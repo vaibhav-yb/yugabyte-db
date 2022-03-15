@@ -467,7 +467,7 @@ getYsqlStatementStats(void *cb_arg)
 	char	   *qbuffer = NULL;
 	Size		qbuffer_size = 0;
 	pgssEntry  *entry;
-  YsqlStatementStat tmp;
+	YsqlStatementStat tmp;
 
 	qbuffer = qtext_load_file(&qbuffer_size);
 	if (qbuffer == NULL)
@@ -495,6 +495,7 @@ getYsqlStatementStats(void *cb_arg)
       tmp.sum_var_time = entry->counters.sum_var_time;
 
       tmp.rows         = entry->counters.rows;
+      tmp.query_id     = entry->key.queryid;
 
       WriteStatArrayElemToJson(cb_arg, &tmp);
     }

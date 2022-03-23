@@ -19,6 +19,7 @@
 
 #include "yb/rpc/rpc_controller.h"
 
+#include "yb/util/curl_util.h"
 #include "yb/util/path_util.h"
 #include "yb/util/result.h"
 #include "yb/util/tsan_util.h"
@@ -348,6 +349,25 @@ TEST_F(PgWrapperOneNodeClusterTest, YB_DISABLE_TEST_IN_TSAN(TestPostgresPid)) {
 
   ASSERT_OK(pg_ts_->Start(false /* start_cql_proxy */));
   ASSERT_OK(cluster_->WaitForTabletServerCount(tserver_count, timeout));
+}
+
+TEST_F(PgWrapperTest, SQLWeb) {
+  ASSERT_NO_FATALS(CreateTable("CREATE TABLE mytbl (k INT PRIMARY KEY, v TEXT)"));
+
+    const string stat_endpoint = "statements";
+    const string sql_web_port = "13000";
+    EasyCurl curl_;
+    faststring buf_;
+    auto addr = cluster_->master()->bound_rpc_addr().host();
+
+    ASSERT_TRUE(cluster_->num_tablet_servers() > 0);
+    const auto endpoint = strings::Substitute(
+      "http://$0:$1/$2",
+      addr, sql_web_port, stat_endpoint);
+
+    std::cout << "### " << endpoint << std::endl;
+    Status s = curl_.FetchURL(endpoint, &buf_);
+    std::cout << "### " << buf_.ToString() << std::endl;
 }
 
 }  // namespace pgwrapper

@@ -124,6 +124,7 @@ public class KubernetesCommandExecutor extends UniverseTaskBase {
     // so we would need that for any sort helm operations.
     public String nodePrefix;
     public String namespace;
+    public boolean isReadOnlyCluster;
     public String ybSoftwareVersion = null;
     public boolean enableNodeToNodeEncrypt = false;
     public boolean enableClientToNodeEncrypt = false;
@@ -288,7 +289,7 @@ public class KubernetesCommandExecutor extends UniverseTaskBase {
               : taskParams().nodePrefix;
       String namespace =
           PlacementInfoUtil.getKubernetesNamespace(
-              isMultiAz, taskParams().nodePrefix, azName, config);
+              isMultiAz, taskParams().nodePrefix, azName, config, taskParams().isReadOnlyCluster);
 
       List<Pod> podInfos =
           kubernetesManagerFactory.getManager().getPodInfos(config, nodePrefix, namespace);
@@ -312,6 +313,7 @@ public class KubernetesCommandExecutor extends UniverseTaskBase {
         }
         pod.put("namespace", podNamespace);
         pods.set(podName, pod);
+        log.info("In KubernetesCmdExecutor podname: {}, pod: {}", podName, pod);
       }
     }
 

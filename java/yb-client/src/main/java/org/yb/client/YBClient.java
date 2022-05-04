@@ -1556,16 +1556,16 @@ public class YBClient implements AutoCloseable {
                                                 boolean initialCheckpoint,
                                                 boolean bootstrap) throws Exception {
     Deferred<SetCheckpointResponse> d = asyncClient.setCheckpointWithBootstrap(table, streamId, 
-    tabletId, term, index, initialCheckpoint, bootstrap);
+        tabletId, term, index, initialCheckpoint, bootstrap);
     d.addErrback(new Callback<Exception, Exception>() {
-    @Override
-    public Exception call(Exception o) throws Exception {
-    o.printStackTrace();
-    throw o;
-    }
+      @Override
+      public Exception call(Exception o) throws Exception {
+        o.printStackTrace();
+        throw o;
+      }
     });
     d.addCallback(setCheckpointResponse -> {
-    return setCheckpointResponse;
+      return setCheckpointResponse;
     });
     return d.join(2 * getDefaultAdminOperationTimeoutMs());
   }

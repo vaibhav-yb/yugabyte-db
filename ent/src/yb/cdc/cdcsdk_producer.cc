@@ -706,6 +706,7 @@ Status GetChangesForCDCSDK(
     bool schema_streamed = false;
 
     for (const auto& msg : read_ops.messages) {
+      LOG(INFO) << "VKVK cached schema initialized: " << (**cached_schema).initialized();
       if (!schema_streamed && !(**cached_schema).initialized()) {
         current_schema.CopyFrom(*tablet_peer->tablet()->schema().get());
         string table_name = tablet_peer->tablet()->metadata()->table_name();
@@ -719,10 +720,12 @@ Status GetChangesForCDCSDK(
         *cached_schema = std::make_shared<Schema>(std::move(current_schema));
         SchemaPB current_schema_pb;
         SchemaToPB(**cached_schema, &current_schema_pb);
+        LOG(INFO) << "VKVK filling DDL info";
         FillDDLInfo(row_message,
                     current_schema_pb,
                     tablet_peer->tablet()->metadata()->schema_version());
       } else {
+        LOG(INFO) << "VKVK Setting current_schema = **cached_schema";
         current_schema = **cached_schema;
       }
 

@@ -494,11 +494,11 @@ public class AsyncYBClient implements AutoCloseable {
                                                                     boolean bootstrap) {
     checkIsClosed();
     SetCheckpointRequest rpc = new SetCheckpointRequest(table, streamId,
-      tabletId, term, index, initialCheckpoint, bootstrap);
+        tabletId, term, index, initialCheckpoint, bootstrap);
     Deferred d = rpc.getDeferred();
     rpc.setTimeoutMillis(defaultOperationTimeoutMs);
     sendRpcToTablet(rpc);
-    return d;                 
+    return d;
   }
 
   /**

@@ -486,7 +486,7 @@ public class AsyncYBClient implements AutoCloseable {
   }
 
   public Deferred<SetCheckpointResponse> setCheckpointWithBootstrap(YBTable table,
-                                                                    String streamId, 
+                                                                    String streamId,
                                                                     String tabletId,
                                                                     long term,
                                                                     long index,

@@ -282,7 +282,6 @@ class CDCServiceImpl::Impl {
 
     if (it != cdc_state_metadata_.end()) {
       if (need_schema_info) {
-        LOG(INFO) << "VKVK need_schema_info set to true, setting current schema as empty";
         it->current_schema = std::make_shared<Schema>();
       }
       return it->current_schema;

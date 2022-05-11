@@ -248,7 +248,7 @@ SubDocKey(DocKey([], ["mydockey", 123456]), ["subkey_b", "subkey_d"; HT{ physica
         ValueRef(ValueEntryType::kTombstone), 5000_usec_ht));
   }
 
-  void VerifySubDocument(SubDocKey subdoc_key, HybridTime ht, string subdoc_string) {
+  void VerifyDocument(const DocKey& doc_key, HybridTime ht, string subdoc_string) {
     SubDocument doc_from_rocksdb;
     bool subdoc_found_in_rocksdb = false;
 
@@ -257,7 +257,7 @@ SubDocKey(DocKey([], ["mydockey", 123456]), ["subkey_b", "subkey_d"; HT{ physica
 
     // TODO(dtxn) - check both transaction and non-transaction path?
     // https://yugabyte.atlassian.net/browse/ENG-2177
-    auto encoded_subdoc_key = subdoc_key.EncodeWithoutHt();
+    auto encoded_subdoc_key = doc_key.Encode();
     GetSubDoc(
         encoded_subdoc_key, &doc_from_rocksdb, &subdoc_found_in_rocksdb,
         kNonTransactionalOperationContext, ReadHybridTime::SingleTime(ht));
@@ -594,7 +594,7 @@ TEST_P(DocDBTestWrapper, KeyAsEmptyObjectIsNotMasked) {
       SubDocKey(DocKey([], [1234]), [null, false; HT{ physical: 617 }]) -> 12345
       SubDocKey(DocKey([], [1234]), ["later"; HT{ physical: 336 }]) -> 1
       )#");
-  VerifySubDocument(SubDocKey(doc_key), 4000_usec_ht,
+  VerifyDocument(doc_key, 4000_usec_ht,
                     R"#(
 {
   null: {},
@@ -623,7 +623,7 @@ TEST_P(DocDBTestWrapper, NullChildObjectShouldMaskValues) {
       SubDocKey(DocKey([], ["mydockey", 123456]), ["obj"; HT{ physical: 2000 }]) -> {}
       SubDocKey(DocKey([], ["mydockey", 123456]), ["obj", "key"; HT{ physical: 2000 }]) -> "value"
       )#");
-  VerifySubDocument(SubDocKey(doc_key), 4000_usec_ht,
+  VerifyDocument(doc_key, 4000_usec_ht,
                     R"#(
 {
   "obj": null
@@ -695,8 +695,8 @@ TEST_F(DocDBTestQl, ColocatedTableTombstoneTest) {
       SubDocKey(DocKey(ColocationId=16385, [], ["mydockey", 123456]), [HT{ physical: 1000 }]) -> 1
       SubDocKey(DocKey(ColocationId=16385, [], ["mydockey", 789123]), [HT{ physical: 1000 }]) -> 2
       )#");
-  VerifySubDocument(SubDocKey(doc_key_1), 4000_usec_ht, "");
-  VerifySubDocument(SubDocKey(doc_key_1), 1500_usec_ht, "1");
+  VerifyDocument(doc_key_1, 4000_usec_ht, "");
+  VerifyDocument(doc_key_1, 1500_usec_ht, "1");
 }
 
 TEST_P(DocDBTestWrapper, HistoryCompactionFirstRowHandlingRegression) {
@@ -758,163 +758,6 @@ SubDocKey(DocKey([], ["mydockey", 123456]), ["u"; HT{ physical: 1000 w: 1 }]) ->
      )#");
 }
 
-// This tests reads on data without init markers. Basic Test tests with init markers.
-TEST_P(DocDBTestWrapper, GetSubDocumentTest) {
-  const DocKey doc_key(KeyEntryValues("mydockey", kIntKey1));
-  SetupRocksDBState(doc_key.Encode());
-
-  // We will test the state of the entire document after every operation, using timestamps
-  // 500, 1500, 2500, 3500, 4500, 5500.
-
-  VerifySubDocument(SubDocKey(doc_key), 500_usec_ht, "");
-
-  VerifySubDocument(SubDocKey(doc_key), 1500_usec_ht,
-                    R"#(
-{
-  "a": {
-    "1": "1",
-    "2": "2"
-  },
-  "b": {
-    "c": {
-      "1": "3"
-    },
-    "d": {
-      "1": "5",
-      "2": "6"
-    }
-  },
-  "u": "7"
-}
-      )#");
-
-  VerifySubDocument(SubDocKey(doc_key), 2500_usec_ht,
-                    R"#(
-{
-  "a": {
-    "1": "1",
-    "2": 11
-  },
-  "b": {
-    "c": {
-      "1": "3"
-    },
-    "d": {
-      "1": "5",
-      "2": "6"
-    }
-  },
-  "u": "7"
-}
-      )#");
-
-  VerifySubDocument(SubDocKey(doc_key), 3500_usec_ht,
-                    R"#(
-{
-  "a": {
-    "1": "1",
-    "2": 11
-  },
-  "b": {
-    "e": {
-      "1": "8",
-      "2": "9"
-    },
-    "y": "10"
-  },
-  "u": "7"
-}
-      )#");
-
-  VerifySubDocument(SubDocKey(doc_key), 4500_usec_ht,
-                    R"#(
-{
-  "a": {
-    "1": "3",
-    "2": 11,
-    "3": "4"
-  },
-  "b": {
-    "e": {
-      "1": "8",
-      "2": "9"
-    },
-    "y": "10"
-  },
-  "u": "7"
-}
-      )#");
-
-  VerifySubDocument(SubDocKey(doc_key), 5500_usec_ht,
-                    R"#(
-{
-  "a": {
-    "1": "3",
-    "2": 11,
-    "3": "4"
-  },
-  "b": {
-    "e": {
-      "1": "8"
-    },
-    "y": "10"
-  },
-  "u": "7"
-}
-      )#");
-
-  // Test the evolution of SubDoc root.b at various timestamps.
-
-  VerifySubDocument(SubDocKey(doc_key, KeyEntryValue("b")), 500_usec_ht, "");
-
-  VerifySubDocument(SubDocKey(doc_key, KeyEntryValue("b")), 2500_usec_ht,
-                    R"#(
-{
-  "c": {
-    "1": "3"
-  },
-  "d": {
-    "1": "5",
-    "2": "6"
-  }
-}
-      )#");
-
-  VerifySubDocument(SubDocKey(doc_key, KeyEntryValue("b")), 3500_usec_ht,
-                    R"#(
-{
-  "e": {
-    "1": "8",
-    "2": "9"
-  },
-  "y": "10"
-}
-      )#");
-
-  VerifySubDocument(SubDocKey(doc_key, KeyEntryValue("b")), 5500_usec_ht,
-                    R"#(
-{
-  "e": {
-    "1": "8"
-  },
-  "y": "10"
-}
-      )#");
-
-  VerifySubDocument(SubDocKey(
-      doc_key, KeyEntryValue("b"), KeyEntryValue("d")), 10000_usec_ht, "");
-
-  VerifySubDocument(SubDocKey(doc_key, KeyEntryValue("b"), KeyEntryValue("d")),
-                    2500_usec_ht,
-                    R"#(
-  {
-    "1": "5",
-    "2": "6"
-  }
-        )#");
-
-}
-
 TEST_P(DocDBTestWrapper, ListInsertAndGetTest) {
   QLValuePB parent;
   QLValuePB list = QLValue::PrimitiveArray(10, 2);
@@ -924,7 +767,7 @@ TEST_P(DocDBTestWrapper, ListInsertAndGetTest) {
   AddMapValue("other", "other_value", &parent);
   ASSERT_OK(InsertSubDocument(DocPath(encoded_doc_key), ValueRef(parent), HybridTime(100)));
 
-  VerifySubDocument(SubDocKey(doc_key), HybridTime(250),
+  VerifyDocument(doc_key, HybridTime(250),
       R"#(
   {
     "list2": {
@@ -941,7 +784,7 @@ TEST_P(DocDBTestWrapper, ListInsertAndGetTest) {
       ValueRef(QLValue::PrimitiveArray(1, "3", 2, 2)),
       HybridTime(200)));
 
-  VerifySubDocument(SubDocKey(doc_key), HybridTime(250),
+  VerifyDocument(doc_key, HybridTime(250),
       R"#(
   {
     "list1": {
@@ -1011,7 +854,7 @@ SubDocKey(DocKey([], ["list_test", 231]), ["other"; \
     HT{ physical: 0 logical: 100 w: 3 }]) -> "other_value"
         )#");
 
-  VerifySubDocument(SubDocKey(doc_key), HybridTime(150),
+  VerifyDocument(doc_key, HybridTime(150),
       R"#(
   {
     "list2": {
@@ -1022,7 +865,7 @@ SubDocKey(DocKey([], ["list_test", 231]), ["other"; \
   }
         )#");
 
-  VerifySubDocument(SubDocKey(doc_key), HybridTime(450),
+  VerifyDocument(doc_key, HybridTime(450),
       R"#(
   {
     "list1": {
@@ -1083,7 +926,7 @@ SubDocKey(DocKey([], ["list_test", 231]), ["other"; \
     HT{ physical: 0 logical: 100 w: 3 }]) -> "other_value"
         )#");
 
-  VerifySubDocument(SubDocKey(doc_key), HybridTime(550),
+  VerifyDocument(doc_key, HybridTime(550),
       R"#(
   {
     "list1": {
@@ -1145,7 +988,7 @@ SubDocKey(DocKey([], ["list_test", 231]), ["other"; \
     HT{ physical: 0 logical: 100 w: 3 }]) -> "other_value"
         )#");
 
-  VerifySubDocument(SubDocKey(doc_key), HybridTime(550),
+  VerifyDocument(doc_key, HybridTime(550),
       R"#(
   {
     "list1": {
@@ -1191,7 +1034,7 @@ TEST_P(DocDBTestWrapper, ListOverwriteAndInsertTest) {
   write_list({1, 2, 3, 4, 5}, 200);
   write_list({6, 7, 8}, 300);
 
-  VerifySubDocument(SubDocKey(doc_key), HybridTime(350),
+  VerifyDocument(doc_key, HybridTime(350),
       R"#(
   {
     "list": {
@@ -1233,7 +1076,7 @@ SubDocKey(DocKey([], ["list_test", 231]), ["list", ArrayIndex(5); \
   ASSERT_NOK(ReplaceInList(
       DocPath(encoded_doc_key, KeyEntryValue("list")), 3, ValueRef(QLValue::Primitive(17)),
       ReadHybridTime::SingleTime(HybridTime(400)), HybridTime(500), rocksdb::kDefaultQueryId));
-  VerifySubDocument(SubDocKey(doc_key), HybridTime(500),
+  VerifyDocument(doc_key, HybridTime(500),
       R"#(
   {
     "list": {
@@ -1311,7 +1154,7 @@ SubDocKey(DocKey([], ["foo", 231]), ["key2", ArrayIndex(4); HT{ physical: 0 logi
 -> 32
       )#");
 
-  VerifySubDocument(SubDocKey(doc_key), HybridTime(550),
+  VerifyDocument(doc_key, HybridTime(550),
       R"#(
   {
     "key1": {
@@ -2766,7 +2609,7 @@ SubDocKey(DocKey([], ["mydockey", 123456]), ["subkey_b", "subkey_c"; HT{ physica
           I\x80\x00\x00\x00\x00\x01\xe2@\
           !', '{')
         )#");
-    VerifySubDocument(SubDocKey(doc_key), 8000_usec_ht, "{}");
+    VerifyDocument(doc_key, 8000_usec_ht, "{}");
   }
 
   // Reset our collection of snapshots now that we've performed one more operation.
@@ -3124,7 +2967,7 @@ TEST_P(DocDBTestWrapper, MergingIterator) {
 
   // Get key2 from DocDB. Bloom filter will skip SST file and it should invalidate SST file
   // iterator in order for MergingIterator to not pickup key1 incorrectly.
-  VerifySubDocument(SubDocKey(key2), ht, "\"value2\"");
+  VerifyDocument(key2, ht, "\"value2\"");
 }
 
 TEST_P(DocDBTestWrapper, SetPrimitiveWithInitMarker) {

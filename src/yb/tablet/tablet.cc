@@ -258,6 +258,7 @@ DECLARE_int32(rocksdb_level0_stop_writes_trigger);
 DECLARE_uint64(rocksdb_max_file_size_for_compaction);
 DECLARE_int64(apply_intents_task_injected_delay_ms);
 DECLARE_string(regular_tablets_data_block_key_value_encoding);
+DECLARE_int64(cdc_intent_retention_ms);
 
 DEFINE_test_flag(uint64, inject_sleep_before_applying_intents_ms, 0,
                  "Sleep before applying intents to docdb after transaction commit");
@@ -746,6 +747,13 @@ Status Tablet::OpenKeyValueTablet() {
 
   ql_storage_.reset(new docdb::QLRocksDBStorage(doc_db()));
   if (transaction_participant_) {
+    // We need to set the "cdc_sdk_min_checkpoint_op_id" so that intents don't get
+    // garbage collected after transactions are loaded.
+    if (transaction_participant_) {
+      transaction_participant_->SetIntentRetainOpIdAndTime(
+        metadata_->cdc_sdk_min_checkpoint_op_id(),
+        MonoDelta::FromMilliseconds(GetAtomicFlag(&FLAGS_cdc_intent_retention_ms)));
+    }
     transaction_participant_->SetDB(doc_db(), &key_bounds_, &pending_non_abortable_op_counter_);
   }
 
@@ -1115,8 +1123,7 @@ Result<std::unique_ptr<docdb::YQLRowwiseIteratorIf>> Tablet::NewRowIterator(
   return NewRowIterator(*table_info->schema, {}, table_id);
 }
 
-Status Tablet::ApplyRowOperations(
-    WriteOperation* operation, AlreadyAppliedToRegularDB already_applied_to_regular_db) {
+Status Tablet::ApplyRowOperations(WriteOperation* operation, ApplyPhase apply_phase) {
   const auto& write_request =
       operation->consensus_round() && operation->consensus_round()->replicate_msg()
           // Online case.
@@ -1130,14 +1137,13 @@ Status Tablet::ApplyRowOperations(
     metrics_->rows_inserted->IncrementBy(put_batch.write_pairs().size());
   }
 
-  return ApplyOperation(
-      *operation, write_request.batch_idx(), put_batch, already_applied_to_regular_db);
+  return ApplyOperation(*operation, write_request.batch_idx(), put_batch, apply_phase);
 }
 
 Status Tablet::ApplyOperation(
     const Operation& operation, int64_t batch_idx,
     const docdb::KeyValueWriteBatchPB& write_batch,
-    AlreadyAppliedToRegularDB already_applied_to_regular_db) {
+    ApplyPhase apply_phase) {
   auto hybrid_time = operation.WriteHybridTime();
 
   docdb::ConsensusFrontiers frontiers;
@@ -1152,8 +1158,8 @@ Status Tablet::ApplyOperation(
     frontiers_ptr->Largest().set_max_value_level_ttl_expiration_time(
         docdb::FileExpirationFromValueTTL(operation.hybrid_time(), ttl));
   }
-  return ApplyKeyValueRowOperations(
-      batch_idx, write_batch, frontiers_ptr, hybrid_time, already_applied_to_regular_db);
+  return ApplyKeyValueRowOperations(batch_idx, write_batch, frontiers_ptr, hybrid_time,
+                                    apply_phase);
 }
 
 Status Tablet::PrepareTransactionWriteBatch(
@@ -1202,7 +1208,7 @@ Status Tablet::ApplyKeyValueRowOperations(
     const KeyValueWriteBatchPB& put_batch,
     const rocksdb::UserFrontiers* frontiers,
     const HybridTime hybrid_time,
-    AlreadyAppliedToRegularDB already_applied_to_regular_db) {
+    ApplyPhase apply_phase) {
   if (put_batch.write_pairs().empty() && put_batch.read_pairs().empty() &&
       put_batch.apply_external_transactions().empty()) {
     return Status::OK();
@@ -1219,8 +1225,10 @@ Status Tablet::ApplyKeyValueRowOperations(
     WriteToRocksDB(frontiers, &write_batch, StorageDbType::kIntents);
   } else {
     rocksdb::WriteBatch regular_write_batch;
-    auto* regular_write_batch_ptr = !already_applied_to_regular_db ? &regular_write_batch : nullptr;
-    // See comments for PrepareNonTransactionWriteBatch.
+    auto* regular_write_batch_ptr =
+        apply_phase == ApplyPhase::kNone ? &regular_write_batch : nullptr;
+
+    // See comments for PrepareExternalWriteBatch.
     rocksdb::WriteBatch intents_write_batch;
     PrepareNonTransactionWriteBatch(
         put_batch, hybrid_time, intents_db_.get(), regular_write_batch_ptr, &intents_write_batch);

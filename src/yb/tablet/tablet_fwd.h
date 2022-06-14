@@ -83,10 +83,14 @@ YB_STRONGLY_TYPED_BOOL(IsSysCatalogTablet);
 YB_STRONGLY_TYPED_BOOL(ShouldAbortActiveTransactions);
 YB_STRONGLY_TYPED_BOOL(TransactionsEnabled);
 
-// Used to indicate that a transaction-related operation has already been applied to regular RocksDB
-// (which was flushed) but the corresponding deletion of intents from the intents RocksDB has not
-// been flushed and was therefore lost.
-YB_STRONGLY_TYPED_BOOL(AlreadyAppliedToRegularDB);
+// kIntents - Used to indicate that a transaction-related operation has already been applied to
+// intents RocksDB.
+// kRegular - Used to indicate that a transaction-related operation has already been applied to
+// regular RocksDB (which was flushed) but the corresponding deletion of intents from the intents
+// RocksDB has not been flushed and was therefore lost.
+// kNone - Used to indicate that a transaction has not been applied to either regular or intents
+// RocksDB.
+YB_DEFINE_ENUM(ApplyPhase, (kNone)(kRegular)(kIntents));
 
 enum class FlushFlags {
   kNone = 0,

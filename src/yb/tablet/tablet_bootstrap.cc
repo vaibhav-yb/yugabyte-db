@@ -387,12 +387,10 @@ namespace {
 struct ReplayDecision {
   bool should_replay = false;
 
-  // This is true for transaction update operations that have already been applied to the regular
-  // RocksDB but not to the intents RocksDB.
-  AlreadyAppliedToRegularDB already_applied_to_regular_db = AlreadyAppliedToRegularDB::kFalse;
+  ApplyPhase apply_phase = ApplyPhase::kNone;
 
   std::string ToString() const {
-    return YB_STRUCT_TO_STRING(should_replay, already_applied_to_regular_db);
+    return YB_STRUCT_TO_STRING(should_replay, apply_phase);
   }
 };
 
@@ -405,6 +403,31 @@ ReplayDecision ShouldReplayOperation(
     bool write_op_has_transaction) {
   // In most cases we assume that intents_flushed_index <= regular_flushed_index but here we are
   // trying to be resilient to violations of that assumption.
+  if (op_type == consensus::UPDATE_TRANSACTION_OP) {
+    if (txn_status == TransactionStatus::APPLYING) {
+      VLOG_WITH_FUNC(3) << "index: " << index << " "
+                        << "regular_flushed_index: " << regular_flushed_index
+                        << " intents_flushed_index: " << intents_flushed_index;
+
+      ApplyPhase apply_phase;
+      if (index <= intents_flushed_index) {
+        apply_phase = ApplyPhase::kIntents;
+      } else if (index <= regular_flushed_index) {
+        apply_phase = ApplyPhase::kRegular;
+      } else {
+        apply_phase = ApplyPhase::kNone;
+      }
+
+      return {true, apply_phase};
+    } else {
+      // For other types of transaction updates, we ignore them if they have been flushed to the
+      // regular RocksDB.
+      VLOG_WITH_FUNC(3) << "index: " << index << " > "
+                        << "regular_flushed_index: " << regular_flushed_index;
+      return {index > regular_flushed_index};
+    }
+  }
+
   if (index <= std::min(regular_flushed_index, intents_flushed_index)) {
     // Never replay anyting that is flushed to both regular and intents RocksDBs in a transactional
     // table.
@@ -412,22 +435,6 @@ ReplayDecision ShouldReplayOperation(
                       << "regular_flushed_index: " << regular_flushed_index
                       << " intents_flushed_index: " << intents_flushed_index;
     return {false};
-  }
-
-  if (op_type == consensus::UPDATE_TRANSACTION_OP) {
-    if (txn_status == TransactionStatus::APPLYING &&
-        intents_flushed_index < index && index <= regular_flushed_index) {
-      // Intents were applied/flushed to regular RocksDB, but not flushed into the intents RocksDB.
-      VLOG_WITH_FUNC(3) << "index: " << index << " "
-                        << "regular_flushed_index: " << regular_flushed_index
-                        << " intents_flushed_index: " << intents_flushed_index;
-      return {true, AlreadyAppliedToRegularDB::kTrue};
-    }
-    // For other types of transaction updates, we ignore them if they have been flushed to the
-    // regular RocksDB.
-    VLOG_WITH_FUNC(3) << "index: " << index << " > "
-                      << "regular_flushed_index: " << regular_flushed_index;
-    return {index > regular_flushed_index};
   }
 
   if (op_type == consensus::WRITE_OP && write_op_has_transaction) {
@@ -894,15 +901,14 @@ class TabletBootstrap {
   }
 
   // Replays the given committed operation.
-  CHECKED_STATUS PlayAnyRequest(
-      ReplicateMsg* replicate, AlreadyAppliedToRegularDB already_applied_to_regular_db) {
+  Status PlayAnyRequest(ReplicateMsg* replicate, ApplyPhase apply_phase) {
     const auto op_type = replicate->op_type();
     if (test_hooks_) {
-      test_hooks_->Replayed(yb::OpId::FromPB(replicate->id()), already_applied_to_regular_db);
+      test_hooks_->Replayed(OpId::FromPB(replicate->id()), apply_phase);
     }
     switch (op_type) {
       case consensus::WRITE_OP:
-        return PlayWriteRequest(replicate, already_applied_to_regular_db);
+        return PlayWriteRequest(replicate, apply_phase);
 
       case consensus::CHANGE_METADATA_OP:
         return PlayChangeMetadataRequest(replicate);
@@ -917,7 +923,7 @@ class TabletBootstrap {
         return Status::OK();  // This is why it is a no-op!
 
       case consensus::UPDATE_TRANSACTION_OP:
-        return PlayUpdateTransactionRequest(replicate, already_applied_to_regular_db);
+        return PlayUpdateTransactionRequest(replicate, apply_phase);
 
       case consensus::SNAPSHOT_OP:
         return PlayTabletSnapshotRequest(replicate);
@@ -1020,7 +1026,7 @@ class TabletBootstrap {
     HandleRetryableRequest(*replicate, entry_time);
     VLOG_WITH_PREFIX_AND_FUNC(3) << "decision: " << AsString(decision);
     if (decision.should_replay) {
-      const auto status = PlayAnyRequest(replicate, decision.already_applied_to_regular_db);
+      const auto status = PlayAnyRequest(replicate, decision.apply_phase);
       if (!status.ok()) {
         return status.CloneAndAppend(Format(
             "Failed to play $0 request. ReplicateMsg: { $1 }",
@@ -1242,8 +1248,18 @@ class TabletBootstrap {
     log::SegmentSequence segments;
     RETURN_NOT_OK(log_->GetSegmentsSnapshot(&segments));
 
+    // If any cdc stream is active for this tablet, we do not want to skip flushed entries.
+    bool should_skip_flushed_entries = FLAGS_skip_flushed_entries;
+    if (should_skip_flushed_entries && tablet_->transaction_participant()) {
+      if (tablet_->transaction_participant()->GetRetainOpId() != OpId::Invalid()) {
+        should_skip_flushed_entries = false;
+        LOG_WITH_PREFIX(WARNING) << "Ignoring skip_flushed_entries even though it is set, becasue "
+                                 << "we need to scan all segments when any cdc stream is active "
+                                 << "for this tablet.";
+      }
+    }
     // Find the earliest log segment we need to read, so the rest can be ignored.
-    auto iter = FLAGS_skip_flushed_entries ? SkipFlushedEntries(&segments) : segments.begin();
+    auto iter = should_skip_flushed_entries ? SkipFlushedEntries(&segments) : segments.begin();
 
     yb::OpId last_committed_op_id;
     yb::OpId last_read_entry_op_id;
@@ -1363,8 +1379,7 @@ class TabletBootstrap {
     return Status::OK();
   }
 
-  CHECKED_STATUS PlayWriteRequest(
-      ReplicateMsg* replicate_msg, AlreadyAppliedToRegularDB already_applied_to_regular_db) {
+  Status PlayWriteRequest(ReplicateMsg* replicate_msg, ApplyPhase apply_phase) {
     SCHECK(replicate_msg->has_hybrid_time(), IllegalState,
            "A write operation with no hybrid time");
 
@@ -1390,8 +1405,7 @@ class TabletBootstrap {
       return Status::OK();
     }
 
-    auto apply_status = tablet_->ApplyRowOperations(
-        &operation, already_applied_to_regular_db);
+    auto apply_status = tablet_->ApplyRowOperations(&operation, apply_phase);
     // Failure is regular case, since could happen because transaction was aborted, while
     // replicating its intents.
     LOG_IF(INFO, !apply_status.ok()) << "Apply operation failed: " << apply_status;
@@ -1480,8 +1494,7 @@ class TabletBootstrap {
     return Status::OK();
   }
 
-  CHECKED_STATUS PlayUpdateTransactionRequest(
-      ReplicateMsg* replicate_msg, AlreadyAppliedToRegularDB already_applied_to_regular_db) {
+  Status PlayUpdateTransactionRequest(ReplicateMsg* replicate_msg, ApplyPhase apply_phase) {
     SCHECK(replicate_msg->has_hybrid_time(),
            Corruption, "A transaction update request must have a hybrid time");
 
@@ -1510,7 +1523,7 @@ class TabletBootstrap {
         .op_id = operation.op_id(),
         .hybrid_time = operation.hybrid_time(),
         .sealed = operation.request()->sealed(),
-        .already_applied_to_regular_db = already_applied_to_regular_db
+        .apply_phase = apply_phase
       };
       return transaction_participant->ProcessReplicated(replicated_data);
     }

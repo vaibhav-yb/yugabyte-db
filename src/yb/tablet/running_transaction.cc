@@ -79,11 +79,16 @@ void RunningTransaction::BatchReplicated(const TransactionalBatchData& value) {
 }
 
 void RunningTransaction::SetLocalCommitData(
-    HybridTime time, const AbortedSubTransactionSet& aborted_subtxn_set) {
+    HybridTime time, const AbortedSubTransactionSet& aborted_subtxn_set, const OpId& op_id) {
   local_commit_aborted_subtxn_set_ = aborted_subtxn_set;
   local_commit_time_ = time;
   last_known_status_hybrid_time_ = local_commit_time_;
   last_known_status_ = TransactionStatus::COMMITTED;
+  apply_record_op_id_ = op_id;
+}
+
+void RunningTransaction::SetApplyOpId(const OpId& op_id) {
+  apply_record_op_id_ = op_id;
 }
 
 void RunningTransaction::Aborted() {
@@ -510,11 +515,6 @@ void RunningTransaction::SetApplyData(const docdb::ApplyTransactionState& apply_
     std::lock_guard<std::mutex> lock(context_.mutex_);
     context_.RemoveUnlocked(id(), RemoveReason::kLargeApplied, &min_running_notifier);
   }
-}
-
-void RunningTransaction::SetOpId(const OpId& id) {
-  opId.index = id.index;
-  opId.term = id.term;
 }
 
 bool RunningTransaction::ProcessingApply() const {

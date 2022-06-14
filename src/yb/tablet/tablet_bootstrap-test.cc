@@ -119,9 +119,9 @@ struct BootstrapTestHooksImpl : public TabletBootstrapTestHooksIf {
     return flushed_op_ids;
   }
 
-  void Replayed(OpId op_id, AlreadyAppliedToRegularDB already_applied_to_regular_db) override {
+  void Replayed(OpId op_id, ApplyPhase apply_phase) override {
     actual_report.replayed.push_back(op_id);
-    if (already_applied_to_regular_db) {
+    if (apply_phase == ApplyPhase::kRegular) {
       actual_report.replayed_to_intents_only.push_back(op_id);
     }
   }
@@ -822,6 +822,16 @@ void GenerateRandomInput(size_t num_entries, std::mt19937_64* rng, BootstrapInpu
                 FAIL() << "Unknown operation type: " << consensus::OperationType_Name(op_type);
               }
             }
+            if (replay) {
+              replayed.push_back(op_id);
+            }
+          }
+        }
+        if (index <= intents_flushed_index && op_id >= first_op_id_of_segment_to_replay) {
+          // We replay even Update transactions having an APPLY revord even if their intents were
+          // only flushed to intents db.
+          if (op_type == consensus::OperationType::UPDATE_TRANSACTION_OP) {
+            bool replay = batch_data.txn_status == TransactionStatus::APPLYING;
             if (replay) {
               replayed.push_back(op_id);
             }

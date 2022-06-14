@@ -410,7 +410,7 @@ class TransactionParticipant::Impl
       auto it = transactions_.find(id);
 
       if (it != transactions_.end() && !(**it).ProcessingApply()) {
-        OpId op_id = (**it).GetOpId();
+        OpId op_id = (**it).GetApplyOpId();
 
         // If transaction op_id is greater than the CDCSDK checkpoint op_id.
         // don't clean the intent as well as intent after this.
@@ -521,6 +521,37 @@ class TransactionParticipant::Impl
     participant_context_.StrandEnqueue(cleanup_aborts_task.get());
   }
 
+  CHECKED_STATUS ProcessAppliedTransaction (const TransactionApplyData& data) {
+    VLOG_WITH_PREFIX(2) << "ProcessApplied: " << data.ToString();
+    loader_.WaitLoaded(data.transaction_id);
+    std::lock_guard<std::mutex> lock(mutex_);
+
+    auto it = transactions_.find(data.transaction_id);
+
+    if (it == transactions_.end()) {
+      // This situation is possible when we are trying to replay transaction by scanning WAL.
+      // WAL can extra entries due to CDC updating it's checkpoint only once in 15 seconds.
+      // Although the entries will be deleted from IntentDB, WAL can still have old apply
+      // operations.
+      YB_LOG_WITH_PREFIX_EVERY_N_SECS(WARNING, 1)
+          << Format("ProcessApplied of unknown transaction: $0", data);
+      return Status::OK();
+    } else {
+      SetLocalCommitDataOfTransaction(it, data);
+
+      if ((**it).ProcessingApply()) {
+        VLOG_WITH_PREFIX(2) << "Don't cleanup transaction because it is applying intents: "
+                            << data.transaction_id;
+        return Status::OK();
+      }
+
+      MinRunningNotifier min_running_notifier(&applier_);
+      RemoveUnlocked(it, RemoveReason::kProcessCleanup, &min_running_notifier);
+    }
+
+    return Status::OK();
+  }
+
   CHECKED_STATUS ProcessApply(const TransactionApplyData& data) {
     VLOG_WITH_PREFIX(2) << "Apply: " << data.ToString();
 
@@ -560,14 +591,12 @@ class TransactionParticipant::Impl
             << "Transaction was previously applied with another commit ht: " << existing_commit_ht
             << ", new commit ht: " << data.commit_ht;
       } else {
-        transactions_.modify(lock_and_iterator.iterator, [&data](auto& txn) {
-          txn->SetLocalCommitData(data.commit_ht, data.aborted);
-        });
-
         LOG_IF_WITH_PREFIX(DFATAL, data.log_ht < last_safe_time_)
             << "Apply transaction before last safe time " << data.transaction_id
             << ": " << data.log_ht << " vs " << last_safe_time_;
       }
+
+      SetLocalCommitDataOfTransaction(lock_and_iterator.iterator, data);
     }
 
     if (!was_applied) {
@@ -593,7 +622,6 @@ class TransactionParticipant::Impl
     auto lock_and_iterator = LockAndFind(
         data.transaction_id, "apply"s, TransactionLoadFlags{TransactionLoadFlag::kMustExist});
     if (lock_and_iterator.found()) {
-      lock_and_iterator.transaction().SetOpId(data.op_id);
       if (!apply_state.active()) {
         RemoveUnlocked(lock_and_iterator.iterator, RemoveReason::kApplied, &min_running_notifier);
       } else {
@@ -651,10 +679,16 @@ class TransactionParticipant::Impl
         cleanup_cache_.Insert(data.transaction_id);
         return Status::OK();
       }
-    } else if ((**it).ProcessingApply()) {
-      VLOG_WITH_PREFIX(2) << "Don't cleanup transaction because it is applying intents: "
-                          << data.transaction_id;
-      return Status::OK();
+    } else {
+      transactions_.modify(it, [&data](auto& txn) {
+        txn->SetApplyOpId(data.op_id);
+      });
+
+      if ((**it).ProcessingApply()) {
+        VLOG_WITH_PREFIX(2) << "Don't cleanup transaction because it is applying intents: "
+                            << data.transaction_id;
+        return Status::OK();
+      }
     }
 
     if (cleanup_type == CleanupType::kGraceful) {
@@ -1085,7 +1119,7 @@ class TransactionParticipant::Impl
       .time = now,
       .reason = reason,
     });
-    ProcessRemoveQueueUnlocked(min_running_notifier);
+     ProcessRemoveQueueUnlocked(min_running_notifier);
   }
 
   void ProcessRemoveQueueUnlocked(MinRunningNotifier* min_running_notifier) REQUIRES(mutex_) {
@@ -1157,8 +1191,7 @@ class TransactionParticipant::Impl
       MinRunningNotifier* min_running_notifier) REQUIRES(mutex_) {
     TransactionId txn_id = (**it).id();
     OpId checkpoint_op_id = GetLatestCheckPoint();
-    auto itr = transactions_.find(txn_id);
-    OpId op_id = (**itr).GetOpId();
+    OpId op_id = (**it).GetApplyOpId();
 
     if (running_requests_.empty() && op_id < checkpoint_op_id) {
       (**it).ScheduleRemoveIntents(*it);
@@ -1244,6 +1277,13 @@ class TransactionParticipant::Impl
       participant_context_.StrandEnqueue(cleanup_task.get());
     }
     return LockAndFindResult{};
+  }
+
+  void SetLocalCommitDataOfTransaction(const Transactions::const_iterator iterator,
+                                       const TransactionApplyData& data) {
+    transactions_.modify(iterator, [&data](auto& txn) {
+      txn->SetLocalCommitData(data.commit_ht, data.aborted, data.op_id);
+    });
   }
 
   void LoadTransaction(
@@ -1400,12 +1440,21 @@ class TransactionParticipant::Impl
         .sealed = data.sealed,
         .status_tablet = data.state.tablets(0)
       };
-    if (!data.already_applied_to_regular_db) {
-      return ProcessApply(apply_data);
+
+    switch (data.apply_phase) {
+      case ApplyPhase::kNone:
+        return ProcessApply(apply_data);
+      case ApplyPhase::kRegular:
+        // TODO(abharadwaj): Add support for Sealed transaction.
+        if (!data.sealed) {
+          return ProcessCleanup(apply_data, CleanupType::kImmediate);
+        }
+
+        return Status::OK();
+      case ApplyPhase::kIntents:
+        return ProcessAppliedTransaction(apply_data);
     }
-    if (!data.sealed) {
-      return ProcessCleanup(apply_data, CleanupType::kImmediate);
-    }
+
     return Status::OK();
   }
 
@@ -1727,7 +1776,7 @@ OneWayBitmap TransactionParticipant::TEST_TransactionReplicatedBatches(
 }
 
 std::string TransactionParticipant::ReplicatedData::ToString() const {
-  return YB_STRUCT_TO_STRING(leader_term, state, op_id, hybrid_time, already_applied_to_regular_db);
+  return YB_STRUCT_TO_STRING(leader_term, state, op_id, hybrid_time);
 }
 
 void TransactionParticipant::StartShutdown() {
@@ -1773,7 +1822,7 @@ void TransactionParticipant::SetIntentRetainOpIdAndTime(
   impl_->SetIntentRetainOpIdAndTime(op_id, cdc_sdk_op_id_expiration);
 }
 
-OpId TransactionParticipant::TEST_GetRetainOpId() const {
+OpId TransactionParticipant::GetRetainOpId() const {
   return impl_->GetRetainOpId();
 }
 

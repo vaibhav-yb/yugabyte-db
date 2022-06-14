@@ -60,7 +60,7 @@ Status UpdateTxnOperation::DoReplicated(int64_t leader_term, Status* complete_st
         .op_id = op_id(),
         .hybrid_time = hybrid_time(),
         .sealed = request()->sealed(),
-        .already_applied_to_regular_db = AlreadyAppliedToRegularDB::kFalse
+        .apply_phase = ApplyPhase::kNone
     };
     return transaction_participant->ProcessReplicated(data);
   } else {

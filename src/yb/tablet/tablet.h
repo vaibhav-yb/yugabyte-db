@@ -307,12 +307,12 @@ class Tablet : public AbstractTablet, public TransactionIntentApplier {
   // Apply all of the row operations associated with this transaction.
   CHECKED_STATUS ApplyRowOperations(
       WriteOperation* operation,
-      AlreadyAppliedToRegularDB already_applied_to_regular_db = AlreadyAppliedToRegularDB::kFalse);
+      ApplyPhase apply_phase = ApplyPhase::kNone);
 
   CHECKED_STATUS ApplyOperation(
       const Operation& operation, int64_t batch_idx,
       const docdb::KeyValueWriteBatchPB& write_batch,
-      AlreadyAppliedToRegularDB already_applied_to_regular_db = AlreadyAppliedToRegularDB::kFalse);
+      ApplyPhase apply_phase = ApplyPhase::kNone);
 
   // Apply a set of RocksDB row operations.
   // If rocksdb_write_batch is specified it could contain preencoded RocksDB operations.
@@ -321,7 +321,7 @@ class Tablet : public AbstractTablet, public TransactionIntentApplier {
       const docdb::KeyValueWriteBatchPB& put_batch,
       const rocksdb::UserFrontiers* frontiers,
       HybridTime hybrid_time,
-      AlreadyAppliedToRegularDB already_applied_to_regular_db = AlreadyAppliedToRegularDB::kFalse);
+      ApplyPhase apply_phase = ApplyPhase::kNone);
 
   void WriteToRocksDB(
       const rocksdb::UserFrontiers* frontiers,

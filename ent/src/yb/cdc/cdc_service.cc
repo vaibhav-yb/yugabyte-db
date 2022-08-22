@@ -206,8 +206,8 @@ struct TabletCheckpointInfo {
 struct CDCStateMetadataInfo {
   ProducerTabletInfo producer_tablet_info;
 
-  mutable std::string commit_timestamp;
-  mutable std::shared_ptr<Schema> current_schema;
+  mutable uint64_t commit_timestamp;
+  mutable std::shared_ptr<Schema>  current_schema;
   mutable OpId last_streamed_op_id;
   mutable SchemaVersion current_schema_version;
 
@@ -262,7 +262,7 @@ class CDCServiceImpl::Impl {
 
   void UpdateCDCStateMetadata(
       const ProducerTabletInfo& producer_tablet,
-      const std::string& timestamp,
+      const uint64_t& timestamp,
       const std::shared_ptr<Schema>& schema,
       const OpId& op_id,
       const uint32_t current_schema_version) {
@@ -310,6 +310,25 @@ class CDCServiceImpl::Impl {
       return it->last_streamed_op_id;
     }
     return boost::none;
+  }
+
+  uint64_t GetCommitTime(const ProducerTabletInfo &producer_tablet) {
+    std::lock_guard<decltype(mutex_)> l(mutex_);
+    auto it = cdc_state_metadata_.find(producer_tablet);
+
+    if (it != cdc_state_metadata_.end()) {
+      return it->commit_timestamp;
+    }
+
+    CDCStateMetadataInfo info = CDCStateMetadataInfo {
+      .producer_tablet_info = producer_tablet,
+      .commit_timestamp = {},
+      .current_schema = std::make_shared<Schema>(),
+      .last_streamed_op_id = OpId(),
+      .mem_tracker = nullptr,
+    };
+    cdc_state_metadata_.emplace(info);
+    return info.commit_timestamp;
   }
 
   void AddTabletCheckpoint(
@@ -1597,7 +1616,7 @@ void CDCServiceImpl::GetChanges(
             &CDCServiceImpl::UpdateChildrenTabletsOnSplitOp, this, producer_tablet, _1, session),
         mem_tracker, &msgs_holder, resp, &last_readable_index, get_changes_deadline);
   } else {
-    std::string commit_timestamp;
+    uint64_t commit_timestamp = impl_->GetCommitTime(producer_tablet);
     OpId last_streamed_op_id;
     auto cached_schema_info = impl_->GetOrAddSchema(producer_tablet, req->need_schema_info());
 
@@ -1712,6 +1731,18 @@ void CDCServiceImpl::GetChanges(
 
   if (record.checkpoint_type == IMPLICIT) {
     if (UpdateCheckpointRequired(record, cdc_sdk_op_id)) {
+      HybridTime ht_of_last_returned_message = HybridTime::kInvalid;
+      HaveMoreMessages have_more_messages = HaveMoreMessages::kTrue;
+      auto leader_safe_time = tablet_peer->LeaderSafeTime();
+      if (!leader_safe_time.ok()) {
+        YB_LOG_EVERY_N_SECS(WARNING, 10)
+            << "Could not compute safe time: " << leader_safe_time.status();
+        leader_safe_time = HybridTime::kInvalid;
+      }
+
+      auto safe_time = GetSafeTimeForTarget(
+          leader_safe_time.get(), ht_of_last_returned_message, have_more_messages);
+
       RPC_STATUS_RETURN_ERROR(
           UpdateCheckpointAndActiveTime(
               producer_tablet, OpId::FromPB(resp->checkpoint().op_id()), op_id, session,
@@ -3735,6 +3766,7 @@ Status CDCServiceImpl::UpdateCheckpointAndActiveTime(
     const OpId& commit_op_id,
     const client::YBSessionPtr& session,
     uint64_t last_record_hybrid_time,
+    uint64_t safe_point,
     const CDCRequestSource& request_source,
     const bool force_update,
     const HybridTime& cdc_sdk_safe_time) {
@@ -4051,7 +4083,7 @@ Status CDCServiceImpl::UpdateChildrenTabletsOnSplitOpForCDCSDK(
 
     RETURN_NOT_OK_SET_CODE(
         UpdateCheckpointAndActiveTime(
-            child_info, split_op_id, split_op_id, session, GetCurrentTimeMicros(),
+            child_info, split_op_id, split_op_id, session, GetCurrentTimeMicros(), UINT64_MAX,
             CDCRequestSource::CDCSDK, true),
         CDCError(CDCErrorPB::INTERNAL_ERROR));
   }

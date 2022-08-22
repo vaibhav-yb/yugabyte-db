@@ -23,6 +23,7 @@
 #include "yb/common/common_fwd.h"
 #include "yb/common/transaction.h"
 #include "yb/consensus/consensus_fwd.h"
+#include "yb/consensus/log_cache.h"
 #include "yb/docdb/docdb.pb.h"
 #include "yb/tablet/tablet_fwd.h"
 #include "yb/util/monotime.h"
@@ -78,7 +79,7 @@ Status GetChangesForCDCSDK(
     client::YBClient* client,
     consensus::ReplicateMsgsHolder* msgs_holder,
     GetChangesResponsePB* resp,
-    std::string* commit_timestamp,
+    uint64_t* commit_timestamp,
     std::shared_ptr<Schema>* cached_schema,
     uint32_t* cached_schema_version,
     OpId* last_streamed_op_id,
@@ -86,6 +87,11 @@ Status GetChangesForCDCSDK(
     const CoarseTimePoint deadline = CoarseTimePoint::max());
 
 using UpdateOnSplitOpFunc = std::function<Status(const consensus::ReplicateMsg&)>;
+
+HybridTime GetSafeTimeForTarget(
+    const HybridTime leader_safe_time,
+    HybridTime ht_of_last_returned_message,
+    HaveMoreMessages have_more_messages);
 
 Status GetChangesForXCluster(const std::string& stream_id,
                              const std::string& tablet_id,

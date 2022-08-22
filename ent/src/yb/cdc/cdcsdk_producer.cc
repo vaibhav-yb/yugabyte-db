@@ -11,6 +11,7 @@
 // under the License.
 
 #include "yb/cdc/cdc_producer.h"
+#include <boost/lexical_cast.hpp>
 
 #include "yb/cdc/cdc_common_util.h"
 
@@ -477,7 +478,8 @@ Status PopulateCDCSDKIntentRecord(
 
       // Write pair contains record for different row. Create a new CDCRecord in this case.
       row_message->set_transaction_id(transaction_id.ToString());
-      row_message->set_commit_time(intent.intent_ht.hybrid_time().ToUint64());
+      row_message->set_commit_time(commit_time);
+      row_message->set_record_time(intent.intent_ht.hybrid_time().ToUint64());
 
       if ((metadata.record_type == cdc::CDCRecordType::ALL) &&
           (row_message->op() == RowMessage_Op_DELETE)) {
@@ -805,6 +807,8 @@ Status PopulateCDCSDKWriteRecord(
       }
       // Process intent records.
       row_message->set_commit_time(msg->hybrid_time());
+      row_message->set_record_time(msg->hybrid_time());
+
       prev_decoded_key = decoded_key;
     }
     prev_key = primary_key;
@@ -954,8 +958,9 @@ void SetKeyWriteId(string key, int32_t write_id, CDCSDKCheckpointPB* checkpoint)
 }
 
 void FillBeginRecord(
-    const TransactionId& transaction_id,
-    const std::shared_ptr<tablet::TabletPeer>& tablet_peer, GetChangesResponsePB* resp) {
+    const TransactionId& transaction_id, const std::shared_ptr<tablet::TabletPeer>& tablet_peer,
+    GetChangesResponsePB* resp,
+    const uint64_t& commit_timestamp) {
   for (auto const& table_id : tablet_peer->tablet_metadata()->GetAllColocatedTables()) {
     auto tablet_result = tablet_peer->shared_tablet_safe();
     if (!tablet_result.ok()) {
@@ -974,13 +979,15 @@ void FillBeginRecord(
     row_message->set_op(RowMessage_Op_BEGIN);
     row_message->set_transaction_id(transaction_id.ToString());
     row_message->set_table(table_name);
+    row_message->set_commit_time(commit_timestamp);
   }
 }
 
 void FillCommitRecord(
     const OpId& op_id, const TransactionId& transaction_id,
-    const std::shared_ptr<tablet::TabletPeer>& tablet_peer,
-    CDCSDKCheckpointPB* checkpoint, GetChangesResponsePB* resp) {
+    const std::shared_ptr<tablet::TabletPeer>& tablet_peer, CDCSDKCheckpointPB* checkpoint,
+    GetChangesResponsePB* resp,
+    const uint64_t& commit_timestamp) {
   for (auto const& table_id : tablet_peer->tablet_metadata()->GetAllColocatedTables()) {
     auto tablet_result = tablet_peer->shared_tablet_safe();
     if (!tablet_result.ok()) {
@@ -1000,6 +1007,7 @@ void FillCommitRecord(
     row_message->set_op(RowMessage_Op_COMMIT);
     row_message->set_transaction_id(transaction_id.ToString());
     row_message->set_table(table_name);
+    row_message->set_commit_time(commit_timestamp);
 
     CDCSDKOpIdPB* cdc_sdk_op_id_pb = proto_record->mutable_cdc_sdk_op_id();
     SetCDCSDKOpId(op_id.term, op_id.index, 0, "", cdc_sdk_op_id_pb);
@@ -1025,7 +1033,7 @@ Status ProcessIntents(
     const uint64_t& commit_time) {
   auto tablet = VERIFY_RESULT(tablet_peer->shared_tablet_safe());
   if (stream_state->key.empty() && stream_state->write_id == 0) {
-    FillBeginRecord(transaction_id, tablet_peer, resp);
+    FillBeginRecord(transaction_id, tablet_peer, resp, commit_time);
   }
 
   RETURN_NOT_OK(tablet->GetIntents(transaction_id, keyValueIntents, stream_state));
@@ -1093,7 +1101,7 @@ Status ProcessIntents(
   SetTermIndex(op_id.term, op_id.index, checkpoint);
 
   if (stream_state->key.empty() && stream_state->write_id == 0) {
-    FillCommitRecord(op_id, transaction_id, tablet_peer, checkpoint, resp);
+    FillCommitRecord(op_id, transaction_id, tablet_peer, checkpoint, resp, commit_time);
   } else {
     SetKeyWriteId(reverse_index_key, write_id, checkpoint);
   }
@@ -1120,6 +1128,7 @@ Status PopulateCDCSDKSnapshotRecord(
   row_message->set_op(RowMessage_Op_READ);
   row_message->set_pgschema_name(schema.SchemaName());
   row_message->set_commit_time(time.read.ToUint64());
+  row_message->set_record_time(time.read.ToUint64());
 
   DatumMessagePB* cdc_datum_message = nullptr;
 
@@ -1234,7 +1243,7 @@ Status GetChangesForCDCSDK(
     client::YBClient* client,
     consensus::ReplicateMsgsHolder* msgs_holder,
     GetChangesResponsePB* resp,
-    std::string* commit_timestamp,
+    uint64_t* commit_timestamp,
     std::shared_ptr<Schema>* cached_schema,
     SchemaVersion* cached_schema_version,
     OpId* last_streamed_op_id,
@@ -1436,13 +1445,6 @@ Status GetChangesForCDCSDK(
       bool pending_intents = false;
       bool schema_streamed = false;
 
-      if (read_ops.messages.empty()) {
-        VLOG_WITH_FUNC(1) << "Did not get any messages with current batch of 'read_ops'."
-                          << "last_seen_op_id: " << last_seen_op_id << ", last_readable_opid_index "
-                          << *last_readable_opid_index;
-        break;
-      }
-
       for (const auto& msg : read_ops.messages) {
         last_seen_op_id.term = msg->id().term();
         last_seen_op_id.index = msg->id().index();
@@ -1507,6 +1509,7 @@ Status GetChangesForCDCSDK(
           case consensus::OperationType::WRITE_OP: {
             const auto& batch = msg->write().write_batch();
 
+            *commit_timestamp = msg->hybrid_time();
             if (!batch.has_transaction()) {
               RETURN_NOT_OK(PopulateCDCSDKWriteRecord(
                   msg, stream_metadata, tablet_peer, enum_oid_label_map, composite_atts_map, resp,

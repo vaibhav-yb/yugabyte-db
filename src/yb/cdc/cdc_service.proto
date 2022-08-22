@@ -367,6 +367,7 @@ message RowMessage {
 
   // truncate info
   optional yb.tserver.TruncateRequestPB truncate_request_info = 13;
+  optional uint64 record_time = 14;
 }
 
 message CDCSDKProtoRecordPB {

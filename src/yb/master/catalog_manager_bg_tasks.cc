@@ -259,13 +259,16 @@ void CatalogManagerBgTasks::Run() {
         catalog_manager_->StartTablespaceBgTaskIfStopped();
       }
 
-      // Restart xCluster parent tablet deletion bg task.
-      catalog_manager_->StartXClusterParentTabletDeletionTaskIfStopped();
-
       // Run periodic task for namespace-level replications.
       catalog_manager_->ScheduleXClusterNSReplicationAddTableTask();
 
       was_leader_ = true;
+      // Restart CDCSDK parent tablet deletion bg task.
+      catalog_manager_->StartCDCParentTabletDeletionTaskIfStopped();
+
+      // Run periodic task for namespace-level replications.
+      catalog_manager_->ScheduleXClusterNSReplicationAddTableTask();
+
     } else {
       // leader_status is not ok.
       if (was_leader_) {

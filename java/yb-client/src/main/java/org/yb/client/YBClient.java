@@ -1528,6 +1528,13 @@ public class YBClient implements AutoCloseable {
     return d.join(2*getDefaultAdminOperationTimeoutMs());
   }
 
+  public GetTabletListToPollForCDCResponse getTabletListToPollForCdc(
+    YBTable table, String streamId, String tableId) throws Exception {
+    Deferred<GetTabletListToPollForCDCResponse> d = asyncClient
+      .getTabletListToPollForCdc(table, streamId, tableId);
+    return d.join(2*getDefaultAdminOperationTimeoutMs());
+  }
+
   public SetCheckpointResponse commitCheckpoint(YBTable table, String streamId,
                                                 String tabletId,
                                                 long term,

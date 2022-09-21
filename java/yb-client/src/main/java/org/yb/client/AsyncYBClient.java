@@ -472,6 +472,18 @@ public class AsyncYBClient implements AutoCloseable {
     return d;
   }
 
+  public Deferred<GetTabletListToPollForCDCResponse> getTabletListToPollForCdc(YBTable table,
+                                                                               String streamId,
+                                                                               String tableId) {
+    checkIsClosed();
+    GetTabletListToPollForCDCRequest rpc = new GetTabletListToPollForCDCRequest(table, streamId, 
+      tableId);
+    Deferred<GetTabletListToPollForCDCResponse> d = rpc.getDeferred();
+    rpc.setTimeoutMillis(defaultOperationTimeoutMs);
+    sendRpcToTablet(rpc);
+    return d;
+  }
+
   public Deferred<SetCheckpointResponse> setCheckpointWithBootstrap(YBTable table,
                                                                     String streamId,
                                                                     String tabletId,

@@ -25,15 +25,10 @@ public class GetTabletListToPollForCDCRequest extends YRpc<GetTabletListToPollFo
   private String streamId;
   private String tableId;
 
-  private TableInfo.Builder tableInfoBuilder;
-
   public GetTabletListToPollForCDCRequest(YBTable ybTable, String streamId, String tableId) {
     super(ybTable);
     this.streamId = streamId;
     this.tableId = tableId;
-
-    tableInfoBuilder.setStreamId(ByteString.copyFromUtf8(this.streamId));
-    tableInfoBuilder.setTableId(ByteString.copyFromUtf8(this.tableId));
   }
 
   @Override
@@ -42,7 +37,11 @@ public class GetTabletListToPollForCDCRequest extends YRpc<GetTabletListToPollFo
 
     final CdcService.GetTabletListToPollForCDCRequestPB.Builder builder = CdcService
       .GetTabletListToPollForCDCRequestPB.newBuilder();
-    
+
+    final TableInfo.Builder tableInfoBuilder = TableInfo.newBuilder();
+    tableInfoBuilder.setStreamId(ByteString.copyFromUtf8(this.streamId));
+    tableInfoBuilder.setTableId(ByteString.copyFromUtf8(this.tableId));
+
     builder.setTableInfo(tableInfoBuilder.build());
 
     return toChannelBuffer(header, builder.build());
@@ -66,16 +65,12 @@ public class GetTabletListToPollForCDCRequest extends YRpc<GetTabletListToPollFo
     return this.tableId;
   }
 
-  public TableInfo getTableInfo() {
-    return this.tableInfoBuilder.build();
-  }
-
   @Override
   Pair<GetTabletListToPollForCDCResponse, Object> deserialize(CallResponse callResponse, 
                                                               String tsUUID) throws Exception {
     final CdcService.GetTabletListToPollForCDCResponsePB.Builder respBuilder = CdcService
       .GetTabletListToPollForCDCResponsePB.newBuilder();
-    
+
     readProtobuf(callResponse.getPBMessage(), respBuilder);
 
     GetTabletListToPollForCDCResponse response = new GetTabletListToPollForCDCResponse(

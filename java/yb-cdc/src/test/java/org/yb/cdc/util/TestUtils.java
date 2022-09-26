@@ -164,6 +164,15 @@ public class TestUtils {
       "Unable to find build dir! myUrl=" + myUrl + ", currentDir=" + currentDir);
   }
 
+  public static void splitTablet(String tabletId) throws Exception {
+    String ybRootDir = (rootYBDirectory == null) ? findRootYBDirectory() : rootYBDirectory;
+    Process process = Runtime.getRuntime().exec(
+        ybRootDir + "/build/latest/bin/yb-admin split_tablet " + tabletId);
+
+    int exitCode = process.waitFor();
+    System.out.println("Exit code of the process: " + exitCode + " with no idea of tablet split yet");
+  }
+
   /**
    * This function starts a single node cluster using yugabyted. The flow is that it initially
    * calls destroyYugabyted() to destroy any existing cluster which could be running and then

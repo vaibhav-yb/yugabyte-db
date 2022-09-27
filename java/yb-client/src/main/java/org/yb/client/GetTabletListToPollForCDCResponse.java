@@ -21,13 +21,13 @@ public class GetTabletListToPollForCDCResponse extends YRpcResponse {
   private List<CdcService.TabletCheckpointPair> tabletCheckpointPairList;
 
   public GetTabletListToPollForCDCResponse(
-      long elapsedMillis, 
-      String uuid, 
+      long elapsedMillis,
+      String uuid,
       List<CdcService.TabletCheckpointPair> tabletCheckpointPairList) {
     super(elapsedMillis, uuid);
     this.tabletCheckpointPairList = tabletCheckpointPairList;
   }
-  
+
   /**
    * Get the list of tablet checkpoint pairs as specified in the request
    * @return a list of tablet checkpoint pairs

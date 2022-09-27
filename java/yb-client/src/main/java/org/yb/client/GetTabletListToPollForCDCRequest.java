@@ -66,7 +66,7 @@ public class GetTabletListToPollForCDCRequest extends YRpc<GetTabletListToPollFo
   }
 
   @Override
-  Pair<GetTabletListToPollForCDCResponse, Object> deserialize(CallResponse callResponse, 
+  Pair<GetTabletListToPollForCDCResponse, Object> deserialize(CallResponse callResponse,
                                                               String tsUUID) throws Exception {
     final CdcService.GetTabletListToPollForCDCResponsePB.Builder respBuilder = CdcService
       .GetTabletListToPollForCDCResponsePB.newBuilder();
@@ -74,7 +74,7 @@ public class GetTabletListToPollForCDCRequest extends YRpc<GetTabletListToPollFo
     readProtobuf(callResponse.getPBMessage(), respBuilder);
 
     GetTabletListToPollForCDCResponse response = new GetTabletListToPollForCDCResponse(
-        deadlineTracker.getElapsedMillis(), 
+        deadlineTracker.getElapsedMillis(),
         tsUUID,
         respBuilder.getTabletCheckpointPairsList());
 

@@ -42,11 +42,12 @@ public class TestGetTabletsApiCdc extends CDCBaseClass {
 
   @Test
   public void verifyIfNewApiReturnsExpectedValues() throws Exception {
+    // setServerFlag(getTserverHostAndPort(), "tablet_split_low_phase_size_threshold_bytes", "10240");
     testSubscriber = new CDCSubscriber(getMasterAddresses());
     testSubscriber.createStream("proto");
 
     // Insert some records in the table
-    for (int i = 0; i < 10; ++i) {
+    for (int i = 0; i < 100; ++i) {
       statement.execute(String.format("INSERT INTO test VALUES (%d,%d);", i, i+1));
     }
 
@@ -70,20 +71,25 @@ public class TestGetTabletsApiCdc extends CDCBaseClass {
 
     splitTablet(getMasterAddresses(), tabletId);
 
-    // Keep calling get changes in a loop until we see tablet_split error
-    try {
-      List<CdcService.CDCSDKProtoRecordPB> outputList = new ArrayList<>();
-      // Keep calling GetChanges until it throws an Exception
-      while (true) {
-        testSubscriber.getResponseFromCDC(outputList, cp);
-      }
-    } catch (CDCErrorException cdcException) {
-      if (cdcException.getCDCError().getCode() == Code.TABLET_SPLIT) {
-        System.out.println("Tablet split error reported");
-      } else {
-        throw cdcException;
-      }
+    // Insert more records after scheduling the split tablet task
+    for (int i = 100; i < 10000; ++i) {
+      statement.execute(String.format("INSERT INTO test VALUES (%d,%d);", i, i+1));
     }
+
+    // Keep calling get changes in a loop until we see tablet_split error
+    // try {
+    //   List<CdcService.CDCSDKProtoRecordPB> outputList = new ArrayList<>();
+    //   // Keep calling GetChanges until it throws an Exception
+    //   while (true) {
+    //     testSubscriber.getResponseFromCDC(outputList);
+    //   }
+    // } catch (CDCErrorException cdcException) {
+    //   if (cdcException.getCDCError().getCode() == Code.TABLET_SPLIT) {
+    //     System.out.println("Tablet split error reported");
+    //   } else {
+    //     throw cdcException;
+    //   }
+    // }
 
     // Wait for tablet split to happen
     waitForTabletSplit(ybClient, testSubscriber.getTableId(), 2);

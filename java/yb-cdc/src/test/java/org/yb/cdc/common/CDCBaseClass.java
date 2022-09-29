@@ -134,6 +134,7 @@ public class CDCBaseClass extends BaseMiniClusterTest {
     flagMap.put("client_read_write_timeout_ms",
       String.valueOf(BuildTypeUtil.adjustTimeout(120000)));
     flagMap.put("memory_limit_hard_bytes", String.valueOf(2L * 1024 * 1024 * 1024));
+    flagMap.put("tablet_split_low_phase_size_threshold_bytes", String.valueOf(1024));
     return flagMap;
   }
 
@@ -544,6 +545,7 @@ public class CDCBaseClass extends BaseMiniClusterTest {
   }
 
   protected void splitTablet(String masterAddresses, String tabletId) throws Exception {
+    System.out.println("Running the command: " + TestUtils.findBinary("yb-admin") + " --master_addresses " + masterAddresses + " split_tablet " + tabletId);
     runProcess(TestUtils.findBinary("yb-admin"),
       "--master_addresses",
       masterAddresses,

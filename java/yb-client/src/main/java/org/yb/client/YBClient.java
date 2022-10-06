@@ -1535,6 +1535,11 @@ public class YBClient implements AutoCloseable {
     return d.join(2*getDefaultAdminOperationTimeoutMs());
   }
 
+  public SplitTabletResponse splitTablet(String tabletId) throws Exception {
+    Deferred<SplitTabletResponse> d = asyncClient.splitTablet(tabletId);
+    return d.join(2*getDefaultAdminOperationTimeoutMs());
+  }
+
   public SetCheckpointResponse commitCheckpoint(YBTable table, String streamId,
                                                 String tabletId,
                                                 long term,

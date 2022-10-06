@@ -170,7 +170,16 @@ public class TestUtils {
         ybRootDir + "/build/latest/bin/yb-admin split_tablet " + tabletId);
 
     int exitCode = process.waitFor();
-    System.out.println("Exit code of the process: " + exitCode + " with no idea of tablet split yet");
+    System.out.println("Exit code of the process: " + exitCode);
+  }
+
+  public static void compactTable(String tableId) throws Exception {
+    String ybRootDir = (rootYBDirectory == null) ? findRootYBDirectory() : rootYBDirectory;
+    Process process = Runtime.getRuntime().exec(
+        ybRootDir + "/build/latest/bin/yb-admin compact_table_by_id " + tableId);
+
+    int exitCode = process.waitFor();
+    System.out.println("Exit code of the process: " + exitCode);
   }
 
   /**

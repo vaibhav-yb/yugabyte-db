@@ -47,7 +47,7 @@ public class TestGetTabletsApiCdc extends CDCBaseClass {
     testSubscriber.createStream("proto");
 
     // Insert some records in the table
-    for (int i = 0; i < 100; ++i) {
+    for (int i = 0; i < 200; ++i) {
       statement.execute(String.format("INSERT INTO test VALUES (%d,%d);", i, i+1));
     }
 
@@ -69,10 +69,12 @@ public class TestGetTabletsApiCdc extends CDCBaseClass {
     TabletCheckpointPair pair = respBeforeSplit.getTabletCheckpointPairList().get(0);
     assertEquals(tabletId, pair.getTabletId().toStringUtf8());
 
-    splitTablet(getMasterAddresses(), tabletId);
+    TestUtils.compactTable(testSubscriber.getTableId());
+
+    ybClient.splitTablet(tabletId);
 
     // Insert more records after scheduling the split tablet task
-    for (int i = 100; i < 10000; ++i) {
+    for (int i = 200; i < 10000; ++i) {
       statement.execute(String.format("INSERT INTO test VALUES (%d,%d);", i, i+1));
     }
 
@@ -107,7 +109,7 @@ public class TestGetTabletsApiCdc extends CDCBaseClass {
                                   int tabletCount) throws Exception {
     Awaitility.await()
       .pollDelay(Duration.ofSeconds(10))
-      .atMost(Duration.ofSeconds(120))
+      .atMost(Duration.ofSeconds(240))
       .until(() -> {
         Set<String> tabletIds = ybClient.getTabletUUIDs(ybClient.openTableByUUID(tableId));
         return tabletIds.size() == tabletCount;

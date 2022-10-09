@@ -42,7 +42,10 @@ public class TestGetTabletsApiCdc extends CDCBaseClass {
 
   @Test
   public void verifyIfNewApiReturnsExpectedValues() throws Exception {
-    // setServerFlag(getTserverHostAndPort(), "tablet_split_low_phase_size_threshold_bytes", "10240");
+    System.out.println("VKVK before setting the flags");
+    setServerFlag(getTserverHostAndPort(), "update_min_cdc_indices_interval_secs", "1");
+    setServerFlag(getTserverHostAndPort(), "cdc_state_checkpoint_update_interval_ms", "1");
+    System.out.println("VKVK after setting the flags");
     testSubscriber = new CDCSubscriber(getMasterAddresses());
     testSubscriber.createStream("proto");
 
@@ -70,33 +73,47 @@ public class TestGetTabletsApiCdc extends CDCBaseClass {
     assertEquals(tabletId, pair.getTabletId().toStringUtf8());
 
     // TestUtils.compactTable(testSubscriber.getTableId());
-    System.out.println("BLEH BLEH BLEH BLEH BLEH BLEH before flush tablet");
+    System.out.println("VKVK before flush tablet command");
     ybClient.flushTable(testSubscriber.getTableId());
-    System.out.println("BLEH BLEH BLEH BLEH BLEH BLEH before split tablet");
+
+    // Wait for the flush table command to succeed
+    System.out.println("VKVK waiting for 60 seconds now");
+    TestUtils.waitFor(Duration.ofSeconds(60));
+
+    System.out.println("VKVK before split tablet command");
     ybClient.splitTablet(tabletId);
+    System.out.println("VKVK after split tablet command");
 
     // Insert more records after scheduling the split tablet task
     for (int i = 2000; i < 10000; ++i) {
       statement.execute(String.format("INSERT INTO test VALUES (%d,%d);", i, i+1));
     }
 
-    // Keep calling get changes in a loop until we see tablet_split error
-    // try {
-    //   List<CdcService.CDCSDKProtoRecordPB> outputList = new ArrayList<>();
-    //   // Keep calling GetChanges until it throws an Exception
-    //   while (true) {
-    //     testSubscriber.getResponseFromCDC(outputList);
-    //   }
-    // } catch (CDCErrorException cdcException) {
-    //   if (cdcException.getCDCError().getCode() == Code.TABLET_SPLIT) {
-    //     System.out.println("Tablet split error reported");
-    //   } else {
-    //     throw cdcException;
-    //   }
-    // }
-
     // Wait for tablet split to happen
+    System.out.println("VKVK Before waiting for tablet split");
     waitForTabletSplit(ybClient, testSubscriber.getTableId(), 2);
+    System.out.println("VKVK After waiting for tablet split");
+
+    // Keep calling get changes in a loop until we see tablet_split error
+    boolean isFirstTime = true;
+    try {
+      List<CdcService.CDCSDKProtoRecordPB> outputList = new ArrayList<>();
+      // Keep calling GetChanges until it throws an Exception
+      while (true) {
+        if (isFirstTime) {
+          testSubscriber.getResponseFromCDC(outputList);
+          isFirstTime = false;
+        } else {
+          testSubscriber.getResponseFromCDC(outputList, testSubscriber.getSubscriberCheckpoint());
+        }
+      }
+    } catch (CDCErrorException cdcException) {
+      if (cdcException.getCDCError().getCode() == Code.TABLET_SPLIT) {
+        System.out.println("VKVK Tablet split error reported");
+      } else {
+        throw cdcException;
+      }
+    }
 
     // Call the new API to get the tablets
     GetTabletListToPollForCDCResponse respAfterSplit = ybClient.getTabletListToPollForCdc(

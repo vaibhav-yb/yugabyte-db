@@ -1576,7 +1576,8 @@ public class YBClient implements AutoCloseable {
   }
 
   /**
-   * [Test purposes only] Flush and compact the provided table.
+   * [Test purposes only] Flush and compact the provided table. Note that you will need to wait
+   * accordingly for the table to get flushed and the SST files to get created.
    * @param tableId the UUID of the table to compact
    * @return an RPC response of type {@link FlushTableResponse} containing the flush request ID
    * @throws Exception

@@ -55,7 +55,7 @@ public class FlushTableRequest extends YRpc<FlushTableResponse> {
   }
 
   @Override
-  Pair<FlushTableResponse, Object> deserialize(CallResponse callResponse, 
+  Pair<FlushTableResponse, Object> deserialize(CallResponse callResponse,
                                                String tsUUID) throws Exception {
     final FlushTablesResponsePB.Builder respBuilder = FlushTablesResponsePB.newBuilder();
     readProtobuf(callResponse.getPBMessage(), respBuilder);

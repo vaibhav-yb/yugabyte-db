@@ -47,12 +47,12 @@ public class SplitTabletRequest extends YRpc<SplitTabletResponse> {
   }
 
   @Override
-  Pair<SplitTabletResponse, Object> deserialize(CallResponse callResponse, 
+  Pair<SplitTabletResponse, Object> deserialize(CallResponse callResponse,
                                                 String tsUUID) throws Exception {
     final SplitTabletResponsePB.Builder respBuilder = SplitTabletResponsePB.newBuilder();
     readProtobuf(callResponse.getPBMessage(), respBuilder);
 
-    SplitTabletResponse response = 
+    SplitTabletResponse response =
       new SplitTabletResponse(deadlineTracker.getElapsedMillis(), tsUUID);
     return new Pair<SplitTabletResponse,Object>(
       response, respBuilder.hasError() ? respBuilder.getError() : null);

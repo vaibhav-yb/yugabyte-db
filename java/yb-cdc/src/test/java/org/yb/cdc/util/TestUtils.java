@@ -166,24 +166,6 @@ public class TestUtils {
       "Unable to find build dir! myUrl=" + myUrl + ", currentDir=" + currentDir);
   }
 
-  public static void splitTablet(String tabletId) throws Exception {
-    String ybRootDir = (rootYBDirectory == null) ? findRootYBDirectory() : rootYBDirectory;
-    Process process = Runtime.getRuntime().exec(
-        ybRootDir + "/build/latest/bin/yb-admin split_tablet " + tabletId);
-
-    int exitCode = process.waitFor();
-    System.out.println("Exit code of the process: " + exitCode);
-  }
-
-  public static void compactTable(String tableId) throws Exception {
-    String ybRootDir = (rootYBDirectory == null) ? findRootYBDirectory() : rootYBDirectory;
-    Process process = Runtime.getRuntime().exec(
-        ybRootDir + "/build/latest/bin/yb-admin compact_table_by_id " + tableId);
-
-    int exitCode = process.waitFor();
-    System.out.println("Exit code of the process: " + exitCode);
-  }
-
   /**
    * This function starts a single node cluster using yugabyted. The flow is that it initially
    * calls destroyYugabyted() to destroy any existing cluster which could be running and then
@@ -235,12 +217,12 @@ public class TestUtils {
 
   /**
    * Helper function to wait for a specified duration
-   * @param duration the amount of time to wait
+   * @param seconds the amount of seconds to wait
    */
-  public static void waitFor(Duration duration) {
+  public static void waitFor(long seconds) {
     Awaitility.await()
-      .pollDelay(duration)
-      .atMost(duration.plusSeconds(1))
+      .pollDelay(Duration.ofSeconds(seconds))
+      .atMost(Duration.ofSeconds(seconds + 1))
       .until(() -> { return true; });
   }
 }

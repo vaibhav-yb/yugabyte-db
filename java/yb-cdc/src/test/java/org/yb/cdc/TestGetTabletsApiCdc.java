@@ -47,7 +47,7 @@ public class TestGetTabletsApiCdc extends CDCBaseClass {
     testSubscriber.createStream("proto");
 
     // Insert some records in the table
-    for (int i = 0; i < 200; ++i) {
+    for (int i = 0; i < 2000; ++i) {
       statement.execute(String.format("INSERT INTO test VALUES (%d,%d);", i, i+1));
     }
 
@@ -69,12 +69,14 @@ public class TestGetTabletsApiCdc extends CDCBaseClass {
     TabletCheckpointPair pair = respBeforeSplit.getTabletCheckpointPairList().get(0);
     assertEquals(tabletId, pair.getTabletId().toStringUtf8());
 
-    TestUtils.compactTable(testSubscriber.getTableId());
-
+    // TestUtils.compactTable(testSubscriber.getTableId());
+    System.out.println("BLEH BLEH BLEH BLEH BLEH BLEH before flush tablet");
+    ybClient.flushTable(testSubscriber.getTableId());
+    System.out.println("BLEH BLEH BLEH BLEH BLEH BLEH before split tablet");
     ybClient.splitTablet(tabletId);
 
     // Insert more records after scheduling the split tablet task
-    for (int i = 200; i < 10000; ++i) {
+    for (int i = 2000; i < 10000; ++i) {
       statement.execute(String.format("INSERT INTO test VALUES (%d,%d);", i, i+1));
     }
 
@@ -103,6 +105,7 @@ public class TestGetTabletsApiCdc extends CDCBaseClass {
 
     // Ideally there would be 2 tablets since the original one has split into 2
     assertEquals(2, respAfterSplit.getTabletCheckpointPairListSize());
+    System.out.println("BLEH BLEH BLEH BLEH BLEH BLEH");
   }
 
   private void waitForTabletSplit(YBClient ybClient, String tableId,

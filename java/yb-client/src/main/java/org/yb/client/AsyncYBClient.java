@@ -493,6 +493,15 @@ public class AsyncYBClient implements AutoCloseable {
     return d;
   }
 
+  public Deferred<FlushTableResponse> flushTable(String tableId) {
+    checkIsClosed();
+    FlushTableRequest rpc = new FlushTableRequest(this.masterTable, tableId);
+    Deferred<FlushTableResponse> d = rpc.getDeferred();
+    rpc.setTimeoutMillis(defaultOperationTimeoutMs);
+    sendRpcToTablet(rpc);
+    return d;
+  }
+
   public Deferred<SetCheckpointResponse> setCheckpointWithBootstrap(YBTable table,
                                                                     String streamId,
                                                                     String tabletId,
@@ -1543,6 +1552,9 @@ public class AsyncYBClient implements AutoCloseable {
       tablet = getFirstTablet(tableId);
     }
     if (request instanceof SplitTabletRequest) {
+      tablet = getFirstTablet(tableId);
+    }
+    if (request instanceof FlushTableRequest) {
       tablet = getFirstTablet(tableId);
     }
     // Set the propagated timestamp so that the next time we send a message to

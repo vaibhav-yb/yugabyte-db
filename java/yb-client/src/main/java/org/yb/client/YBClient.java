@@ -1540,6 +1540,11 @@ public class YBClient implements AutoCloseable {
     return d.join(2*getDefaultAdminOperationTimeoutMs());
   }
 
+  public FlushTableResponse flushTable(String tableId) throws Exception {
+    Deferred<FlushTableResponse> d = asyncClient.flushTable(tableId);
+    return d.join(2*getDefaultAdminOperationTimeoutMs());
+  }
+
   public SetCheckpointResponse commitCheckpoint(YBTable table, String streamId,
                                                 String tabletId,
                                                 long term,

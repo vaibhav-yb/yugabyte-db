@@ -773,35 +773,6 @@ bool VerifyTabletSplitOnParentTablet(
   return (children_tablet_count == 2);
 }
 
-bool VerifyTabletSplitOnParentTablet(
-    const TableId& table_id, const TabletId& tablet_id,
-    const std::shared_ptr<yb::consensus::ReplicateMsg>& msg, client::YBClient* client) {
-  if (!(msg->has_split_request() && msg->split_request().has_tablet_id() &&
-        msg->split_request().tablet_id() == tablet_id)) {
-    LOG(WARNING) << "The replicate message for split-op does not have the parent tablet_id set to: "
-                 << tablet_id << ". Could not verify tablet-split for tablet: " << tablet_id;
-    return false;
-  }
-
-  google::protobuf::RepeatedPtrField<master::TabletLocationsPB> tablets;
-  client::YBTableName table_name;
-  table_name.set_table_id(table_id);
-  RETURN_NOT_OK_RET(
-      client->GetTablets(
-          table_name, 0, &tablets, /* partition_list_version =*/nullptr,
-          RequireTabletsRunning::kFalse, master::IncludeInactive::kTrue),
-      false);
-
-  uint children_tablet_count = 0;
-  for (const auto& tablet : tablets) {
-    if (tablet.has_split_parent_tablet_id() && tablet.split_parent_tablet_id() == tablet_id) {
-      children_tablet_count += 1;
-    }
-  }
-
-  return (children_tablet_count == 2);
-}
-
 // CDC get changes is different from 2DC as it doesn't need
 // to read intents from WAL.
 

@@ -311,15 +311,9 @@ class CDCServiceImpl : public CDCServiceIf {
 
   Status GetTabletIdsToPoll(
       const CDCStreamId stream_id,
-<<<<<<< HEAD
-      const std::set<const TabletId>& active_or_hidden_tablets,
-      const std::set<const TabletId>& parent_tablets,
-      const std::map<const TabletId, const TabletId>& child_to_parent_mapping,
-=======
       const std::set<TabletId>& active_or_hidden_tablets,
       const std::set<TabletId>& parent_tablets,
       const std::map<TabletId, TabletId>& child_to_parent_mapping,
->>>>>>> master
       std::vector<std::pair<TabletId, OpId>>* result);
 
   // This method deletes entries from the cdc_state table that are contained in the set.

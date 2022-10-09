@@ -248,12 +248,6 @@ void CatalogManagerBgTasks::Run() {
       WARN_NOT_OK(catalog_manager_->RunXClusterBgTasks(), "Failed XCluster Background Task");
 
       was_leader_ = true;
-      // Restart CDCSDK parent tablet deletion bg task.
-      catalog_manager_->StartCDCParentTabletDeletionTaskIfStopped();
-
-      // Run periodic task for namespace-level replications.
-      catalog_manager_->ScheduleXClusterNSReplicationAddTableTask();
-
     } else {
       // leader_status is not ok.
       if (was_leader_) {

@@ -641,12 +641,6 @@ class CatalogManager : public yb::master::CatalogManager, SnapshotCoordinatorCon
     const google::protobuf::RepeatedPtrField<std::string>& table_ids);
 
   void ProcessCDCParentTabletDeletionPeriodically();
-<<<<<<< HEAD
-
-  Status DoProcessCDCClusterTabletDeletion(const cdc::CDCRequestSource request_source);
-
-  void LoadCDCRetainedTabletsSet() REQUIRES(mutex_);
-=======
 
   Status DoProcessCDCClusterTabletDeletion(const cdc::CDCRequestSource request_source);
 
@@ -681,7 +675,6 @@ class CatalogManager : public yb::master::CatalogManager, SnapshotCoordinatorCon
     const std::string& consumer_table_id,
     const std::string& stream_id,
     const std::vector<ReplicationErrorPb>& replication_error_codes) REQUIRES_SHARED(mutex_);
->>>>>>> master
 
   // Snapshot map: snapshot-id -> SnapshotInfo.
   typedef std::unordered_map<SnapshotId, scoped_refptr<SnapshotInfo>> SnapshotInfoMap;

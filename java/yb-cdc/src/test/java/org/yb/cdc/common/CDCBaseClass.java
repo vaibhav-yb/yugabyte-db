@@ -545,7 +545,6 @@ public class CDCBaseClass extends BaseMiniClusterTest {
   }
 
   protected void splitTablet(String masterAddresses, String tabletId) throws Exception {
-    System.out.println("Running the command: " + TestUtils.findBinary("yb-admin") + " --master_addresses " + masterAddresses + " split_tablet " + tabletId);
     runProcess(TestUtils.findBinary("yb-admin"),
       "--master_addresses",
       masterAddresses,

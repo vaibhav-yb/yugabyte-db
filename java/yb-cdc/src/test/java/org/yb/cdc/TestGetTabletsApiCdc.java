@@ -108,11 +108,11 @@ public class TestGetTabletsApiCdc extends CDCBaseClass {
     System.out.println("BLEH BLEH BLEH BLEH BLEH BLEH");
   }
 
-  private void waitForTabletSplit(YBClient ybClient, String tableId,
+  private void waitForTabletSplit(YBClient ybClient, String tableId, 
                                   int tabletCount) throws Exception {
     Awaitility.await()
       .pollDelay(Duration.ofSeconds(10))
-      .atMost(Duration.ofSeconds(240))
+      .atMost(Duration.ofSeconds(120))
       .until(() -> {
         Set<String> tabletIds = ybClient.getTabletUUIDs(ybClient.openTableByUUID(tableId));
         return tabletIds.size() == tabletCount;

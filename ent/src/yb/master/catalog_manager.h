@@ -80,6 +80,11 @@ class CatalogManager : public yb::master::CatalogManager, SnapshotCoordinatorCon
       EditSnapshotScheduleResponsePB* resp,
       rpc::RpcContext* rpc);
 
+  Status RestoreSnapshotSchedule(
+      const RestoreSnapshotScheduleRequestPB* req,
+      RestoreSnapshotScheduleResponsePB* resp,
+      rpc::RpcContext* rpc);
+
   Status ChangeEncryptionInfo(const ChangeEncryptionInfoRequestPB* req,
                               ChangeEncryptionInfoResponsePB* resp) override;
 
@@ -218,6 +223,11 @@ class CatalogManager : public yb::master::CatalogManager, SnapshotCoordinatorCon
                                     SetupNSUniverseReplicationResponsePB* resp,
                                     rpc::RpcContext* rpc);
 
+  // Returns the replication status.
+  Status GetReplicationStatus(const GetReplicationStatusRequestPB* req,
+                                      GetReplicationStatusResponsePB* resp,
+                                      rpc::RpcContext* rpc);
+
   // Find all the CDC streams that have been marked as DELETED.
   Status FindCDCStreamsMarkedAsDeleting(std::vector<scoped_refptr<CDCStreamInfo>>* streams);
 
@@ -252,6 +262,8 @@ class CatalogManager : public yb::master::CatalogManager, SnapshotCoordinatorCon
 
   bool IsCdcEnabled(const TableInfo& table_info) const override;
 
+  bool IsCdcSdkEnabled(const TableInfo& table_info) override;
+
   bool IsTablePartOfBootstrappingCdcStream(const TableInfo& table_info) const override;
 
   Status ValidateNewSchemaWithCdc(const TableInfo& table_info, const Schema& new_schema)
@@ -273,6 +285,8 @@ class CatalogManager : public yb::master::CatalogManager, SnapshotCoordinatorCon
 
   void EnableTabletSplitting(const std::string& feature) override;
 
+  Status RunXClusterBgTasks();
+
   void StartCDCParentTabletDeletionTaskIfStopped();
 
   void ScheduleCDCParentTabletDeletionTask();
@@ -285,6 +299,9 @@ class CatalogManager : public yb::master::CatalogManager, SnapshotCoordinatorCon
     std::lock_guard<MutexType> lock(backfill_mutex_);
     pending_backfill_tables_.emplace(id);
   }
+
+  Status ProcessTabletReplicationStatus(
+      const TabletReplicationStatusPB& replication_state) override EXCLUDES(mutex_);
 
  private:
   friend class SnapshotLoader;
@@ -624,10 +641,47 @@ class CatalogManager : public yb::master::CatalogManager, SnapshotCoordinatorCon
     const google::protobuf::RepeatedPtrField<std::string>& table_ids);
 
   void ProcessCDCParentTabletDeletionPeriodically();
+<<<<<<< HEAD
 
   Status DoProcessCDCClusterTabletDeletion(const cdc::CDCRequestSource request_source);
 
   void LoadCDCRetainedTabletsSet() REQUIRES(mutex_);
+=======
+
+  Status DoProcessCDCClusterTabletDeletion(const cdc::CDCRequestSource request_source);
+
+  void LoadCDCRetainedTabletsSet() REQUIRES(mutex_);
+
+  void PopulateUniverseReplicationStatus(
+    const UniverseReplicationInfo& universe,
+    GetReplicationStatusResponsePB* resp) const REQUIRES_SHARED(mutex_);
+
+  Status StoreReplicationErrors(
+    const std::string& universe_id,
+    const std::string& consumer_table_id,
+    const std::string& stream_id,
+    const std::vector<std::pair<ReplicationErrorPb, std::string>>& replication_errors)
+      EXCLUDES(mutex_);
+
+  Status StoreReplicationErrorsUnlocked(
+    const std::string& universe_id,
+    const std::string& consumer_table_id,
+    const std::string& stream_id,
+    const std::vector<std::pair<ReplicationErrorPb, std::string>>& replication_errors)
+      REQUIRES_SHARED(mutex_);
+
+  Status ClearReplicationErrors(
+    const std::string& universe_id,
+    const std::string& consumer_table_id,
+    const std::string& stream_id,
+    const std::vector<ReplicationErrorPb>& replication_error_codes) EXCLUDES(mutex_);
+
+  Status ClearReplicationErrorsUnlocked(
+    const std::string& universe_id,
+    const std::string& consumer_table_id,
+    const std::string& stream_id,
+    const std::vector<ReplicationErrorPb>& replication_error_codes) REQUIRES_SHARED(mutex_);
+>>>>>>> master
 
   // Snapshot map: snapshot-id -> SnapshotInfo.
   typedef std::unordered_map<SnapshotId, scoped_refptr<SnapshotInfo>> SnapshotInfoMap;

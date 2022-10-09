@@ -58,6 +58,8 @@
 #include "yb/gutil/strings/substitute.h"
 #include "yb/gutil/sysinfo.h"
 
+#include "yb/master/master_ddl.pb.h"
+
 #include "yb/rocksdb/db/memtable.h"
 
 #include "yb/rpc/messenger.h"
@@ -65,6 +67,7 @@
 #include "yb/rpc/strand.h"
 #include "yb/rpc/thread_pool.h"
 
+#include "yb/tablet/operations/change_auto_flags_config_operation.h"
 #include "yb/tablet/operations/change_metadata_operation.h"
 #include "yb/tablet/operations/history_cutoff_operation.h"
 #include "yb/tablet/operations/operation_driver.h"
@@ -764,6 +767,7 @@ void TabletPeer::GetTabletStatusPB(TabletStatusPB* status_pb_out) {
   disk_size_info.ToPB(status_pb_out);
   // Set hide status of the tablet.
   status_pb_out->set_is_hidden(meta_->hidden());
+  status_pb_out->set_has_been_fully_compacted(meta_->has_been_fully_compacted());
 }
 
 Status TabletPeer::RunLogGC() {
@@ -836,6 +840,9 @@ consensus::OperationType MapOperationTypeToPB(OperationType operation_type) {
 
     case OperationType::kSplit:
       return consensus::SPLIT_OP;
+
+    case OperationType::kChangeAutoFlagsConfig:
+      return consensus::CHANGE_AUTO_FLAGS_CONFIG_OP;
 
     case OperationType::kEmpty:
       LOG(FATAL) << "OperationType::kEmpty cannot be converted to consensus::OperationType";
@@ -1064,6 +1071,27 @@ OpId TabletPeer::GetLatestCheckPoint() {
   return OpId();
 }
 
+Result<NamespaceId> TabletPeer::GetNamespaceId() {
+  auto namespace_id = tablet()->metadata()->namespace_id();
+  if (!namespace_id.empty()) {
+    return namespace_id;
+  }
+  // This is empty the first time we try to fetch the namespace id from the tablet metadata, so
+  // fetch it from the client and populate the tablet metadata.
+  auto* client = client_future().get();
+  master::GetNamespaceInfoResponsePB resp;
+  RETURN_NOT_OK(client->GetNamespaceInfo({} /* namesapce_id */,
+                                         tablet()->metadata()->namespace_name(),
+                                         boost::none /* database_type */, &resp));
+  namespace_id = resp.namespace_().id();
+  if (namespace_id.empty()) {
+    return STATUS(IllegalState, Format("Could not get namespace id for $0",
+                                       tablet()->metadata()->namespace_name()));
+  }
+  RETURN_NOT_OK(tablet()->metadata()->set_namespace_id(namespace_id));
+  return namespace_id;
+}
+
 Status TabletPeer::SetCDCSDKRetainOpIdAndTime(
     const OpId& cdc_sdk_op_id, const MonoDelta& cdc_sdk_op_id_expiration) {
   if (cdc_sdk_op_id == OpId::Invalid()) {
@@ -1145,6 +1173,13 @@ std::unique_ptr<Operation> TabletPeer::CreateOperation(consensus::ReplicateMsg* 
        DCHECK(replicate_msg->has_split_request()) << "SPLIT_OP replica"
           " operation must receive an SplitOpRequestPB";
       return std::make_unique<SplitOperation>(tablet(), tablet_splitter_);
+
+    case consensus::CHANGE_AUTO_FLAGS_CONFIG_OP:
+      DCHECK(replicate_msg->has_auto_flags_config())
+          << "CHANGE_AUTO_FLAGS_CONFIG_OP replica"
+             " operation must receive an AutoFlagsConfigPB";
+      return std::make_unique<ChangeAutoFlagsConfigOperation>(
+          tablet(), replicate_msg->mutable_auto_flags_config());
 
     case consensus::UNKNOWN_OP: FALLTHROUGH_INTENDED;
     case consensus::NO_OP: FALLTHROUGH_INTENDED;

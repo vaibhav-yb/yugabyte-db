@@ -241,6 +241,11 @@ class YBClient {
   Status WaitForCreateTableToFinish(const string& table_id,
                                             const CoarseTimePoint& deadline);
 
+  // Wait for delete table to finish.
+  Status WaitForDeleteTableToFinish(const string& table_id);
+  Status WaitForDeleteTableToFinish(const string& table_id,
+                                    const CoarseTimePoint& deadline);
+
   // Truncate the specified table.
   // Set 'wait' to true if the call must wait for the table to be fully truncated before returning.
   Status TruncateTable(const std::string& table_id, bool wait = true);
@@ -642,6 +647,9 @@ class YBClient {
       const std::string& table_name,
       const master::ReplicationInfoPB* replication_info = nullptr);
 
+  // Add a tablet to a transaction table.
+  Status AddTransactionStatusTablet(const TableId& table_id);
+
   // Open the table with the given name or id. This will do an RPC to ensure that
   // the table exists and look up its schema.
   // Version with table_id is preferable due to parallel run of RPCs.
@@ -739,6 +747,7 @@ class YBClient {
   void LookupTabletById(const std::string& tablet_id,
                         const std::shared_ptr<const YBTable>& table,
                         master::IncludeInactive include_inactive,
+                        master::IncludeDeleted include_deleted,
                         CoarseTimePoint deadline,
                         LookupTabletCallback callback,
                         UseCache use_cache);

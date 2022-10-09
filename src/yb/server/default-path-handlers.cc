@@ -373,6 +373,8 @@ static void MemTrackersHandler(const Webserver::WebRequest& req, Webserver::WebR
   if (depth != "") {
     max_depth = std::stoi(depth);
   }
+  string full_path_arg = FindWithDefault(req.parsed_args, "show_full_path", "true");
+  bool use_full_path = ParseLeadingBoolValue(full_path_arg.c_str(), true);
 
   std::vector<MemTrackerData> trackers;
   CollectMemTrackerData(MemTracker::GetRootTracker(), 0, &trackers);
@@ -388,8 +390,9 @@ static void MemTrackersHandler(const Webserver::WebRequest& req, Webserver::WebR
         HumanReadableNumBytes::ToString(tracker->consumption());
     const std::string peak_consumption_str =
         HumanReadableNumBytes::ToString(tracker->peak_consumption());
+    const std::string tracker_id = use_full_path ? tracker->ToString() : tracker->id();
     *output << Format("  <tr data-depth=\"$0\" class=\"level$0\">\n", data.depth);
-    *output << "    <td>" << tracker->id() << "</td>";
+    *output << "    <td>" << tracker_id << "</td>";
     // UpdateConsumption returns true if consumption is taken from external source,
     // for instance tcmalloc stats. So we should show only it in this case.
     if (!data.consumption_excluded_from_ancestors || data.tracker->UpdateConsumption()) {
@@ -514,10 +517,21 @@ static void WriteMetricsForPrometheus(const MetricRegistry* const metrics,
   MeticEntitiesOptions entities_opts;
   ParseRequestOptions(req, &entities_opts, &opts);
 
-  std::stringstream *output = &resp->output;
+  std::stringstream* output = &resp->output;
+
+  std::set<std::string> prototypes;
+  metrics->get_all_prototypes(prototypes);
+
   if (entities_opts.empty()) {
+    if (prototypes.find("cdcsdk") != prototypes.end()) {
+      entities_opts[AggregationMetricLevel::kStream].metrics.push_back("cdcsdk");
+      prototypes.erase("cdcsdk");
+    }
+
     entities_opts[AggregationMetricLevel::kTable].metrics.push_back("*");
+    entities_opts[AggregationMetricLevel::kTable].exclude_metrics.push_back("cdcsdk");
   }
+
   for (const auto& entity_options : entities_opts) {
     PrometheusWriter writer(output, entity_options.first);
     WARN_NOT_OK(metrics->WriteForPrometheus(&writer, entity_options.second, opts),

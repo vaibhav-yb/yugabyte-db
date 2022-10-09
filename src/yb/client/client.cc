@@ -198,6 +198,8 @@ using yb::master::GetMasterClusterConfigRequestPB;
 using yb::master::GetMasterClusterConfigResponsePB;
 using yb::master::CreateTransactionStatusTableRequestPB;
 using yb::master::CreateTransactionStatusTableResponsePB;
+using yb::master::AddTransactionStatusTabletRequestPB;
+using yb::master::AddTransactionStatusTabletResponsePB;
 using yb::master::UpdateConsumerOnProducerSplitRequestPB;
 using yb::master::UpdateConsumerOnProducerSplitResponsePB;
 using yb::master::PlacementInfoPB;
@@ -590,6 +592,16 @@ Status YBClient::WaitForCreateTableToFinish(
     const string& table_id, const CoarseTimePoint& deadline) {
   const YBTableName empty_table_name;
   return data_->WaitForCreateTableToFinish(this, empty_table_name, table_id, deadline);
+}
+
+Status YBClient::WaitForDeleteTableToFinish(const string& table_id) {
+  const auto deadline = CoarseMonoClock::Now() + default_admin_operation_timeout();
+  return WaitForDeleteTableToFinish(table_id, deadline);
+}
+
+Status YBClient::WaitForDeleteTableToFinish(
+    const string& table_id, const CoarseTimePoint& deadline) {
+  return data_->WaitForDeleteTableToFinish(this, table_id, deadline);
 }
 
 Status YBClient::TruncateTable(const string& table_id, bool wait) {
@@ -1738,6 +1750,14 @@ Status YBClient::CreateTransactionsStatusTable(
   return Status::OK();
 }
 
+Status YBClient::AddTransactionStatusTablet(const TableId& table_id) {
+  master::AddTransactionStatusTabletRequestPB req;
+  master::AddTransactionStatusTabletResponsePB resp;
+  req.set_table_id(table_id);
+  CALL_SYNC_LEADER_MASTER_RPC_EX(Admin, req, resp, AddTransactionStatusTablet);
+  return Status::OK();
+}
+
 Status YBClient::GetTabletsFromTableId(const string& table_id,
                                        const int32_t max_tablets,
                                        RepeatedPtrField<TabletLocationsPB>* tablets) {
@@ -1926,11 +1946,13 @@ void YBClient::LookupTabletByKey(const std::shared_ptr<YBTable>& table,
 void YBClient::LookupTabletById(const std::string& tablet_id,
                                 const std::shared_ptr<const YBTable>& table,
                                 master::IncludeInactive include_inactive,
+                                master::IncludeDeleted include_deleted,
                                 CoarseTimePoint deadline,
                                 LookupTabletCallback callback,
                                 UseCache use_cache) {
   data_->meta_cache_->LookupTabletById(
-      tablet_id, table, include_inactive, deadline, std::move(callback), use_cache);
+      tablet_id, table, include_inactive, include_deleted, deadline, std::move(callback),
+      use_cache);
 }
 
 void YBClient::LookupAllTablets(const std::shared_ptr<YBTable>& table,

@@ -3,6 +3,7 @@
 package com.yugabyte.yw.commissioner.tasks;
 
 import com.google.common.collect.ImmutableSet;
+import com.google.common.collect.Sets;
 import com.yugabyte.yw.commissioner.BaseTaskDependencies;
 import com.yugabyte.yw.commissioner.Common.CloudType;
 import com.yugabyte.yw.commissioner.HookInserter;
@@ -19,6 +20,7 @@ import com.yugabyte.yw.commissioner.tasks.subtasks.InstanceActions;
 import com.yugabyte.yw.commissioner.tasks.subtasks.InstanceExistCheck;
 import com.yugabyte.yw.commissioner.tasks.subtasks.PrecheckNode;
 import com.yugabyte.yw.commissioner.tasks.subtasks.PreflightNodeCheck;
+import com.yugabyte.yw.commissioner.tasks.subtasks.UniverseSetTlsParams;
 import com.yugabyte.yw.commissioner.tasks.subtasks.UpdateUniverseTags;
 import com.yugabyte.yw.commissioner.tasks.subtasks.WaitForMasterLeader;
 import com.yugabyte.yw.common.NodeManager;
@@ -28,6 +30,7 @@ import com.yugabyte.yw.common.Util;
 import com.yugabyte.yw.common.certmgmt.EncryptionInTransitUtil;
 import com.yugabyte.yw.common.helm.HelmUtils;
 import com.yugabyte.yw.common.password.RedactingService;
+import com.yugabyte.yw.forms.CertsRotateParams;
 import com.yugabyte.yw.forms.UniverseDefinitionTaskParams;
 import com.yugabyte.yw.forms.UniverseDefinitionTaskParams.Cluster;
 import com.yugabyte.yw.forms.UniverseDefinitionTaskParams.ClusterType;
@@ -54,6 +57,7 @@ import java.util.ArrayList;
 import java.util.Collection;
 import java.util.HashMap;
 import java.util.HashSet;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Arrays;
@@ -66,11 +70,11 @@ import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
-import javax.annotation.Nullable;
 import javax.inject.Inject;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.commons.collections.CollectionUtils;
 import org.apache.commons.lang3.StringUtils;
+import org.apache.commons.lang3.tuple.Pair;
 import play.Configuration;
 import play.libs.Json;
 
@@ -322,17 +326,10 @@ public abstract class UniverseDefinitionTaskBase extends UniverseTaskBase {
    * @param nodeIdx index to be used in node name.
    * @param region region in which this node is present.
    * @param az zone in which this node is present.
-   * @param dedicatedTo process type that node is reserved for.
    * @return a string which can be used as the node name.
    */
   public static String getNodeName(
-      Cluster cluster,
-      String tagValue,
-      String prefix,
-      int nodeIdx,
-      String region,
-      String az,
-      @Nullable ServerType dedicatedTo) {
+      Cluster cluster, String tagValue, String prefix, int nodeIdx, String region, String az) {
     if (!tagValue.isEmpty()) {
       checkTagPattern(tagValue);
     }
@@ -353,9 +350,6 @@ public abstract class UniverseDefinitionTaskBase extends UniverseTaskBase {
       } else {
         newName = getTagBasedName(tagValue, cluster, nodeIdx, region, az);
       }
-    }
-    if (dedicatedTo != null) {
-      newName += "-" + dedicatedTo.name().toLowerCase();
     }
 
     log.info("Node name " + newName + " at index " + nodeIdx);
@@ -412,8 +406,7 @@ public abstract class UniverseDefinitionTaskBase extends UniverseTaskBase {
                   taskParams().nodePrefix,
                   node.nodeIdx,
                   node.cloudInfo.region,
-                  node.cloudInfo.az,
-                  node.dedicatedTo);
+                  node.cloudInfo.az);
           iter++;
         }
         node.isYsqlServer = isYSQL;
@@ -428,8 +421,7 @@ public abstract class UniverseDefinitionTaskBase extends UniverseTaskBase {
   public void updateOnPremNodeUuidsOnTaskParams() {
     for (Cluster cluster : taskParams().clusters) {
       if (cluster.userIntent.providerType == CloudType.onprem) {
-        setOnpremData(
-            taskParams().getNodesInCluster(cluster.uuid), cluster.userIntent.instanceType);
+        updateOnPremNodeUuids(taskParams().getNodesInCluster(cluster.uuid), cluster);
       }
     }
   }
@@ -447,10 +439,19 @@ public abstract class UniverseDefinitionTaskBase extends UniverseTaskBase {
             .filter(c -> c.userIntent.providerType.equals(CloudType.onprem))
             .collect(Collectors.toList());
     for (Cluster onPremCluster : onPremClusters) {
-      setOnpremData(
-          universeDetails.getNodesInCluster(onPremCluster.uuid),
-          onPremCluster.userIntent.instanceType);
+      updateOnPremNodeUuids(universeDetails.getNodesInCluster(onPremCluster.uuid), onPremCluster);
     }
+  }
+
+  private void updateOnPremNodeUuids(Collection<NodeDetails> clusterNodes, Cluster cluster) {
+    Map<String, List<NodeDetails>> groupByType =
+        clusterNodes
+            .stream()
+            .collect(Collectors.groupingBy(n -> cluster.userIntent.getInstanceTypeForNode(n)));
+    groupByType.forEach(
+        (instanceType, nodes) -> {
+          setOnpremData(new HashSet<>(nodes), instanceType);
+        });
   }
 
   public void setCloudNodeUuids(Universe universe) {
@@ -509,12 +510,11 @@ public abstract class UniverseDefinitionTaskBase extends UniverseTaskBase {
           PlacementInfoUtil.selectMasters(
               masterLeader,
               primaryNodes,
-              primaryCluster.userIntent.replicationFactor,
               taskParams().mastersInDefaultRegion
                   ? PlacementInfoUtil.getDefaultRegionCode(taskParams())
                   : null,
               applySelection,
-              primaryCluster.userIntent.dedicatedNodes);
+              primaryCluster.userIntent);
       log.info(
           "Active masters count after balancing = "
               + PlacementInfoUtil.getNumActiveMasters(primaryNodes));
@@ -677,7 +677,7 @@ public abstract class UniverseDefinitionTaskBase extends UniverseTaskBase {
       UserIntent userIntent = taskParams().getClusterByUuid(node.placementUuid).userIntent;
       AnsibleConfigureServers.Params params = new AnsibleConfigureServers.Params();
       // Set the device information (numVolumes, volumeSize, etc.)
-      params.deviceInfo = userIntent.deviceInfo;
+      params.deviceInfo = userIntent.getDeviceInfoForNode(node);
       // Add the node name.
       params.nodeName = node.nodeName;
       // Add the universe uuid.
@@ -783,7 +783,7 @@ public abstract class UniverseDefinitionTaskBase extends UniverseTaskBase {
       // Add the node name.
       params.nodeName = node.nodeName;
       // Add device info.
-      params.deviceInfo = userIntent.deviceInfo;
+      params.deviceInfo = userIntent.getDeviceInfoForNode(node);
       // Set numVolumes if user did not set it
       if (params.deviceInfo.numVolumes == null) {
         params.deviceInfo.numVolumes =
@@ -923,7 +923,7 @@ public abstract class UniverseDefinitionTaskBase extends UniverseTaskBase {
   protected void fillSetupParamsForNode(
       AnsibleSetupServer.Params params, UserIntent userIntent, NodeDetails node) {
     CloudSpecificInfo cloudInfo = node.cloudInfo;
-    params.deviceInfo = userIntent.deviceInfo;
+    params.deviceInfo = userIntent.getDeviceInfoForNode(node);
     // Set the region code.
     params.azUuid = node.azUuid;
     params.placementUuid = node.placementUuid;
@@ -952,7 +952,7 @@ public abstract class UniverseDefinitionTaskBase extends UniverseTaskBase {
   protected void fillCreateParamsForNode(
       AnsibleCreateServer.Params params, UserIntent userIntent, NodeDetails node) {
     CloudSpecificInfo cloudInfo = node.cloudInfo;
-    params.deviceInfo = userIntent.deviceInfo;
+    params.deviceInfo = userIntent.getDeviceInfoForNode(node);
     // Set the region code.
     params.azUuid = node.azUuid;
     params.placementUuid = node.placementUuid;
@@ -1052,7 +1052,7 @@ public abstract class UniverseDefinitionTaskBase extends UniverseTaskBase {
       UserIntent userIntent = taskParams().getClusterByUuid(node.placementUuid).userIntent;
       AnsibleConfigureServers.Params params = new AnsibleConfigureServers.Params();
       // Set the device information (numVolumes, volumeSize, etc.)
-      params.deviceInfo = userIntent.deviceInfo;
+      params.deviceInfo = userIntent.getDeviceInfoForNode(node);
       // Add the node name.
       params.nodeName = node.nodeName;
       // Add the universe uuid.
@@ -1129,7 +1129,7 @@ public abstract class UniverseDefinitionTaskBase extends UniverseTaskBase {
       NodeTaskParams params = new NodeTaskParams();
       UserIntent userIntent = taskParams().getClusterByUuid(node.placementUuid).userIntent;
       // Set the device information (numVolumes, volumeSize, etc.)
-      params.deviceInfo = userIntent.deviceInfo;
+      params.deviceInfo = userIntent.getDeviceInfoForNode(node);
       // Set the region name to the proper provider code so we can use it in the cloud API calls.
       params.azUuid = node.azUuid;
       params.placementUuid = node.placementUuid;
@@ -1157,7 +1157,8 @@ public abstract class UniverseDefinitionTaskBase extends UniverseTaskBase {
       throw new IllegalArgumentException(getName() + ": nodePrefix not set");
     }
     if (opType == UniverseOpType.CREATE
-        && PlacementInfoUtil.getNumMasters(taskParams().nodeDetailsSet) > 0) {
+        && PlacementInfoUtil.getNumMasters(taskParams().nodeDetailsSet) > 0
+        && !taskParams().clusters.get(0).userIntent.dedicatedNodes) {
       throw new IllegalStateException("Should not have any masters before create task is run.");
     }
 
@@ -1189,7 +1190,8 @@ public abstract class UniverseDefinitionTaskBase extends UniverseTaskBase {
         if (cluster.clusterType == ClusterType.ASYNC) {
           // Readonly cluster should not have kubernetes overrides.
           if (StringUtils.isNotBlank(cluster.userIntent.universeOverrides)
-              || StringUtils.isNotBlank(cluster.userIntent.azOverrides)) {
+              || cluster.userIntent.azOverrides != null
+                  && cluster.userIntent.azOverrides.size() != 0) {
             throw new IllegalArgumentException("Readonly cluster can't have overrides defined");
           }
         } else { // During edit universe, overrides can't be changed.
@@ -1197,29 +1199,209 @@ public abstract class UniverseDefinitionTaskBase extends UniverseTaskBase {
             Map<String, String> curUnivOverrides =
                 HelmUtils.flattenMap(
                     HelmUtils.convertYamlToMap(univCluster.userIntent.universeOverrides));
-            Map<String, String> curAZOverrides =
-                HelmUtils.flattenMap(
-                    HelmUtils.convertYamlToMap(univCluster.userIntent.azOverrides));
+            Map<String, String> curAZsOverrides = univCluster.userIntent.azOverrides;
+            Map<String, String> newAZsOverrides = cluster.userIntent.azOverrides;
+            if (curAZsOverrides == null) curAZsOverrides = new HashMap<>();
+            if (newAZsOverrides == null) newAZsOverrides = new HashMap<>();
+            if (curAZsOverrides.size() != newAZsOverrides.size()) {
+              throw new IllegalArgumentException(
+                  "Kubernetes overrides can't be modified during the edit operation.");
+            }
+
+            if (!Sets.difference(curAZsOverrides.keySet(), newAZsOverrides.keySet()).isEmpty()
+                || !Sets.difference(newAZsOverrides.keySet(), curAZsOverrides.keySet()).isEmpty()) {
+              throw new IllegalArgumentException(
+                  "Kubernetes overrides can't be modified during the edit operation.");
+            }
+
             Map<String, String> newUnivOverrides =
                 HelmUtils.flattenMap(
                     HelmUtils.convertYamlToMap(cluster.userIntent.universeOverrides));
-            Map<String, String> newAZOverrides =
-                HelmUtils.flattenMap(HelmUtils.convertYamlToMap(cluster.userIntent.azOverrides));
-            if (!(curUnivOverrides.equals(newUnivOverrides)
-                && curAZOverrides.equals(newAZOverrides))) {
+            if (!curUnivOverrides.equals(newUnivOverrides)) {
               throw new IllegalArgumentException(
-                  "Universe overrides can't be modified during the edit operation.");
+                  "Kubernetes overrides can't be modified during the edit operation.");
+            }
+            for (String az : curAZsOverrides.keySet()) {
+              String curAZOverridesStr = curAZsOverrides.get(az);
+              Map<String, Object> curAZOverrides = HelmUtils.convertYamlToMap(curAZOverridesStr);
+              String newAZOverridesStr = newAZsOverrides.get(az);
+              Map<String, Object> newAZOverrides = HelmUtils.convertYamlToMap(newAZOverridesStr);
+              if (!curAZOverrides.equals(newAZOverrides)) {
+                throw new IllegalArgumentException(
+                    String.format(
+                        "Kubernetes overrides can't be modified during the edit operation. "
+                            + "For AZ %s, previous overrides: %s, new overrides: %s",
+                        az, curAZOverridesStr, newAZOverridesStr));
+              }
             }
           }
         }
       } else {
         // Non k8s universes should not have kubernetes overrides.
         if (StringUtils.isNotBlank(cluster.userIntent.universeOverrides)
-            || StringUtils.isNotBlank(cluster.userIntent.azOverrides)) {
+            || cluster.userIntent.azOverrides != null
+                && cluster.userIntent.azOverrides.size() != 0) {
           throw new IllegalArgumentException(
               "Non kubernetes universe can't have kubernetes overrides defined");
         }
       }
+    }
+  }
+
+  protected AnsibleConfigureServers.Params createCertUpdateParams(
+      UserIntent userIntent,
+      NodeDetails node,
+      NodeManager.CertRotateAction certRotateAction,
+      CertsRotateParams.CertRotationType rootCARotationType,
+      CertsRotateParams.CertRotationType clientRootCARotationType) {
+    AnsibleConfigureServers.Params params =
+        getAnsibleConfigureServerParams(
+            node,
+            ServerType.TSERVER,
+            UpgradeTaskParams.UpgradeTaskType.Certs,
+            UpgradeTaskParams.UpgradeTaskSubType.None);
+    params.enableNodeToNodeEncrypt = userIntent.enableNodeToNodeEncrypt;
+    params.enableClientToNodeEncrypt = userIntent.enableClientToNodeEncrypt;
+    params.rootCA = taskParams().rootCA;
+    params.clientRootCA = taskParams().clientRootCA;
+    params.rootAndClientRootCASame = taskParams().rootAndClientRootCASame;
+    params.rootCARotationType = rootCARotationType;
+    params.clientRootCARotationType = clientRootCARotationType;
+    params.certRotateAction = certRotateAction;
+    return params;
+  }
+
+  protected void createCertUpdateTasks(
+      Collection<NodeDetails> nodes,
+      NodeManager.CertRotateAction certRotateAction,
+      SubTaskGroupType subTaskGroupType,
+      CertsRotateParams.CertRotationType rootCARotationType,
+      CertsRotateParams.CertRotationType clientRootCARotationType) {
+    String subGroupDescription =
+        String.format(
+            "AnsibleConfigureServers (%s) for: %s", subTaskGroupType, taskParams().nodePrefix);
+    SubTaskGroup subTaskGroup = getTaskExecutor().createSubTaskGroup(subGroupDescription, executor);
+    UserIntent userIntent = getUserIntent();
+
+    for (NodeDetails node : nodes) {
+      AnsibleConfigureServers.Params params =
+          createCertUpdateParams(
+              userIntent, node, certRotateAction, rootCARotationType, clientRootCARotationType);
+      AnsibleConfigureServers task = createTask(AnsibleConfigureServers.class);
+      task.initialize(params);
+      task.setUserTaskUUID(userTaskUUID);
+      subTaskGroup.addSubTask(task);
+    }
+    subTaskGroup.setSubTaskGroupType(subTaskGroupType);
+    getRunnableTask().addSubTaskGroup(subTaskGroup);
+  }
+
+  protected void createYbcUpdateCertDirsTask(
+      List<NodeDetails> nodes, SubTaskGroupType subTaskGroupType) {
+    String subGroupDescription =
+        String.format(
+            "AnsibleConfigureServers (%s) for: %s", subTaskGroupType, taskParams().nodePrefix);
+    SubTaskGroup subTaskGroup = getTaskExecutor().createSubTaskGroup(subGroupDescription, executor);
+    UserIntent userIntent = getUserIntent();
+
+    for (NodeDetails node : nodes) {
+      AnsibleConfigureServers.Params params =
+          createUpdateCertDirParams(userIntent, node, ServerType.CONTROLLER);
+      AnsibleConfigureServers task = createTask(AnsibleConfigureServers.class);
+      task.initialize(params);
+      task.setUserTaskUUID(userTaskUUID);
+      subTaskGroup.addSubTask(task);
+    }
+    subTaskGroup.setSubTaskGroupType(subTaskGroupType);
+    getRunnableTask().addSubTaskGroup(subTaskGroup);
+  }
+
+  protected void createUpdateCertDirsTask(
+      Collection<NodeDetails> nodes, ServerType serverType, SubTaskGroupType subTaskGroupType) {
+    String subGroupDescription =
+        String.format(
+            "AnsibleConfigureServers (%s) for: %s", subTaskGroupType, taskParams().nodePrefix);
+    SubTaskGroup subTaskGroup = getTaskExecutor().createSubTaskGroup(subGroupDescription, executor);
+    UserIntent userIntent = getUserIntent();
+
+    for (NodeDetails node : nodes) {
+      AnsibleConfigureServers.Params params =
+          createUpdateCertDirParams(userIntent, node, serverType);
+      AnsibleConfigureServers task = createTask(AnsibleConfigureServers.class);
+      task.initialize(params);
+      task.setUserTaskUUID(userTaskUUID);
+      subTaskGroup.addSubTask(task);
+    }
+    subTaskGroup.setSubTaskGroupType(subTaskGroupType);
+    getRunnableTask().addSubTaskGroup(subTaskGroup);
+  }
+
+  protected AnsibleConfigureServers.Params createUpdateCertDirParams(
+      UserIntent userIntent, NodeDetails node, ServerType serverType) {
+    AnsibleConfigureServers.Params params =
+        getAnsibleConfigureServerParams(
+            node,
+            serverType,
+            UpgradeTaskParams.UpgradeTaskType.Certs,
+            UpgradeTaskParams.UpgradeTaskSubType.None);
+    params.enableNodeToNodeEncrypt = userIntent.enableNodeToNodeEncrypt;
+    params.enableClientToNodeEncrypt = userIntent.enableClientToNodeEncrypt;
+    params.rootAndClientRootCASame = taskParams().rootAndClientRootCASame;
+    params.certRotateAction = NodeManager.CertRotateAction.UPDATE_CERT_DIRS;
+    return params;
+  }
+
+  protected UniverseSetTlsParams.Params createSetTlsParams(SubTaskGroupType subTaskGroupType) {
+    UniverseSetTlsParams.Params params = new UniverseSetTlsParams.Params();
+    params.universeUUID = taskParams().universeUUID;
+    params.enableNodeToNodeEncrypt = getUserIntent().enableNodeToNodeEncrypt;
+    params.enableClientToNodeEncrypt = getUserIntent().enableClientToNodeEncrypt;
+    params.allowInsecure = getUniverse().getUniverseDetails().allowInsecure;
+    params.rootCA = taskParams().rootCA;
+    params.clientRootCA = taskParams().clientRootCA;
+    params.rootAndClientRootCASame = taskParams().rootAndClientRootCASame;
+    return params;
+  }
+
+  protected void createUniverseSetTlsParamsTask(SubTaskGroupType subTaskGroupType) {
+    SubTaskGroup subTaskGroup =
+        getTaskExecutor().createSubTaskGroup("UniverseSetTlsParams", executor);
+    UniverseSetTlsParams.Params params = createSetTlsParams(subTaskGroupType);
+
+    UniverseSetTlsParams task = createTask(UniverseSetTlsParams.class);
+    task.initialize(params);
+    subTaskGroup.addSubTask(task);
+    subTaskGroup.setSubTaskGroupType(subTaskGroupType);
+    getRunnableTask().addSubTaskGroup(subTaskGroup);
+  }
+
+  protected LinkedHashSet<NodeDetails> toOrderedSet(
+      Pair<List<NodeDetails>, List<NodeDetails>> nodes) {
+    LinkedHashSet<NodeDetails> nodeSet = new LinkedHashSet<>();
+    nodeSet.addAll(nodes.getLeft());
+    nodeSet.addAll(nodes.getRight());
+    return nodeSet;
+  }
+
+  protected void createCertUpdateTasks(
+      List<NodeDetails> masters,
+      List<NodeDetails> tservers,
+      SubTaskGroupType subTaskGroupType,
+      CertsRotateParams.CertRotationType rootCARotationType,
+      CertsRotateParams.CertRotationType clientRootCARotationType) {
+    // Copy new server certs to all nodes
+    createCertUpdateTasks(
+        toOrderedSet(Pair.of(masters, tservers)),
+        NodeManager.CertRotateAction.ROTATE_CERTS,
+        subTaskGroupType,
+        rootCARotationType,
+        clientRootCARotationType);
+    // Update gflags of cert directories
+    createUpdateCertDirsTask(masters, ServerType.MASTER, subTaskGroupType);
+    createUpdateCertDirsTask(tservers, ServerType.TSERVER, subTaskGroupType);
+
+    if (taskParams().ybcInstalled) {
+      createYbcUpdateCertDirsTask(tservers, subTaskGroupType);
     }
   }
 
@@ -1483,7 +1665,7 @@ public abstract class UniverseDefinitionTaskBase extends UniverseTaskBase {
         PreflightNodeCheck.Params params = new PreflightNodeCheck.Params();
         UserIntent userIntent = cluster.userIntent;
         params.nodeName = node.nodeName;
-        params.deviceInfo = userIntent.deviceInfo;
+        params.deviceInfo = userIntent.getDeviceInfoForNode(node);
         params.azUuid = node.azUuid;
         params.universeUUID = taskParams().universeUUID;
         UniverseTaskParams.CommunicationPorts.exportToCommunicationPorts(
@@ -1938,7 +2120,7 @@ public abstract class UniverseDefinitionTaskBase extends UniverseTaskBase {
     AnsibleConfigureServers.Params params = new AnsibleConfigureServers.Params();
     Map<String, String> gflags = getPrimaryClusterGFlags(processType, getUniverse());
     // Set the device information (numVolumes, volumeSize, etc.)
-    params.deviceInfo = userIntent.deviceInfo;
+    params.deviceInfo = userIntent.getDeviceInfoForNode(node);
     // Add the node name.
     params.nodeName = node.nodeName;
     // Add the universe uuid.

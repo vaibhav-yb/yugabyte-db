@@ -8,6 +8,7 @@ aliases:
   - /quick-start/
 layout: single
 type: docs
+body_class: yb-page-style
 rightNav:
   hideH4: true
 ---
@@ -276,7 +277,7 @@ To load sample data and explore an example using ysqlsh, refer to [Retail Analyt
 
 ## Build a Java application
 
-The following tutorial shows a small Java application that connects to a YugabyteDB cluster using the topology-aware Yugabyte JDBC driver and performs basic SQL operations.
+The following tutorial shows a small Java application that connects to a YugabyteDB cluster using the topology-aware YugabyteDB JDBC driver and performs basic SQL operations.
 
 For examples using other languages, refer to [Build an application](../develop/build-apps/).
 

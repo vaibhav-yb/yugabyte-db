@@ -34,6 +34,11 @@ TAG_FLAG(stream_truncate_record, runtime);
 
 DECLARE_int64(cdc_intent_retention_ms);
 
+DEFINE_bool(
+    enable_single_record_update, true,
+    "Enable packing updates corresponding to a row in single CDC record");
+TAG_FLAG(enable_single_record_update, runtime);
+
 namespace yb {
 namespace cdc {
 
@@ -143,38 +148,37 @@ void SetCheckpoint(
   }
 }
 
-bool ShouldCreateNewProtoRecord(
-    const RowMessage& row_message, const Schema& schema, size_t col_count) {
-  return (row_message.op() == RowMessage_Op_INSERT && col_count == schema.num_columns()) ||
-         (row_message.op() == RowMessage_Op_UPDATE || row_message.op() == RowMessage_Op_DELETE);
-}
-
 bool IsInsertOperation(const RowMessage& row_message) {
   return row_message.op() == RowMessage_Op_INSERT;
 }
 
 bool IsInsertOrUpdate(const RowMessage& row_message) {
   return row_message.IsInitialized()  &&
-      (row_message.op() == RowMessage_Op_INSERT
-       || row_message.op() == RowMessage_Op_UPDATE);
+         (row_message.op() == RowMessage_Op_INSERT
+          || row_message.op() == RowMessage_Op_UPDATE);
 }
 
 void MakeNewProtoRecord(
     const docdb::IntentKeyValueForCDC& intent, const OpId& op_id, const RowMessage& row_message,
     const Schema& schema, size_t col_count, CDCSDKProtoRecordPB* proto_record,
     GetChangesResponsePB* resp, IntraTxnWriteId* write_id, std::string* reverse_index_key) {
-  if (ShouldCreateNewProtoRecord(row_message, schema, col_count)) {
-    CDCSDKOpIdPB* cdc_sdk_op_id_pb = proto_record->mutable_cdc_sdk_op_id();
-    SetCDCSDKOpId(
-        op_id.term, op_id.index, intent.write_id, intent.reverse_index_key, cdc_sdk_op_id_pb);
+  CDCSDKOpIdPB* cdc_sdk_op_id_pb = proto_record->mutable_cdc_sdk_op_id();
+  SetCDCSDKOpId(
+      op_id.term, op_id.index, intent.write_id, intent.reverse_index_key, cdc_sdk_op_id_pb);
 
-    CDCSDKProtoRecordPB* record_to_be_added = resp->add_cdc_sdk_proto_records();
-    record_to_be_added->CopyFrom(*proto_record);
-    record_to_be_added->mutable_row_message()->CopyFrom(row_message);
+  Slice doc_ht(intent.ht_buf);
 
-    *write_id = intent.write_id;
-    *reverse_index_key = intent.reverse_index_key;
+  CDCSDKProtoRecordPB* record_to_be_added = resp->add_cdc_sdk_proto_records();
+  record_to_be_added->CopyFrom(*proto_record);
+  record_to_be_added->mutable_row_message()->CopyFrom(row_message);
+  auto result = DocHybridTime::DecodeFromEnd(&doc_ht);
+  if (result.ok()) {
+    record_to_be_added->mutable_row_message()->set_commit_time((*result).hybrid_time().value());
+  } else {
+    LOG(WARNING) << "Failed to get commit hybrid time for intent key: " << intent.key_buf.c_str();
   }
+  *write_id = intent.write_id;
+  *reverse_index_key = intent.reverse_index_key;
 }
 
 Result<size_t> PopulatePackedRows(
@@ -214,13 +218,20 @@ Status PopulateCDCSDKIntentRecord(
     IntraTxnWriteId* write_id,
     std::string* reverse_index_key,
     Schema* old_schema) {
+  bool colocated = tablet_peer->tablet()->metadata()->colocated();
   Schema& schema = old_schema ? *old_schema : *tablet_peer->tablet()->schema();
+  SchemaVersion schema_version = tablet_peer->tablet()->metadata()->schema_version();
+  std::string table_name = tablet_peer->tablet()->metadata()->table_name();
   SchemaPackingStorage schema_packing_storage;
-  schema_packing_storage.AddSchema(tablet_peer->tablet()->metadata()->schema_version(), schema);
+  schema_packing_storage.AddSchema(schema_version, schema);
   Slice prev_key;
   CDCSDKProtoRecordPB proto_record;
   RowMessage* row_message = proto_record.mutable_row_message();
   size_t col_count = 0;
+  docdb::IntentKeyValueForCDC prev_intent;
+  MicrosTime prev_intent_phy_time = 0;
+  bool new_cdc_record_needed = false;
+
   for (const auto& intent : intents) {
     Slice key(intent.key_buf);
     const auto key_size =
@@ -257,13 +268,45 @@ Status PopulateCDCSDKIntentRecord(
     // Compare key hash with previously seen key hash to determine whether the write pair
     // is part of the same row or not.
     Slice primary_key(key.data(), key_size);
-    if (prev_key != primary_key || col_count >= schema.num_columns()) {
+    if (GetAtomicFlag(&FLAGS_enable_single_record_update)) {
+      new_cdc_record_needed =
+          (prev_key != primary_key) || (col_count >= schema.num_columns()) ||
+          (value_type == docdb::ValueEntryType::kTombstone && decoded_key.num_subkeys() == 0) ||
+          prev_intent_phy_time != intent.intent_ht.hybrid_time().GetPhysicalValueMicros();
+    } else {
+      new_cdc_record_needed = (prev_key != primary_key) || (col_count >= schema.num_columns());
+    }
+
+    if (new_cdc_record_needed) {
+      if (FLAGS_enable_single_record_update) {
+        if (col_count > 0) col_count = 0;
+
+        if (proto_record.IsInitialized() && row_message->IsInitialized() &&
+            row_message->op() == RowMessage_Op_UPDATE) {
+          MakeNewProtoRecord(
+              prev_intent, op_id, *row_message, schema, col_count, &proto_record, resp, write_id,
+              reverse_index_key);
+        }
+      }
+
       proto_record.Clear();
       row_message->Clear();
+
+      if (colocated) {
+        auto colocation_id = decoded_key.doc_key().colocation_id();
+        schema = *tablet_peer->tablet()->metadata()->schema("", colocation_id);
+        schema_version = tablet_peer->tablet()->metadata()->schema_version("", colocation_id);
+        table_name = tablet_peer->tablet()->metadata()->table_name("", colocation_id);
+        schema_packing_storage = SchemaPackingStorage();
+        schema_packing_storage.AddSchema(schema_version, schema);
+      }
 
       // Check whether operation is WRITE or DELETE.
       if (value_type == docdb::ValueEntryType::kTombstone && decoded_key.num_subkeys() == 0) {
         SetOperation(row_message, OpType::DELETE, schema);
+        if (!FLAGS_enable_single_record_update) {
+          col_count = schema.num_columns();
+        }
       } else if (value_type == docdb::ValueEntryType::kPackedRow) {
         SetOperation(row_message, OpType::INSERT, schema);
         col_count = schema.num_key_columns();
@@ -274,7 +317,10 @@ Status PopulateCDCSDKIntentRecord(
           col_count = schema.num_key_columns() - 1;
         } else {
           SetOperation(row_message, OpType::UPDATE, schema);
-          col_count = schema.num_columns() - 1;
+          if (!FLAGS_enable_single_record_update) {
+            col_count = schema.num_columns();
+          }
+          *write_id = intent.write_id;
         }
       }
 
@@ -285,13 +331,21 @@ Status PopulateCDCSDKIntentRecord(
     }
 
     prev_key = primary_key;
+    prev_intent_phy_time = intent.intent_ht.hybrid_time().GetPhysicalValueMicros();
     if (IsInsertOrUpdate(*row_message)) {
       if (value_type == docdb::ValueEntryType::kPackedRow) {
         col_count += VERIFY_RESULT(PopulatePackedRows(
             schema_packing_storage, schema, tablet_peer, enum_oid_label_map, &value_slice,
             row_message));
       } else {
-        ++col_count;
+        if (FLAGS_enable_single_record_update) {
+          ++col_count;
+        } else {
+          if (IsInsertOperation(*row_message)) {
+            ++col_count;
+          }
+        }
+
         docdb::Value decoded_value;
         RETURN_NOT_OK(decoded_value.Decode(intent.value_buf));
 
@@ -311,9 +365,33 @@ Status PopulateCDCSDKIntentRecord(
         }
       }
     }
-    row_message->set_table(tablet_peer->tablet()->metadata()->table_name());
+    row_message->set_table(table_name);
+    if (FLAGS_enable_single_record_update) {
+      if ((row_message->op() == RowMessage_Op_INSERT && col_count == schema.num_columns()) ||
+          (row_message->op() == RowMessage_Op_DELETE)) {
+        MakeNewProtoRecord(
+            intent, op_id, *row_message, schema, col_count, &proto_record, resp, write_id,
+            reverse_index_key);
+        col_count = schema.num_columns();
+      } else if (row_message->op() == RowMessage_Op_UPDATE) {
+        prev_intent = intent;
+      }
+    } else {
+      if ((row_message->op() == RowMessage_Op_INSERT && col_count == schema.num_columns()) ||
+          (row_message->op() == RowMessage_Op_UPDATE ||
+           row_message->op() == RowMessage_Op_DELETE)) {
+        MakeNewProtoRecord(
+            intent, op_id, *row_message, schema, col_count, &proto_record, resp, write_id,
+            reverse_index_key);
+      }
+    }
+  }
+
+  if (FLAGS_enable_single_record_update && proto_record.IsInitialized() &&
+      row_message->IsInitialized() && row_message->op() == RowMessage_Op_UPDATE) {
+    row_message->set_table(table_name);
     MakeNewProtoRecord(
-        intent, op_id, *row_message, schema, col_count, &proto_record, resp, write_id,
+        prev_intent, op_id, *row_message, schema, col_count, &proto_record, resp, write_id,
         reverse_index_key);
   }
 
@@ -327,18 +405,20 @@ Status PopulateCDCSDKWriteRecord(
     const std::shared_ptr<tablet::TabletPeer>& tablet_peer,
     const EnumOidLabelMap& enum_oid_label_map,
     GetChangesResponsePB* resp,
-    const Schema& schema) {
-  SchemaPackingStorage schema_packing_storage;
-  schema_packing_storage.AddSchema(tablet_peer->tablet()->metadata()->schema_version(), schema);
+    const Schema& current_schema) {
   const auto& batch = msg->write().write_batch();
   CDCSDKProtoRecordPB* proto_record = nullptr;
   RowMessage* row_message = nullptr;
-
+  bool colocated = tablet_peer->tablet()->metadata()->colocated();
   // Write batch may contain records from different rows.
   // For CDC, we need to split the batch into 1 CDC record per row of the table.
   // We'll use DocDB key hash to identify the records that belong to the same row.
   Slice prev_key;
-
+  Schema schema = current_schema;
+  SchemaVersion schema_version = tablet_peer->tablet()->metadata()->schema_version();
+  std::string table_name = tablet_peer->tablet()->metadata()->table_name();
+  SchemaPackingStorage schema_packing_storage;
+  schema_packing_storage.AddSchema(schema_version, schema);
   // TODO: This function and PopulateCDCSDKIntentRecord have a lot of code in common. They should
   // be refactored to use some common row-column iterator.
   for (const auto& write_pair : batch.write_pairs()) {
@@ -355,19 +435,25 @@ Status PopulateCDCSDKWriteRecord(
     // is part of the same row or not.
     Slice primary_key(key.data(), key_size);
     if (prev_key != primary_key) {
+      Slice sub_doc_key = key;
+      docdb::SubDocKey decoded_key;
+      RETURN_NOT_OK(decoded_key.DecodeFrom(&sub_doc_key, docdb::HybridTimeRequired::kFalse));
+      if (colocated) {
+        auto colocation_id = decoded_key.doc_key().colocation_id();
+        schema = *tablet_peer->tablet()->metadata()->schema("", colocation_id);
+        schema_version = tablet_peer->tablet()->metadata()->schema_version("", colocation_id);
+        table_name = tablet_peer->tablet()->metadata()->table_name("", colocation_id);
+        schema_packing_storage = SchemaPackingStorage();
+        schema_packing_storage.AddSchema(schema_version, schema);
+      }
+
       // Write pair contains record for different row. Create a new CDCRecord in this case.
       proto_record = resp->add_cdc_sdk_proto_records();
       row_message = proto_record->mutable_row_message();
       row_message->set_pgschema_name(schema.SchemaName());
-      row_message->set_table(tablet_peer->tablet()->metadata()->table_name());
-
+      row_message->set_table(table_name);
       CDCSDKOpIdPB* cdc_sdk_op_id_pb = proto_record->mutable_cdc_sdk_op_id();
       SetCDCSDKOpId(msg->id().term(), msg->id().index(), 0, "", cdc_sdk_op_id_pb);
-
-      Slice sub_doc_key = key;
-      docdb::SubDocKey decoded_key;
-      RETURN_NOT_OK(decoded_key.DecodeFrom(&sub_doc_key, docdb::HybridTimeRequired::kFalse));
-
       // Check whether operation is WRITE or DELETE.
       if (value_type == docdb::ValueEntryType::kTombstone && decoded_key.num_subkeys() == 0) {
         SetOperation(row_message, OpType::DELETE, schema);
@@ -454,6 +540,7 @@ Status PopulateCDCSDKDDLRecord(
   row_message = proto_record->mutable_row_message();
   row_message->set_op(RowMessage_Op_DDL);
   row_message->set_table(table_name);
+  row_message->set_commit_time(msg->hybrid_time());
 
   CDCSDKOpIdPB* cdc_sdk_op_id_pb = proto_record->mutable_cdc_sdk_op_id();
   SetCDCSDKOpId(msg->id().term(), msg->id().index(), 0, "", cdc_sdk_op_id_pb);
@@ -596,7 +683,7 @@ Status PopulateCDCSDKSnapshotRecord(
     const EnumOidLabelMap& enum_oid_label_map) {
   CDCSDKProtoRecordPB* proto_record = nullptr;
   RowMessage* row_message = nullptr;
-  string table_name = tablet_peer->tablet()->metadata()->table_name();
+  const std::string& table_name = tablet_peer->tablet()->metadata()->table_name();
 
   proto_record = resp->add_cdc_sdk_proto_records();
   row_message = proto_record->mutable_row_message();
@@ -629,20 +716,61 @@ Status PopulateCDCSDKSnapshotRecord(
   return Status::OK();
 }
 
-void FillDDLInfo(RowMessage* row_message, const SchemaPB& schema, const uint32_t schema_version) {
-  for (const auto& column : schema.columns()) {
-    CDCSDKColumnInfoPB* column_info;
-    column_info = row_message->mutable_schema()->add_column_info();
-    SetColumnInfo(column, column_info);
+void FillDDLInfo(
+    const std::shared_ptr<tablet::TabletPeer>& tablet_peer, GetChangesResponsePB* resp) {
+  for (auto const& table_id : tablet_peer->tablet_metadata()->GetAllColocatedTables()) {
+    auto table_name = tablet_peer->tablet()->metadata()->table_name(table_id);
+    auto schema_version = tablet_peer->tablet()->metadata()->schema_version(table_id);
+    Schema schema = *tablet_peer->tablet()->metadata()->schema(table_id).get();
+    SchemaPB schema_pb;
+    SchemaToPB(schema, &schema_pb);
+    CDCSDKProtoRecordPB* proto_record = resp->add_cdc_sdk_proto_records();
+    RowMessage* row_message = proto_record->mutable_row_message();
+    row_message->set_op(RowMessage_Op_DDL);
+    row_message->set_table(table_name);
+    for (const auto& column : schema_pb.columns()) {
+      CDCSDKColumnInfoPB* column_info;
+      column_info = row_message->mutable_schema()->add_column_info();
+      SetColumnInfo(column, column_info);
+    }
+
+    row_message->set_schema_version(schema_version);
+    row_message->set_pgschema_name(schema_pb.pgschema_name());
+    CDCSDKTablePropertiesPB* cdc_sdk_table_properties_pb =
+        row_message->mutable_schema()->mutable_tab_info();
+
+    const TablePropertiesPB* table_properties = &(schema_pb.table_properties());
+    SetTableProperties(table_properties, cdc_sdk_table_properties_pb);
+  }
+}
+
+bool VerifyTabletSplitOnParentTablet(
+    const TableId& table_id, const TabletId& tablet_id,
+    const std::shared_ptr<yb::consensus::ReplicateMsg>& msg, client::YBClient* client) {
+  if (!(msg->has_split_request() && msg->split_request().has_tablet_id() &&
+        msg->split_request().tablet_id() == tablet_id)) {
+    LOG(WARNING) << "The replicate message for split-op does not have the parent tablet_id set to: "
+                 << tablet_id << ". Could not verify tablet-split for tablet: " << tablet_id;
+    return false;
   }
 
-  row_message->set_schema_version(schema_version);
-  row_message->set_pgschema_name(schema.pgschema_name());
-  CDCSDKTablePropertiesPB* cdc_sdk_table_properties_pb =
-      row_message->mutable_schema()->mutable_tab_info();
+  google::protobuf::RepeatedPtrField<master::TabletLocationsPB> tablets;
+  client::YBTableName table_name;
+  table_name.set_table_id(table_id);
+  RETURN_NOT_OK_RET(
+      client->GetTablets(
+          table_name, 0, &tablets, /* partition_list_version =*/nullptr,
+          RequireTabletsRunning::kFalse, master::IncludeInactive::kTrue),
+      false);
 
-  const TablePropertiesPB* table_properties = &(schema.table_properties());
-  SetTableProperties(table_properties, cdc_sdk_table_properties_pb);
+  uint children_tablet_count = 0;
+  for (const auto& tablet : tablets) {
+    if (tablet.has_split_parent_tablet_id() && tablet.split_parent_tablet_id() == tablet_id) {
+      children_tablet_count += 1;
+    }
+  }
+
+  return (children_tablet_count == 2);
 }
 
 bool VerifyTabletSplitOnParentTablet(
@@ -696,8 +824,6 @@ Status GetChangesForCDCSDK(
   OpId op_id{from_op_id.term(), from_op_id.index()};
   VLOG(1) << "The from_op_id from GetChanges is  " << op_id;
   ScopedTrackedConsumption consumption;
-  CDCSDKProtoRecordPB* proto_record = nullptr;
-  RowMessage* row_message = nullptr;
   CDCSDKCheckpointPB checkpoint;
   bool checkpoint_updated = false;
   bool report_tablet_split = false;
@@ -708,7 +834,6 @@ Status GetChangesForCDCSDK(
     auto txn_participant = tablet_peer->tablet()->transaction_participant();
     ReadHybridTime time;
     std::string nextKey;
-    SchemaPB schema_pb;
     // It is first call in snapshot then take snapshot.
     if ((from_op_id.key().empty()) && (from_op_id.snapshot_time() == 0)) {
       if (txn_participant == nullptr || txn_participant->context() == nullptr)
@@ -745,23 +870,15 @@ Status GetChangesForCDCSDK(
       VLOG(1) << "The after snapshot term " << from_op_id.term() << "index  " << from_op_id.index()
               << "key " << from_op_id.key() << "snapshot time " << from_op_id.snapshot_time();
 
-      Schema schema = *tablet_peer->tablet()->schema().get();
+      FillDDLInfo(tablet_peer, resp);
+      Schema schema = *tablet_peer->tablet()->metadata()->schema().get();
+
       int limit = FLAGS_cdc_snapshot_batch_size;
       int fetched = 0;
       std::vector<QLTableRow> rows;
+      QLTableRow row;
       auto iter = VERIFY_RESULT(tablet_peer->tablet()->CreateCDCSnapshotIterator(
           schema.CopyWithoutColumnIds(), time, nextKey));
-
-      QLTableRow row;
-      SchemaToPB(*tablet_peer->tablet()->schema().get(), &schema_pb);
-
-      proto_record = resp->add_cdc_sdk_proto_records();
-      row_message = proto_record->mutable_row_message();
-      row_message->set_op(RowMessage_Op_DDL);
-      row_message->set_table(tablet_peer->tablet()->metadata()->table_name());
-
-      FillDDLInfo(row_message, schema_pb, tablet_peer->tablet()->metadata()->schema_version());
-
       while (VERIFY_RESULT(iter->HasNext()) && fetched < limit) {
         RETURN_NOT_OK(iter->NextRow(&row));
         RETURN_NOT_OK(PopulateCDCSDKSnapshotRecord(
@@ -826,7 +943,7 @@ Status GetChangesForCDCSDK(
 
       auto txn_participant = tablet_peer->tablet()->transaction_participant();
       if (txn_participant) {
-        request_scope = RequestScope(txn_participant);
+        request_scope = VERIFY_RESULT(RequestScope::Create(txn_participant));
       }
 
       Schema current_schema;
@@ -846,19 +963,9 @@ Status GetChangesForCDCSDK(
 
         if (!schema_streamed && !(**cached_schema).initialized()) {
           current_schema.CopyFrom(*tablet_peer->tablet()->schema().get());
-          string table_name = tablet_peer->tablet()->metadata()->table_name();
           schema_streamed = true;
-
-          proto_record = resp->add_cdc_sdk_proto_records();
-          row_message = proto_record->mutable_row_message();
-          row_message->set_op(RowMessage_Op_DDL);
-          row_message->set_table(table_name);
-
           *cached_schema = std::make_shared<Schema>(std::move(current_schema));
-          SchemaPB current_schema_pb;
-          SchemaToPB(**cached_schema, &current_schema_pb);
-          FillDDLInfo(
-              row_message, current_schema_pb, tablet_peer->tablet()->metadata()->schema_version());
+          FillDDLInfo(tablet_peer, resp);
         } else {
           current_schema = **cached_schema;
         }
@@ -909,7 +1016,7 @@ Status GetChangesForCDCSDK(
 
           case consensus::OperationType::CHANGE_METADATA_OP: {
             RETURN_NOT_OK(SchemaFromPB(msg->change_metadata_request().schema(), &current_schema));
-            string table_name = tablet_peer->tablet()->metadata()->table_name();
+            const std::string& table_name = tablet_peer->tablet()->metadata()->table_name();
             *cached_schema = std::make_shared<Schema>(std::move(current_schema));
             if ((resp->cdc_sdk_proto_records_size() > 0 &&
                  resp->cdc_sdk_proto_records(resp->cdc_sdk_proto_records_size() - 1)
@@ -1017,7 +1124,7 @@ Status GetChangesForCDCSDK(
   }
 
   checkpoint_updated ? resp->mutable_cdc_sdk_checkpoint()->CopyFrom(checkpoint)
-                       : resp->mutable_cdc_sdk_checkpoint()->CopyFrom(from_op_id);
+                     : resp->mutable_cdc_sdk_checkpoint()->CopyFrom(from_op_id);
 
   if (last_streamed_op_id->index > 0) {
     last_streamed_op_id->ToPB(resp->mutable_checkpoint()->mutable_op_id());

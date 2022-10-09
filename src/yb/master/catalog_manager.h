@@ -97,6 +97,8 @@ namespace yb {
 
 class Schema;
 class ThreadPool;
+class AddTransactionStatusTabletRequestPB;
+class AddTransactionStatusTabletResponsePB;
 
 template<class T>
 class AtomicGauge;
@@ -139,8 +141,6 @@ typedef std::unordered_map<TablespaceId, boost::optional<ReplicationInfoPB>>
   TablespaceIdToReplicationInfoMap;
 
 typedef std::unordered_map<TableId, boost::optional<TablespaceId>> TableToTablespaceIdMap;
-
-YB_STRONGLY_TYPED_BOOL(HideOnly);
 
 typedef std::unordered_map<TableId, vector<scoped_refptr<TabletInfo>>> TableToTabletInfos;
 
@@ -224,6 +224,11 @@ class CatalogManager : public tserver::TabletPeerLookupIf,
                                                       const string& table_name,
                                                       const TablespaceId* tablespace_id,
                                                       const ReplicationInfoPB* replication_info);
+
+  // Add a tablet to a transaction status table.
+  Status AddTransactionStatusTablet(const AddTransactionStatusTabletRequestPB* req,
+                                    AddTransactionStatusTabletResponsePB* resp,
+                                    rpc::RpcContext* rpc);
 
   // Check if there is a transaction table whose tablespace id matches the given tablespace id.
   bool DoesTransactionTableExistForTablespace(
@@ -317,6 +322,9 @@ class CatalogManager : public tserver::TabletPeerLookupIf,
   Status LaunchBackfillIndexForTable(const LaunchBackfillIndexForTableRequestPB* req,
                                              LaunchBackfillIndexForTableResponsePB* resp,
                                              rpc::RpcContext* rpc);
+
+  // Schedules a table deletion to run as a background task.
+  Status ScheduleDeleteTable(const scoped_refptr<TableInfo>& table);
 
   // Delete the specified table.
   //
@@ -508,6 +516,8 @@ class CatalogManager : public tserver::TabletPeerLookupIf,
       const IsTabletSplittingCompleteRequestPB* req, IsTabletSplittingCompleteResponsePB* resp,
       rpc::RpcContext* rpc);
 
+  bool IsTabletSplittingCompleteInternal(bool wait_for_parent_deletion);
+
   // Delete CDC streams for a table.
   virtual Status DeleteCDCStreamsForTable(const TableId& table_id) EXCLUDES(mutex_);
   virtual Status DeleteCDCStreamsForTables(const vector<TableId>& table_ids)
@@ -546,12 +556,16 @@ class CatalogManager : public tserver::TabletPeerLookupIf,
   Status GetYsqlCatalogVersion(
       uint64_t* catalog_version, uint64_t* last_breaking_version) override;
   Status GetYsqlAllDBCatalogVersions(DbOidToCatalogVersionMap* versions) override;
+  Status GetYsqlDBCatalogVersion(
+      uint32_t db_oid, uint64_t* catalog_version, uint64_t* last_breaking_version) override;
 
   Status InitializeTransactionTablesConfig(int64_t term);
 
   Status IncrementTransactionTablesVersion();
 
   uint64_t GetTransactionTablesVersion() override;
+
+  Status WaitForTransactionTableVersionUpdateToPropagate();
 
   virtual Status FillHeartbeatResponse(const TSHeartbeatRequestPB* req,
                                                TSHeartbeatResponsePB* resp);
@@ -630,13 +644,18 @@ class CatalogManager : public tserver::TabletPeerLookupIf,
   bool IsUserCreatedTable(const TableInfo& table) const override;
   bool IsUserCreatedTableUnlocked(const TableInfo& table) const REQUIRES_SHARED(mutex_);
 
+  // Let the catalog manager know that we have received a response for a prepare delete
+  // transaction tablet request. This will trigger delete tablet requests on all replicas.
+  void NotifyPrepareDeleteTransactionTabletFinished(
+      const scoped_refptr<TabletInfo>& tablet, const std::string& msg, HideOnly hide_only) override;
+
   // Let the catalog manager know that we have received a response for a delete tablet request,
   // and that we either deleted the tablet successfully, or we received a fatal error.
   //
   // Async tasks should call this when they finish. The last such tablet peer notification will
   // trigger trying to transition the table from DELETING to DELETED state.
   void NotifyTabletDeleteFinished(
-      const TabletServerId& tserver_uuid, const TableId& table_id,
+      const TabletServerId& tserver_uuid, const TabletId& tablet_id,
       const TableInfoPtr& table) override;
 
   // For a DeleteTable, we first mark tables as DELETING then move them to DELETED once all
@@ -757,6 +776,8 @@ class CatalogManager : public tserver::TabletPeerLookupIf,
   // API to check if all the live tservers have similar tablet workload.
   Status IsLoadBalanced(const IsLoadBalancedRequestPB* req,
                                 IsLoadBalancedResponsePB* resp) override;
+
+  MonoTime LastLoadBalancerRunTime() const;
 
   Status IsLoadBalancerIdle(const IsLoadBalancerIdleRequestPB* req,
                                     IsLoadBalancerIdleResponsePB* resp);
@@ -938,9 +959,12 @@ class CatalogManager : public tserver::TabletPeerLookupIf,
       const std::string& ts_uuid,
       const TabletDriveStorageMetadataPB& storage_metadata);
 
+  virtual Status ProcessTabletReplicationStatus(
+      const TabletReplicationStatusPB& replication_state) EXCLUDES(mutex_);
+
   void CheckTableDeleted(const TableInfoPtr& table) override;
 
-  bool ShouldSplitValidCandidate(
+  Status ShouldSplitValidCandidate(
       const TabletInfo& tablet_info, const TabletReplicaDriveInfo& drive_info) const override;
 
   Status GetAllAffinitizedZones(vector<AffinitizedZonesSet>* affinitized_zones) override;
@@ -954,10 +978,25 @@ class CatalogManager : public tserver::TabletPeerLookupIf,
   Status CheckIfPitrActive(
     const CheckIfPitrActiveRequestPB* req, CheckIfPitrActiveResponsePB* resp);
 
+  // Get the parent table id for a colocated table. The table parameter must be colocated and
+  // not satisfy IsColocationParentTableId.
+  Result<TableId> GetParentTableIdForColocatedTable(const scoped_refptr<TableInfo>& table);
+
   Result<std::optional<cdc::ConsumerRegistryPB>> GetConsumerRegistry();
   Result<XClusterNamespaceToSafeTimeMap> GetXClusterNamespaceToSafeTimeMap();
   Status SetXClusterNamespaceToSafeTimeMap(
       const int64_t leader_term, XClusterNamespaceToSafeTimeMap safe_time_map);
+
+  Status GetXClusterEstimatedDataLoss(
+      const GetXClusterEstimatedDataLossRequestPB* req,
+      GetXClusterEstimatedDataLossResponsePB* resp);
+
+  Status GetXClusterSafeTime(
+      const GetXClusterSafeTimeRequestPB* req, GetXClusterSafeTimeResponsePB* resp);
+
+  void SubmitToSysCatalog(std::unique_ptr<tablet::Operation> operation);
+
+  Status PromoteAutoFlags(const PromoteAutoFlagsRequestPB* req, PromoteAutoFlagsResponsePB* resp);
 
  protected:
   // TODO Get rid of these friend classes and introduce formal interface.
@@ -1170,6 +1209,7 @@ class CatalogManager : public tserver::TabletPeerLookupIf,
   static void CreateNewReplicaForLocalMemory(TSDescriptor* ts_desc,
                                              const consensus::ConsensusStatePB* consensus_state,
                                              const ReportedTabletPB& report,
+                                             const tablet::RaftGroupStatePB& state,
                                              TabletReplica* new_replica);
 
   // Extract the set of tablets that can be deleted and the set of tablets
@@ -1193,6 +1233,11 @@ class CatalogManager : public tserver::TabletPeerLookupIf,
       const TSDescriptorVector& ts_descs,
       std::set<TabletServerId>* excluded,
       CMPerTableLoadState* per_table_state, CMGlobalLoadState* global_state);
+
+  // Select and assign a tablet server as the protege 'config'. This protege is selected from the
+  // set of tservers in 'global_state' that have the lowest current protege load.
+  Status SelectProtegeForTablet(
+      TabletInfo* tablet, consensus::RaftConfigPB *config, CMGlobalLoadState* global_state);
 
   // Select N Replicas from online tablet servers (as specified by
   // 'ts_descs') for the specified tablet and populate the consensus configuration
@@ -1295,7 +1340,8 @@ class CatalogManager : public tserver::TabletPeerLookupIf,
       rpc::RpcContext* rpc);
 
   // Request tablet servers to delete all replicas of the tablet.
-  void DeleteTabletReplicas(TabletInfo* tablet, const std::string& msg, HideOnly hide_only);
+  void DeleteTabletReplicas(
+      TabletInfo* tablet, const std::string& msg, HideOnly hide_only, KeepData keep_data) override;
 
   // Returns error if and only if it is forbidden to both:
   // 1) Delete single tablet from table.
@@ -1311,7 +1357,13 @@ class CatalogManager : public tserver::TabletPeerLookupIf,
   // Marks each tablet as deleted and triggers requests to the tablet servers to delete them.
   Status DeleteTabletListAndSendRequests(
       const std::vector<scoped_refptr<TabletInfo>>& tablets, const std::string& deletion_msg,
-      const RepeatedBytes& retained_by_snapshot_schedules);
+      const RepeatedBytes& retained_by_snapshot_schedules, bool transaction_status_tablets);
+
+  // Sends a prepare delete transaction tablet request to the leader of the status tablet.
+  // This will be followed by delete tablet requests to each replica.
+  Status SendPrepareDeleteTransactionTabletRequest(
+      const scoped_refptr<TabletInfo>& tablet, const std::string& leader_uuid,
+      const std::string& reason, HideOnly hide_only);
 
   // Send the "delete tablet request" to the specified TS/tablet.
   // The specified 'reason' will be logged on the TS.
@@ -1321,7 +1373,8 @@ class CatalogManager : public tserver::TabletPeerLookupIf,
                                const scoped_refptr<TableInfo>& table,
                                TSDescriptor* ts_desc,
                                const std::string& reason,
-                               bool hide_only = false);
+                               HideOnly hide_only = HideOnly::kFalse,
+                               KeepData keep_data = KeepData::kFalse);
 
   // Start a task to request the specified tablet leader to step down and optionally to remove
   // the server that is over-replicated. A new tablet server can be specified to start an election
@@ -1465,6 +1518,11 @@ class CatalogManager : public tserver::TabletPeerLookupIf,
     return false;
   }
 
+  virtual bool IsCdcSdkEnabled(const TableInfo& table_info) {
+    // Default value.
+    return false;
+  }
+
   virtual bool IsTablePartOfBootstrappingCdcStream(const TableInfo& table_info) const override {
     // Default value.
     return false;
@@ -1600,7 +1658,7 @@ class CatalogManager : public tserver::TabletPeerLookupIf,
   scoped_refptr<SysConfigInfo> transaction_tables_config_ =
       nullptr; // No GUARD, only write on Load.
 
-  Master *master_;
+  Master* const master_;
   Atomic32 closing_;
 
   std::unique_ptr<SysCatalogTable> sys_catalog_;
@@ -1766,7 +1824,7 @@ class CatalogManager : public tserver::TabletPeerLookupIf,
       const TableDescription& table_description,
       CollectFlags flags,
       std::vector<TableDescription>* all_tables,
-      std::unordered_set<NamespaceId>* parent_colocated_table_ids);
+      std::unordered_set<TableId>* parent_colocated_table_ids);
 
   Status SplitTablet(const scoped_refptr<TabletInfo>& tablet, ManualSplit is_manual_split);
 

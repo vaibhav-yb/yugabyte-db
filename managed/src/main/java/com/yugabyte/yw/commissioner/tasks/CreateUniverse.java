@@ -89,24 +89,6 @@ public class CreateUniverse extends UniverseDefinitionTaskBase {
                   // Fetch the task params from the DB to start from fresh on retry.
                   // Otherwise, some operations like name assignment can fail.
                   fetchTaskDetailsFromDB();
-                  boolean dedicatedNodes =
-                      taskParams().getPrimaryCluster().userIntent.dedicatedNodes;
-                  if (dedicatedNodes) {
-                    taskParams()
-                        .nodeDetailsSet
-                        .forEach(
-                            node -> {
-                              if (node.isTserver) {
-                                node.dedicatedTo = ServerType.TSERVER;
-                                if (node.isMaster) {
-                                  node.isMaster = false;
-                                }
-                              }
-                              if (node.isMaster) {
-                                node.dedicatedTo = ServerType.MASTER;
-                              }
-                            });
-                  }
                   // Select master nodes and apply isMaster flags immediately.
                   selectAndApplyMasters();
                   // Set all the in-memory node names.

@@ -347,7 +347,8 @@ decide_whether_to_use_linuxbrew() {
     elif [[ -n ${YB_LINUXBREW_DIR:-} ||
             ( ${YB_COMPILER_TYPE} =~ ^clang[0-9]+$ &&
                $build_type =~ ^(release|prof_(gen|use))$ &&
-              "$( uname -m )" == "x86_64" ) ]]; then
+              "$( uname -m )" == "x86_64" &&
+              ${OSTYPE} =~ ^linux.*$ ) ]]; then
       YB_USE_LINUXBREW=1
     fi
     export YB_USE_LINUXBREW=${YB_USE_LINUXBREW:-0}
@@ -498,10 +499,14 @@ set_default_compiler_type() {
       YB_COMPILER_TYPE=clang
     elif [[ $OSTYPE =~ ^linux ]]; then
       detect_architecture
-      if [[ ${build_type} =~ ^(debug|fastdebug|release|prof_(gen|use))$ &&
-            ${YB_TARGET_ARCH} == "x86_64" ]]; then
-        YB_COMPILER_TYPE=clang13
+      if [[ ${YB_TARGET_ARCH} == "x86_64" ]]; then
+        if [[ ${build_type} =~ ^(debug|fastdebug|release|tsan|prof_(gen|use))$ ]]; then
+          YB_COMPILER_TYPE=clang14
+        else
+          YB_COMPILER_TYPE=clang13
+        fi
       else
+        # https://github.com/yugabyte/yugabyte-db/issues/12603
         YB_COMPILER_TYPE=clang12
       fi
     else
@@ -509,12 +514,6 @@ set_default_compiler_type() {
     fi
     export YB_COMPILER_TYPE
     readonly YB_COMPILER_TYPE
-  else
-    if is_mac; then
-      if [[ $YB_COMPILER_TYPE != "clang" ]]; then
-        fatal "YB_COMPILER_TYPE is $YB_COMPILER_TYPE on macOS, but only 'clang' is supported"
-      fi
-    fi
   fi
 }
 
@@ -1249,7 +1248,8 @@ download_toolchain() {
     toolchain_urls+=( "$linuxbrew_url" )
   fi
   if [[ -z ${YB_LLVM_TOOLCHAIN_URL:-} &&
-        ${YB_COMPILER_TYPE:-} =~ ^clang[0-9]+$ ]] && is_linux; then
+        -z ${YB_LLVM_TOOLCHAIN_DIR:-} &&
+        ${YB_COMPILER_TYPE:-} =~ ^clang[0-9]+$ ]]; then
     YB_LLVM_TOOLCHAIN_URL=$(
       activate_virtualenv &>/dev/null
       python3 -m llvm_installer --print-url "--llvm-major-version=${YB_COMPILER_TYPE#clang}"
@@ -1299,20 +1299,31 @@ download_toolchain() {
 
     if [[ ${is_llvm} == "true" ]]; then
       if [[ -n ${YB_LLVM_TOOLCHAIN_DIR:-} &&
-            $YB_LLVM_TOOLCHAIN_DIR != "$extracted_dir" &&
-            ${YB_LLVM_TOOLCHAIN_DIR_MISMATCH_WARNING_LOGGED:-0} == "0" ]]; then
-        log_thirdparty_and_toolchain_details
-        log "Warning: YB_LLVM_TOOLCHAIN_DIR is already set to '$YB_LLVM_TOOLCHAIN_DIR', cannot " \
-            "set it to '$extracted_dir'. This may happen in case the LLVM toolchain version used " \
-            "to built third-party dependencies is different from the most recent one for the " \
-            "same major version that we have just picked to build YugabyteDB with."
-        export YB_LLVM_TOOLCHAIN_DIR_MISMATCH_WARNING_LOGGED=1
+            ${YB_LLVM_TOOLCHAIN_DIR} != "${extracted_dir}" ]]; then
+        if [[ ${YB_LLVM_TOOLCHAIN_MISMATCH_WARNING_LOGGED:-0} == "0" &&
+              ${YB_SUPPRESS_LLVM_TOOLCHAIN_MISMATCH_WARNING:-0} != "1" ]]; then
+          log_thirdparty_and_toolchain_details
+          log "Warning: YB_LLVM_TOOLCHAIN_DIR is already set to '${YB_LLVM_TOOLCHAIN_DIR}'," \
+              "cannot set it to '${extracted_dir}'. This may happen in case the LLVM toolchain" \
+              "version used to build third-party dependencies is different from the one we are" \
+              "using now to build YugabyteDB, normally determined by the llvm-installer Python" \
+              "module. To fix this permanently, third-party dependencies should be rebuilt using" \
+              "our most recent build of the LLVM toolchain for this major version, but in most" \
+              "cases this is not a problem. To suppress this warning, set the" \
+              "YB_SUPPRESS_LLVM_TOOLCHAIN_MISMATCH_WARNING env var to 1."
+          export YB_LLVM_TOOLCHAIN_MISMATCH_WARNING_LOGGED=1
+        fi
+      else
+        export YB_LLVM_TOOLCHAIN_DIR=$extracted_dir
+        yb_llvm_toolchain_dir_origin="downloaded from $toolchain_url"
+        save_llvm_toolchain_info_to_build_dir
       fi
-      export YB_LLVM_TOOLCHAIN_DIR=$extracted_dir
-      yb_llvm_toolchain_dir_origin="downloaded from $toolchain_url"
-      save_llvm_toolchain_info_to_build_dir
     fi
   done
+
+  if [[ -n ${YB_LLVM_TOOLCHAIN_DIR:-} && ! -e ${BUILD_ROOT}/toolchain ]]; then
+    ln -s "${YB_LLVM_TOOLCHAIN_DIR}" "${BUILD_ROOT}/toolchain"
+  fi
 }
 
 # -------------------------------------------------------------------------------------------------
@@ -2195,13 +2206,15 @@ check_python_script_syntax() {
 
 run_shellcheck() {
   local scripts_to_check=(
-    yb_build.sh
-    build-support/find_linuxbrew.sh
     build-support/common-build-env.sh
-    build-support/common-test-env.sh
     build-support/common-cli-env.sh
-    build-support/run-test.sh
+    build-support/common-test-env.sh
     build-support/compiler-wrappers/compiler-wrapper.sh
+    build-support/find_linuxbrew.sh
+    build-support/jenkins/build-and-test.sh
+    build-support/jenkins/yb-jenkins-build.sh
+    build-support/run-test.sh
+    yb_build.sh
   )
   pushd "$YB_SRC_ROOT"
   local script_path

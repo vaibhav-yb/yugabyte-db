@@ -3345,6 +3345,27 @@ Status CatalogManager::DeleteCDCStreamsMetadataForTables(const vector<TableId>& 
   return MarkCDCStreamsForMetadataCleanup(streams, SysCDCStreamEntryPB::DELETING_METADATA);
 }
 
+Status CatalogManager::AddNewTableToCDCDKStreamsMetadata(
+    const TableId& table_id, const NamespaceId& ns_id) {
+  SharedLock lock(mutex_);
+  for (const auto& entry : cdc_stream_map_) {
+    // We only look for streams on the same namespace as the table.
+    if (entry.second->namespace_id() == ns_id) {
+      // We get the write lock before modifying 'cdcsdk_unprocessed_tables'.
+      auto stream_lock = entry.second->LockForWrite();
+      if (!stream_lock->is_deleting()) {
+        // We only update the in-memory cache of cdc_state with the unprocessed tables. In events of
+        // master restart and leadership change, the catalog manager bg thread will scan all streams
+        // to find all missing tables and repopulate this 'cdcsdk_unprocessed_tables' field, through
+        // the method: FindAllCDCSDKStreamsMissingTables.
+        entry.second->cdcsdk_unprocessed_tables.insert(table_id);
+      }
+    }
+  }
+
+  return Status::OK();
+}
+
 std::vector<scoped_refptr<CDCStreamInfo>> CatalogManager::FindCDCStreamsForTableUnlocked(
     const TableId& table_id, const cdc::CDCRequestSource cdc_request_source) const {
   std::vector<scoped_refptr<CDCStreamInfo>> streams;
@@ -3614,10 +3635,13 @@ Status CatalogManager::CreateCDCStream(const CreateCDCStreamRequestPB* req,
     }
     stream_lock.mutable_data()->pb.add_table_id(req->table_id());
 
+    if (req->has_initial_state()) {
+      stream_lock.mutable_data()->pb.set_state(SysCDCStreamEntryPB::ACTIVE);
+    }
+
     // Also need to persist changes in sys catalog.
     RETURN_NOT_OK(sys_catalog_->Upsert(leader_ready_term(), stream));
     stream_lock.Commit();
-
     TRACE("Updated CDC stream in sys-catalog");
     // Add the stream to the in-memory map.
     {
@@ -3731,6 +3755,195 @@ Status CatalogManager::MarkCDCStreamsForMetadataCleanup(
     lock.Commit();
   }
   return Status::OK();
+}
+
+Status CatalogManager::FindCDCSDKStreamsForAddedTables(
+    TableStreamIdsMap* table_to_unprocessed_streams_map) {
+  TRACE("Acquired catalog manager lock");
+  SharedLock lock(mutex_);
+  for (const auto& [stream_id, stream_info] : cdc_stream_map_) {
+    if (stream_info->namespace_id().empty()) {
+      continue;
+    }
+
+    auto ltm = stream_info->LockForRead();
+    if (ltm->pb.state() == SysCDCStreamEntryPB::ACTIVE) {
+      for (const auto& table_id : stream_info->cdcsdk_unprocessed_tables) {
+        if (std::find(ltm->table_id().begin(), ltm->table_id().end(), table_id) ==
+            ltm->table_id().end()) {
+          (*table_to_unprocessed_streams_map)[table_id].push_back(stream_info);
+        } else {
+          // This means we have already added the table_id to the stream's metadata.
+          RemoveTableFromCDCSDKUnprocessedSet(table_id, stream_info);
+        }
+      }
+    }
+  }
+
+  return Status::OK();
+}
+
+Status CatalogManager::FindAllCDCSDKStreamsMissingTables(
+    TableStreamIdsMap* table_to_unprocessed_streams_map) {
+  // We filter out only relevant streams.
+  std::vector<scoped_refptr<CDCStreamInfo>> cdcsdk_streams;
+  {
+    TRACE("Acquired catalog manager lock");
+    SharedLock lock(mutex_);
+    for (const auto& entry : cdc_stream_map_) {
+      auto ltm = entry.second->LockForRead();
+      if (ltm->namespace_id().empty() || ltm->started_deleting() || ltm->is_deleting_metadata()) {
+        // Filter out xCluster streams or streams in deleting state.
+        continue;
+      }
+      cdcsdk_streams.push_back(entry.second);
+    }
+  }
+
+  // We iterate over each stream, get the namespace_id of the stream, get all the tables from the
+  // namespace and see which of the tables are missing from the stream's metadata. We collect table
+  // details of all such tables which were in the namespace and not in the stream's metadata.
+  for (const auto& stream_info : cdcsdk_streams) {
+    std::unordered_set<TableId> stream_table_ids;
+    {
+      auto ltm = stream_info->LockForRead();
+      for (const auto& table_id : ltm->table_id()) {
+        stream_table_ids.insert(table_id);
+      }
+    }
+
+    ListTablesRequestPB list_req;
+    ListTablesResponsePB list_resp;
+    master::NamespaceIdentifierPB ns_identifier;
+    ns_identifier.set_id(stream_info->namespace_id());
+    list_req.mutable_namespace_()->CopyFrom(ns_identifier);
+    list_req.add_relation_type_filter(master::USER_TABLE_RELATION);
+    RETURN_NOT_OK(ListTables(&list_req, &list_resp));
+
+    for (const auto& table : list_resp.tables()) {
+      if (table.has_id() && !stream_table_ids.contains(table.id())) {
+        (*table_to_unprocessed_streams_map)[table.id()].push_back(stream_info);
+        LOG(INFO) << "Found unprocessed table: " << table.id()
+                  << ", for stream: " << stream_info->id();
+      }
+    }
+  }
+
+  // We update the in-memory copy of 'CDCStreamInfo', stored in cdc_stream_map with all the
+  // unprocessed tables we found.
+  if (!table_to_unprocessed_streams_map->empty()) {
+    for (const auto& [table_id, streams] : *table_to_unprocessed_streams_map) {
+      for (const auto& stream : streams) {
+        // We get the write lock on the stream before modifying 'cdcsdk_unprocessed_tables'.
+        auto stream_lock = stream->LockForWrite();
+        stream->cdcsdk_unprocessed_tables.insert(table_id);
+      }
+    }
+  }
+
+  return Status::OK();
+}
+
+Status CatalogManager::AddTabletEntriesToCDCSDKStreamsForNewTables(
+    const TableStreamIdsMap& table_to_unprocessed_streams_map) {
+  client::TableHandle cdc_table;
+  const client::YBTableName cdc_state_table_name(
+      YQL_DATABASE_CQL, master::kSystemNamespaceName, master::kCdcStateTableName);
+  auto ybclient = master_->cdc_state_client_initializer().client();
+  if (!ybclient) {
+    return STATUS(IllegalState, "Client not initialized or shutting down");
+  }
+  RETURN_NOT_OK(cdc_table.Open(cdc_state_table_name, ybclient));
+  std::shared_ptr<client::YBSession> session = ybclient->NewSession();
+
+  for (const auto& [table_id, streams] : table_to_unprocessed_streams_map) {
+    GetTableLocationsRequestPB req;
+    GetTableLocationsResponsePB resp;
+    req.mutable_table()->set_table_id(table_id);
+    req.set_max_returned_locations(std::numeric_limits<int32_t>::max());
+    req.set_require_tablets_running(true);
+    req.set_include_inactive(false);
+
+    auto s = GetTableLocations(&req, &resp);
+
+    if (!s.ok()) {
+      if (s.IsNotFound()) {
+        // The table has been deleted. We will remove the table's entry from the stream's metadata.
+        RemoveTableFromCDCSDKUnprocessedSet(table_id, streams);
+      } else {
+        LOG(WARNING) << "Encountered error calling: 'GetTableLocations' for table: " << table_id
+                     << "while trying to add tablet details to cdc_state table. Error: " << s;
+      }
+      continue;
+    }
+
+    if (!resp.IsInitialized()) {
+      VLOG(2) << "The table: " << table_id
+              << ", is not initialised yet. Will add entries for tablets to cdc_state table once "
+                 "all tablets are up and running";
+      continue;
+    }
+
+    for (const auto& stream : streams) {
+      if PREDICT_FALSE (stream == nullptr) {
+        LOG(WARNING) << "Could not find CDC stream: " << stream->id();
+        continue;
+      }
+
+      for (const auto& tablet_pb : resp.tablet_locations()) {
+        const auto insert_op = cdc_table.NewWriteOp(QLWriteRequestPB::QL_STMT_INSERT);
+        auto* insert_req = insert_op->mutable_request();
+        auto* const condition = insert_req->mutable_if_expr()->mutable_condition();
+        condition->set_op(QL_OP_NOT_EXISTS);
+        QLAddStringHashValue(insert_req, tablet_pb.tablet_id());
+        QLAddStringRangeValue(insert_req, stream->id());
+        cdc_table.AddStringColumnValue(
+            insert_req, master::kCdcCheckpoint, OpId::Invalid().ToString());
+        session->Apply(insert_op);
+      }
+
+      auto status = session->TEST_Flush();
+      if (!status.ok()) {
+        LOG(WARNING) << "Encoutered error while trying to add tablets of table: " << table_id
+                     << ", to cdc_state table for stream" << stream->id();
+        continue;
+      }
+
+      auto stream_lock = stream->LockForWrite();
+      if (stream_lock->is_deleting()) {
+        continue;
+      }
+      stream_lock.mutable_data()->pb.add_table_id(table_id);
+      // Also need to persist changes in sys catalog.
+      status = sys_catalog_->Upsert(leader_ready_term(), stream);
+      if (!status.ok()) {
+        LOG(WARNING) << "Encountered error while trying to update sys_catalog of stream: "
+                     << stream->id() << ", with table: " << table_id;
+        continue;
+      }
+
+      stream_lock.Commit();
+      stream->cdcsdk_unprocessed_tables.erase(table_id);
+      LOG(INFO) << "Added tablets of table: " << table_id
+                << ", to cdc_state table for stream: " << stream->id();
+    }
+  }
+
+  return Status::OK();
+}
+
+void CatalogManager::RemoveTableFromCDCSDKUnprocessedSet(
+    const TableId& table_id, const std::list<scoped_refptr<CDCStreamInfo>>& streams) {
+  for (const auto& stream : streams) {
+    RemoveTableFromCDCSDKUnprocessedSet(table_id, stream);
+  }
+}
+
+void CatalogManager::RemoveTableFromCDCSDKUnprocessedSet(
+    const TableId& table_id, const scoped_refptr<CDCStreamInfo>& stream) {
+  // We get the write lock on the stream before modifying 'cdcsdk_unprocessed_tables'
+  auto stream_lock = stream->LockForWrite();
+  stream->cdcsdk_unprocessed_tables.erase(table_id);
 }
 
 Status CatalogManager::FindCDCStreamsMarkedAsDeleting(

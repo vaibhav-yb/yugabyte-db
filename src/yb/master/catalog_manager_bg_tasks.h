@@ -78,6 +78,7 @@ class CatalogManagerBgTasks final {
   scoped_refptr<yb::Thread> thread_;
   enterprise::CatalogManager *catalog_manager_;
   bool was_leader_ = false;
+  bool scan_all_cdcsdk_streams_ = true;
 };
 
 }  // namespace master

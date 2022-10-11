@@ -82,6 +82,10 @@ public class CDCSubscriber {
     return syncClient;
   }
 
+  public String getDbStreamId() {
+    return this.dbStreamId;
+  }
+
   /** Only for test purposes. */
   public void setDbStreamId(String dbStreamId) {
     this.dbStreamId = dbStreamId;

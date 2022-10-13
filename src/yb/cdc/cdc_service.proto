@@ -344,6 +344,7 @@ message RowMessage {
     DDL      = 5;
     TRUNCATE = 6;
     READ     = 7;
+    SAFEPOINT= 8;
   }
 
   optional bytes  transaction_id = 1;

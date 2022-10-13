@@ -1155,6 +1155,21 @@ Status PopulateCDCSDKSnapshotRecord(
   return Status::OK();
 }
 
+Status PopulateCDCSDKSafepointOpRecord(
+    const uint64_t timestamp, const string& table_name, CDCSDKProtoRecordPB* proto_record,
+    const Schema& schema) {
+  RowMessage* row_message = nullptr;
+
+  row_message = proto_record->mutable_row_message();
+  row_message->set_op(RowMessage_Op_SAFEPOINT);
+  row_message->set_pgschema_name(schema.SchemaName());
+  row_message->set_commit_time(timestamp);
+  row_message->set_record_time(timestamp);
+  row_message->set_table(table_name);
+
+  return Status::OK();
+}
+
 void FillDDLInfo(
     const std::shared_ptr<tablet::TabletPeer>& tablet_peer, const Schema& current_schema,
     const SchemaVersion current_schema_version, GetChangesResponsePB* resp) {
@@ -1681,6 +1696,22 @@ Status GetChangesForCDCSDK(
         TabletSplit, "Tablet Split on tablet: $0, no more records to stream", tablet_id);
   }
 
+  // Always add a safepoint record
+
+  auto leader_safe_time = tablet_peer->LeaderSafeTime();
+  if (!leader_safe_time.ok()) {
+    YB_LOG_EVERY_N_SECS(WARNING, 10)
+        << "Could not compute safe time: " << leader_safe_time.status();
+    leader_safe_time = HybridTime::kInvalid;
+  }
+
+  RETURN_NOT_OK(PopulateCDCSDKSafepointOpRecord(
+      leader_safe_time->ToUint64(),
+      tablet_peer->tablet()->metadata()->table_name(),
+      resp->add_cdc_sdk_proto_records(),
+      *tablet_peer->tablet()->schema().get()));
+
+  VLOG(2) << "Added Safepoint Record";
   return Status::OK();
 }
 

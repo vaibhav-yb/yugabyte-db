@@ -485,6 +485,7 @@ message TabletCheckpointPair {
 
 message GetTabletListToPollForCDCRequestPB {
   optional TableInfo table_info = 1;
+  optional bytes tablet_id = 2;
 }
 
 message GetTabletListToPollForCDCResponsePB {

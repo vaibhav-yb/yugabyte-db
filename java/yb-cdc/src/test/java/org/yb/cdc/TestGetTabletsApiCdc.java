@@ -103,6 +103,62 @@ public class TestGetTabletsApiCdc extends CDCBaseClass {
     assertEquals(1, respAfterSplit.getTabletCheckpointPairListSize());
   }
 
+  @Test
+  public void apiShouldOnlyReturnChildTablets() throws Exception {
+    setServerFlag(getTserverHostAndPort(), "update_min_cdc_indices_interval_secs", "1");
+    setServerFlag(getTserverHostAndPort(), "cdc_state_checkpoint_update_interval_ms", "1");
+
+    testSubscriber = new CDCSubscriber(getMasterAddresses());
+    testSubscriber.createStream("proto");
+
+    // Insert some records in the table.
+    for (int i = 0; i < 2000; ++i) {
+      statement.execute(String.format("INSERT INTO test VALUES (%d,%d);", i, i+1));
+    }
+
+    // This is the tablet Id that we need to split.
+    String tabletId = testSubscriber.getTabletId();
+
+    // Call the new API to see if we are receiving the correct tabletId.
+    YBClient ybClient = testSubscriber.getSyncClient();
+    assertNotNull(ybClient);
+
+    GetTabletListToPollForCDCResponse respBeforeSplit = ybClient.getTabletListToPollForCdc(
+      ybClient.openTableByUUID(
+        testSubscriber.getTableId()), testSubscriber.getDbStreamId(), testSubscriber.getTableId());
+
+    // Assert that there is only one tablet checkpoint pair.
+    assertEquals(1, respBeforeSplit.getTabletCheckpointPairListSize());
+
+    // Since there is one tablet only, verify its tablet ID.
+    TabletCheckpointPair pair = respBeforeSplit.getTabletCheckpointPairList().get(0);
+    assertEquals(tabletId, pair.getTabletId().toStringUtf8());
+
+    ybClient.flushTable(testSubscriber.getTableId());
+
+    // Wait for the flush table command to succeed.
+    TestUtils.waitFor(60 /* seconds to wait */);
+
+    ybClient.splitTablet(tabletId);
+
+    // Insert more records after scheduling the split tablet task.
+    for (int i = 2000; i < 10000; ++i) {
+      statement.execute(String.format("INSERT INTO test VALUES (%d,%d);", i, i+1));
+    }
+
+    // Wait for tablet split to happen and verify that the tablet split has actually happened.
+    waitForTabletSplit(ybClient, testSubscriber.getTableId(), 2 /* expectedTabletCount */);
+
+    // Call the new API to get the tablets.
+    GetTabletListToPollForCDCResponse respAfterSplit = ybClient.getTabletListToPollForCdc(
+      ybClient.openTableByUUID(
+        testSubscriber.getTableId()), testSubscriber.getDbStreamId(), testSubscriber.getTableId());
+
+    // There would still be a single tablet since we haven't yet called get changes on the parent
+    // tablet yet.
+    assertEquals(1, respAfterSplit.getTabletCheckpointPairListSize());
+  }
+
   private void waitForTabletSplit(YBClient ybClient, String tableId,
                                   int expectedTabletCount) throws Exception {
     Awaitility.await()

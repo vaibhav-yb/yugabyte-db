@@ -1590,8 +1590,22 @@ public class YBClient implements AutoCloseable {
    */
   public GetTabletListToPollForCDCResponse getTabletListToPollForCdc(
     YBTable table, String streamId, String tableId) throws Exception {
+    return getTabletListToPollForCdc(table, streamId, tableId, "");
+  }
+
+  /**
+   * Get the child tablets of the specified parent tablet after a split.
+   * @param table the {@link YBTable} instance of the table
+   * @param streamId the DB stream ID to read from in the cdc_state table
+   * @param tableId the UUID of the table to which the parent tablet belongs
+   * @param tabletId the UUID of the parent tablet to get the children for
+   * @return an RPC response containing the list of child tablets if tabletId is not null
+   * @throws Exception
+   */
+  public GetTabletListToPollForCDCResponse getTabletListToPollForCdc(
+    YBTable table, String streamId, String tableId, String tabletId) throws Exception {
     Deferred<GetTabletListToPollForCDCResponse> d = asyncClient
-      .getTabletListToPollForCdc(table, streamId, tableId);
+      .getTabletListToPollForCdc(table, streamId, tableId, tabletId);
     return d.join(2*getDefaultAdminOperationTimeoutMs());
   }
 

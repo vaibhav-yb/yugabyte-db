@@ -51,14 +51,21 @@ public class CreateCDCStreamRequest extends YRpc<CreateCDCStreamResponse> {
       this.checkpoint_type = CdcService.CDCCheckpointType.IMPLICIT;
     }
 
-    // If record type is empty then it will be set as the default value which is CHANGE.
-    if (!recordType.isEmpty()) {
+    // If record type is null or empty then it will be set as the default value which is CHANGE.
+    // For more information on default values, see yugabyte-db/src/yb/cdc/cdc_service.proto.
+    if (recordType != null && !recordType.isEmpty()) {
       if (recordType.equalsIgnoreCase("ALL")) {
         this.recordType = CdcService.CDCRecordType.ALL;
       } else {
         this.recordType = CdcService.CDCRecordType.CHANGE;
       }
     }
+  }
+
+  public CreateCDCStreamRequest(YBTable masterTable, String tableId,
+                                String namespaceName, String format,
+                                String checkpointType) {
+    this(masterTable, tableId, namespaceName, format, checkpointType, null);                                
   }
 
   @Override

@@ -88,7 +88,7 @@ public class TestBeforeImage extends CDCBaseClass {
 
     statement.execute("insert into test values (1);");
     statement.execute("update test set b = 'updated_val' where a = 1;");
-    statement.execute("update test set b = 'updated_val_2' where a = 1;");
+    statement.execute("update test set b = 'updated_val_again', c = 56.78 where a = 1;");
 
     List<CdcService.CDCSDKProtoRecordPB> outputList = new ArrayList<>();
     testSubscriber.getResponseFromCDC(outputList);
@@ -96,19 +96,38 @@ public class TestBeforeImage extends CDCBaseClass {
     // Expect 4 records: DDL + INSERT + UPDATE + UPDATE.
     assertEquals(4, outputList.size());
 
+    for (int i = 0; i < outputList.size(); ++i) {
+      LOG.info("Record " + i + ": " + outputList.get(i));
+    }
+
     // The first record is a DDL record.
     assertEquals(Op.DDL, outputList.get(0).getRowMessage().getOp());
 
     // The second record (INSERT) will only have new image.
+    assertEquals(Op.INSERT, outputList.get(1).getRowMessage().getOp());
     assertEquals(1, outputList.get(1).getRowMessage().getNewTuple(0).getDatumInt32());
     assertEquals("default_val", outputList.get(1).getRowMessage().getNewTuple(1).getDatumString());
     assertEquals(12.34, outputList.get(1).getRowMessage().getNewTuple(2).getDatumDouble());
 
-    // The third record is an update record, it will have a before image as well.
+    // The third record is an update record, it will have an old image as well as a new image.
+    assertEquals(Op.UPDATE, outputList.get(2).getRowMessage().getOp());
     assertEquals(1, outputList.get(2).getRowMessage().getOldTuple(0).getDatumInt32());
     assertEquals("default_val", outputList.get(2).getRowMessage().getOldTuple(1).getDatumString());
-    assertEquals(12.34, outputList.get(2).getRowMessage().getOldTuple(2).getDatumString());
+    assertEquals(12.34, outputList.get(2).getRowMessage().getOldTuple(2).getDatumDouble());
 
-    
+    assertEquals(1, outputList.get(2).getRowMessage().getNewTuple(0).getDatumInt32());
+    assertEquals("updated_val", outputList.get(2).getRowMessage().getNewTuple(1).getDatumString());
+    assertEquals(12.34, outputList.get(2).getRowMessage().getNewTuple(2).getDatumDouble());
+
+    // The fourth record is an UPDATE record having both old and new images.
+    assertEquals(Op.UPDATE, outputList.get(3).getRowMessage().getOp());
+    assertEquals(1, outputList.get(3).getRowMessage().getOldTuple(0).getDatumInt32());
+    assertEquals("updated_val", outputList.get(3).getRowMessage().getOldTuple(1).getDatumString());
+    assertEquals(12.34, outputList.get(3).getRowMessage().getOldTuple(2).getDatumDouble());
+
+    assertEquals(1, outputList.get(3).getRowMessage().getNewTuple(0).getDatumInt32());
+    assertEquals("updated_val_again",
+                 outputList.get(3).getRowMessage().getNewTuple(1).getDatumString());
+    assertEquals(56.78, outputList.get(3).getRowMessage().getNewTuple(2).getDatumDouble());
   }  
 }

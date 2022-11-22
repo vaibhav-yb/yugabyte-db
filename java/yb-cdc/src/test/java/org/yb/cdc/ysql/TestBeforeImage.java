@@ -96,10 +96,6 @@ public class TestBeforeImage extends CDCBaseClass {
     // Expect 4 records: DDL + INSERT + UPDATE + UPDATE.
     assertEquals(4, outputList.size());
 
-    for (int i = 0; i < outputList.size(); ++i) {
-      LOG.info("Record " + i + ": " + outputList.get(i));
-    }
-
     // The first record is a DDL record.
     assertEquals(Op.DDL, outputList.get(0).getRowMessage().getOp());
 

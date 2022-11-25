@@ -88,11 +88,6 @@ Status GetChangesForCDCSDK(
 
 using UpdateOnSplitOpFunc = std::function<Status(const consensus::ReplicateMsg&)>;
 
-HybridTime GetSafeTimeForTarget(
-    const HybridTime leader_safe_time,
-    HybridTime ht_of_last_returned_message,
-    HaveMoreMessages have_more_messages);
-
 Status GetChangesForXCluster(const std::string& stream_id,
                              const std::string& tablet_id,
                              const OpId& op_id,

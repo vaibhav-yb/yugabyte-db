@@ -228,7 +228,6 @@ class CDCServiceImpl : public CDCServiceIf {
       const OpId& commit_op_id,
       const client::YBSessionPtr& session,
       uint64_t last_record_hybrid_time,
-      uint64_t safe_point,
       const CDCRequestSource& request_source = CDCRequestSource::CDCSDK,
       bool force_update = false,
       const HybridTime& cdc_sdk_safe_time = HybridTime::kInvalid);

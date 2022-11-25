@@ -1460,6 +1460,13 @@ Status GetChangesForCDCSDK(
       bool pending_intents = false;
       bool schema_streamed = false;
 
+      if (read_ops.messages.empty()) {
+        VLOG_WITH_FUNC(1) << "Did not get any messages with current batch of 'read_ops'."
+                          << "last_seen_op_id: " << last_seen_op_id << ", last_readable_opid_index "
+                          << *last_readable_opid_index;
+        break;
+      }
+
       for (const auto& msg : read_ops.messages) {
         last_seen_op_id.term = msg->id().term();
         last_seen_op_id.index = msg->id().index();
@@ -1698,15 +1705,8 @@ Status GetChangesForCDCSDK(
 
   // Always add a safepoint record
 
-  auto leader_safe_time = tablet_peer->LeaderSafeTime();
-  if (!leader_safe_time.ok()) {
-    YB_LOG_EVERY_N_SECS(WARNING, 10)
-        << "Could not compute safe time: " << leader_safe_time.status();
-    leader_safe_time = HybridTime::kInvalid;
-  }
-
   RETURN_NOT_OK(PopulateCDCSDKSafepointOpRecord(
-      leader_safe_time->ToUint64(),
+      safe_time.ToUint64(),
       tablet_peer->tablet()->metadata()->table_name(),
       resp->add_cdc_sdk_proto_records(),
       *tablet_peer->tablet()->schema().get()));

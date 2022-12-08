@@ -64,6 +64,7 @@ import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Iterator;
 import java.util.List;
+import java.util.Map.Entry;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.RejectedExecutionException;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -326,12 +327,14 @@ public class TabletClient extends ReplayingDecoder<Void> {
     LOG.debug("------------------>> ENTERING DECODE >>------------------");
 
     if (buf == null) {
+      LOG.info("VKVK buf is null, returning from decode");
       return;
     }
 
     CallResponse response = new CallResponse(buf);
     if (response.isEmpty()) {
       // Skip empty messages which we are using as heartbeats.
+      LOG.info("VKVK CallResponse response is empty, returning from decode");
       return;
     }
 
@@ -347,6 +350,10 @@ public class TabletClient extends ReplayingDecoder<Void> {
 
     @SuppressWarnings("rawtypes")
     final YRpc rpc = rpcs_inflight.get(rpcid);
+    LOG.info("VKVK rpcs_inflight size " + rpcs_inflight.size());
+    for (Entry<Integer, YRpc<?>> entry : rpcs_inflight.entrySet()) {
+      LOG.info("VKVK key: " + entry.getKey() + " value: " + entry.getValue());
+    }
 
     if (rpc == null) {
       final String msg = getPeerUuidLoggingString() + "Invalid rpcid: " + rpcid + " found in "
@@ -404,6 +411,7 @@ public class TabletClient extends ReplayingDecoder<Void> {
     // This check is specifically for the ERROR_SERVER_TOO_BUSY case above.
     if (retryableHeaderException != null) {
       ybClient.handleRetryableError(rpc, retryableHeaderException, this);
+      LOG.info("VKVK handled retryable error in previous line for exception" + retryableHeaderException);
       return;
     }
 
@@ -417,6 +425,7 @@ public class TabletClient extends ReplayingDecoder<Void> {
         exception = dispatchTSErrorOrReturnException(rpc, error);
         if (exception == null) {
           // It was taken care of.
+          LOG.info("VKVK TSError was taken care of");
           return;
         } else {
           // We're going to errback.
@@ -427,6 +436,7 @@ public class TabletClient extends ReplayingDecoder<Void> {
         exception = dispatchMasterErrorOrReturnException(rpc, error);
         if (exception == null) {
           // Exception was taken care of.
+          LOG.info("VKVK Master error was taken care of");
           return;
         } else {
           decoded = null;
@@ -437,6 +447,7 @@ public class TabletClient extends ReplayingDecoder<Void> {
         exception = dispatchCDCErrorOrReturnException(rpc, error);
         if (exception == null) {
           // It was taken care of.
+          LOG.info("VKVK CDCError was taken care of");
           return;
         } else {
           // We're going to errback.

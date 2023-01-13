@@ -215,7 +215,7 @@ class TabletPeer : public std::enable_shared_from_this<TabletPeer>,
   std::unique_ptr<UpdateTxnOperation> CreateUpdateTransaction(
       std::shared_ptr<LWTransactionStatePB> request) override;
 
-  void SubmitUpdateTransaction(
+  Status SubmitUpdateTransaction(
       std::unique_ptr<UpdateTxnOperation> operation, int64_t term) override;
 
   HybridTime SafeTimeForTransactionParticipant() override;
@@ -316,6 +316,10 @@ class TabletPeer : public std::enable_shared_from_this<TabletPeer>,
   // If details is specified then this function appends explanation of how index was calculated
   // to it.
   Result<int64_t> GetEarliestNeededLogIndex(std::string* details = nullptr) const;
+
+  // Returns the latest log index for non transaction tables and the minimum log index for
+  // transaction tables.
+  Result<OpId> GetCdcBootstrapOpIdByTableType() const;
 
   // Returns the amount of bytes that would be GC'd if RunLogGC() was called.
   //

@@ -47,7 +47,7 @@ var upgradeCmd = &cobra.Command{
 
 		for _, name := range serviceOrder {
 			status := services[name].Status()
-			if status.Status != common.StatusRunning {
+			if !common.IsHappyStatus(status) {
 				log.Fatal(status.Service + " is not running! upgrade failed")
 			}
 		}
@@ -56,24 +56,30 @@ var upgradeCmd = &cobra.Command{
 		// Here is the postgres minor version/no upgrade workflow
 		common.Upgrade(common.GetVersion())
 		for _, name := range serviceOrder {
+			log.Info("About to upgrade component " + name)
 			services[name].Upgrade()
+			log.Info("Completed upgrade of component " + name)
 		}
 
 		for _, name := range serviceOrder {
+			log.Info("About to restart component " + name)
 			services[name].Stop()
 			services[name].Start()
+			log.Info("Completed restart of component " + name)
 		}
 
-		for _, name := range serviceOrder {
-			status := services[name].Status()
-			if status.Status != common.StatusRunning {
+		var statuses []common.Status
+		for _, service := range services {
+			status := service.Status()
+			statuses = append(statuses, status)
+			if !common.IsHappyStatus(status) {
 				log.Fatal(status.Service + " is not running! upgrade failed")
 			}
 		}
+		common.PrintStatus(statuses...)
 		// Here ends the postgres minor version/no upgrade workflow
 
-		common.CreateInstallMarker()
-		common.SetActiveInstallSymlink()
+		common.PostUpgrade()
 
 	},
 }

@@ -65,7 +65,7 @@ import javax.persistence.Id;
 import javax.persistence.Table;
 import javax.persistence.UniqueConstraint;
 import org.apache.commons.collections.CollectionUtils;
-import org.apache.commons.lang.StringUtils;
+import org.apache.commons.lang3.StringUtils;
 import org.apache.commons.lang3.time.DateUtils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -93,7 +93,8 @@ public class Schedule extends Model {
 
   public enum SortBy implements PagedQuery.SortByIF {
     taskType("taskType"),
-    scheduleUUID("scheduleUUID");
+    scheduleUUID("scheduleUUID"),
+    scheduleName("scheduleName");
 
     private final String sortField;
 

@@ -54,6 +54,8 @@ DEFINE_test_flag(
     bool, cdc_snapshot_failure, false,
     "For testing only, When it is set to true, the CDC snapshot operation will fail.");
 
+DECLARE_bool(ysql_enable_packed_row);
+
 namespace yb {
 namespace cdc {
 
@@ -230,7 +232,7 @@ Status PopulateBeforeImage(
   auto result = iter.HasNext();
   if (result.ok() && *result) {
     RETURN_NOT_OK(iter.NextRow(&row));
-  } else if (FLAGS_cdc_before_image_mandatory) {
+  } else if (FLAGS_cdc_before_image_mandatory && !FLAGS_ysql_enable_packed_row) {
     return result.ok()
                ? STATUS_FORMAT(
                      InternalError,
@@ -1215,15 +1217,7 @@ void FillDDLInfo(
 }
 
 bool VerifyTabletSplitOnParentTablet(
-    const TableId& table_id, const TabletId& tablet_id,
-    const consensus::LWReplicateMsg& msg, client::YBClient* client) {
-  if (!(msg.has_split_request() && msg.split_request().has_tablet_id() &&
-        msg.split_request().tablet_id() == tablet_id)) {
-    LOG(WARNING) << "The replicate message for split-op does not have the parent tablet_id set to: "
-                 << tablet_id << ". Could not verify tablet-split for tablet: " << tablet_id;
-    return false;
-  }
-
+    const TableId& table_id, const TabletId& tablet_id, client::YBClient* client) {
   google::protobuf::RepeatedPtrField<master::TabletLocationsPB> tablets;
   client::YBTableName table_name;
   table_name.set_table_id(table_id);
@@ -1265,7 +1259,7 @@ Status GetChangesForCDCSDK(
     int64_t* last_readable_opid_index,
     const CoarseTimePoint deadline) {
   OpId op_id{from_op_id.term(), from_op_id.index()};
-  VLOG(1) << "The from_op_id from GetChanges is  " << op_id;
+  VLOG(1) << "The from_op_id from GetChanges is  " << op_id << " for tablet_id: " << tablet_id;
   ScopedTrackedConsumption consumption;
   CDCSDKCheckpointPB checkpoint;
   bool checkpoint_updated = false;
@@ -1307,6 +1301,8 @@ Status GetChangesForCDCSDK(
         return STATUS_SUBSTITUTE(
             Corruption, "Cannot read data as the transaction participant context is null");
       }
+      LOG(INFO) << "CDC snapshot initialization is started, by setting checkpoint as: "
+                << data.op_id << ", for tablet_id: " << tablet_id << " stream_id: " << stream_id;
       txn_participant->SetIntentRetainOpIdAndTime(
           data.op_id, MonoDelta::FromMilliseconds(GetAtomicFlag(&FLAGS_cdc_intent_retention_ms)));
       RETURN_NOT_OK(txn_participant->context()->GetLastReplicatedData(&data));
@@ -1375,6 +1371,8 @@ Status GetChangesForCDCSDK(
       // Snapshot ends when next key is empty.
       if (sub_doc_key.doc_key().empty()) {
         VLOG(1) << "Setting next sub doc key empty ";
+        LOG(INFO) << "Done with snapshot operation for tablet_id: " << tablet_id
+                  << " stream_id: " << stream_id << ", from_op_id: " << from_op_id.DebugString();
         // Get the checkpoint or read the checkpoint from the table/cache.
         SetCheckpoint(from_op_id.term(), from_op_id.index(), 0, "", 0, &checkpoint, nullptr);
         checkpoint_updated = true;
@@ -1436,6 +1434,8 @@ Status GetChangesForCDCSDK(
   } else {
     RequestScope request_scope;
     OpId last_seen_op_id = op_id;
+    // Last seen OpId of a non-actionable message.
+    OpId last_seen_default_message_op_id = OpId().Invalid();
 
     // It's possible that a batch of messages in read_ops after fetching from
     // 'ReadReplicatedMessagesForCDC' , will not have any actionable messages. In which case we
@@ -1603,7 +1603,7 @@ Status GetChangesForCDCSDK(
             const TableId& table_id = tablet_ptr->metadata()->table_id();
             auto op_id = OpId::FromPB(msg->id());
 
-            if (!(VerifyTabletSplitOnParentTablet(table_id, tablet_id, *msg, client))) {
+            if (!(VerifyTabletSplitOnParentTablet(table_id, tablet_id, client))) {
               // We could verify the tablet split succeeded. This is possible when the child tablets
               // of a split are not running yet.
               LOG(INFO) << "Found SPLIT_OP record with index: " << op_id
@@ -1637,6 +1637,10 @@ Status GetChangesForCDCSDK(
 
           default:
             // Nothing to do for other operation types.
+            last_seen_default_message_op_id = OpId(msg->id().term(), msg->id().index());
+            VLOG_WITH_FUNC(2) << "Found message of Op type: " << msg->op_type()
+                              << ", on tablet: " << tablet_id
+                              << ", with OpId: " << msg->id().ShortDebugString();
             break;
         }
 
@@ -1659,12 +1663,26 @@ Status GetChangesForCDCSDK(
 
       if (!checkpoint_updated && VLOG_IS_ON(1)) {
         VLOG_WITH_FUNC(1)
-            << "The last batch of 'read_ops' had no actionable message. last_see_op_id: "
+            << "The current batch of 'read_ops' had no actionable message. last_see_op_id: "
             << last_seen_op_id << ", last_readable_opid_index: " << *last_readable_opid_index
             << ". Will retry and get another batch";
       }
+
     } while (!checkpoint_updated && last_readable_opid_index &&
              last_seen_op_id.index < *last_readable_opid_index);
+
+    // In case the checkpoint was not updated at-all, we will update the checkpoint using the last
+    // seen non-actionable message.
+    if (!checkpoint_updated && last_seen_default_message_op_id != OpId().Invalid()) {
+      SetCheckpoint(
+          last_seen_default_message_op_id.term, last_seen_default_message_op_id.index, 0, "", 0,
+          &checkpoint, last_streamed_op_id);
+      checkpoint_updated = true;
+      VLOG_WITH_FUNC(2) << "The last batch of 'read_ops' had no actionable message"
+                        << ", on tablet: " << tablet_id
+                        << ". The checkpoint will be updated based on the last message's OpId to: "
+                        << last_seen_default_message_op_id;
+    }
   }
 
   // If the split_op_id is equal to the checkpoint i.e the OpId of the last actionable message, we

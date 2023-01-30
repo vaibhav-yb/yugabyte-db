@@ -14,7 +14,6 @@ type: docs
 ---
 
 <ul class="nav nav-tabs-alt nav-tabs-yb">
-
   <li>
     <a href="../aws/" class="nav-link">
       <i class="fa-brands fa-aws"></i>
@@ -38,7 +37,7 @@ type: docs
 
   <li>
     <a href="../kubernetes/" class="nav-link">
-      <i class="fa-solid fa-cubes" aria-hidden="true"></i>
+      <i class="fa-regular fa-dharmachakra" aria-hidden="true"></i>
       Kubernetes
     </a>
   </li>
@@ -52,7 +51,7 @@ type: docs
 
   <li>
     <a href="../openshift/" class="nav-link">
-      <i class="fa-solid fa-cubes" aria-hidden="true"></i>OpenShift</a>
+      <i class="fa-brands fa-redhat" aria-hidden="true"></i>OpenShift</a>
   </li>
 
   <li>
@@ -384,7 +383,7 @@ On each node, perform the following as a user with sudo access:
     ```
 
     Add the following to the `/etc/systemd/system/node_exporter.service` file:
-    
+
     ```conf
     [Unit]
     Description=node_exporter - Exporter for machine metrics.
@@ -399,7 +398,7 @@ On each node, perform the following as a user with sudo access:
 
     User=prometheus
     Group=prometheus
-    
+
     ExecStart=/opt/prometheus/node_exporter-1.3.1.linux-amd64/node_exporter  --web.listen-address=:9300 --collector.textfile.directory=/tmp/yugabyte/metrics
     ```
 
@@ -507,7 +506,8 @@ As an alternative to setting crontab permissions, you can install systemd-specif
 1. Enable the `yugabyte` user to run the following commands as sudo or root:
 
    ```sh
-   yugabyte ALL=(ALL:ALL) NOPASSWD: /bin/systemctl start yb-master, \
+   yugabyte ALL=(ALL:ALL) NOPASSWD: 
+   /bin/systemctl start yb-master, \
    /bin/systemctl stop yb-master, \
    /bin/systemctl restart yb-master, \
    /bin/systemctl enable yb-master, \
@@ -517,6 +517,11 @@ As an alternative to setting crontab permissions, you can install systemd-specif
    /bin/systemctl restart yb-tserver, \
    /bin/systemctl enable yb-tserver, \
    /bin/systemctl disable yb-tserver, \
+   /bin/systemctl start yb-bind_check.service, \
+   /bin/systemctl stop yb-bind_check.service, \
+   /bin/systemctl restart yb-bind_check.service, \
+   /bin/systemctl enable yb-bind_check.service, \
+   /bin/systemctl disable yb-bind_check.service, \
    /bin/systemctl start yb-zip_purge_yb_logs.timer, \
    /bin/systemctl stop yb-zip_purge_yb_logs.timer, \
    /bin/systemctl restart yb-zip_purge_yb_logs.timer, \
@@ -554,7 +559,7 @@ As an alternative to setting crontab permissions, you can install systemd-specif
 
    `yb-master.service`
 
-   ```sh
+   ```properties
    [Unit]
    Description=Yugabyte master service
    Requires=network-online.target
@@ -593,7 +598,7 @@ As an alternative to setting crontab permissions, you can install systemd-specif
 
    `yb-tserver.service`
 
-   ```sh
+   ```properties
    [Unit]
    Description=Yugabyte tserver service
    Requires=network-online.target
@@ -632,7 +637,7 @@ As an alternative to setting crontab permissions, you can install systemd-specif
 
    `yb-zip_purge_yb_logs.service`
 
-   ```sh
+   ```properties
    [Unit]
    Description=Yugabyte logs
    Wants=yb-zip_purge_yb_logs.timer
@@ -650,7 +655,7 @@ As an alternative to setting crontab permissions, you can install systemd-specif
 
    `yb-zip_purge_yb_logs.timer`
 
-   ```sh
+   ```properties
    [Unit]
    Description=Yugabyte logs
    Requires=yb-zip_purge_yb_logs.service
@@ -668,7 +673,7 @@ As an alternative to setting crontab permissions, you can install systemd-specif
 
    `yb-clean_cores.service`
 
-   ```sh
+   ```properties
    [Unit]
    Description=Yugabyte clean cores
    Wants=yb-clean_cores.timer
@@ -686,7 +691,7 @@ As an alternative to setting crontab permissions, you can install systemd-specif
 
    `yb-clean_cores.timer`
 
-   ```sh
+   ```properties
    [Unit]
    Description=Yugabyte clean cores
    Requires=yb-clean_cores.service
@@ -704,7 +709,7 @@ As an alternative to setting crontab permissions, you can install systemd-specif
 
    `yb-collect_metrics.service`
 
-   ```sh
+   ```properties
    [Unit]
    Description=Yugabyte collect metrics
    Wants=yb-collect_metrics.timer
@@ -722,7 +727,7 @@ As an alternative to setting crontab permissions, you can install systemd-specif
 
    `yb-collect_metrics.timer`
 
-   ```sh
+   ```properties
    [Unit]
    Description=Yugabyte collect metrics
    Requires=yb-collect_metrics.service
@@ -737,13 +742,45 @@ As an alternative to setting crontab permissions, you can install systemd-specif
    [Install]
    WantedBy=timers.target
    ```
+   
+   `yb-bind_check.service`
+   
+   ```properties
+   [Unit]
+   Description=Yugabyte IP bind check
+   Requires=network-online.target
+   After=network.target network-online.target multi-user.target
+   Before=yb-controller.service yb-tserver.service yb-master.service yb-collect_metrics.timer
+   StartLimitInterval=100
+   StartLimitBurst=10
+   
+   [Path]
+   PathExists=/home/yugabyte/controller/bin/yb-controller-server
+   PathExists=/home/yugabyte/controller/conf/server.conf
+   
+   [Service]
+   # Start
+   ExecStart=/home/yugabyte/controller/bin/yb-controller-server \
+       --flagfile /home/yugabyte/controller/conf/server.conf \
+       --only_bind --logtostderr
+   Type=oneshot
+   KillMode=control-group
+   KillSignal=SIGTERM
+   TimeoutStopSec=10
+   # Logs
+   StandardOutput=syslog
+   StandardError=syslog
+   
+   [Install]
+   WantedBy=default.target
+   ```
 
 ### Use node agents
 
 To automate some of the steps outlined in [Provision nodes manually](#provision-nodes-manually), YugabyteDB Anywhere provides a node agent that you can run on each node meeting the following requirements:
 
 - The node has already been set up with the `yugabyte` user group and home.
-- The bi-directional communication between the node and YugabyteDB Anywhere has been established (that is, the IP address can reach the host and vice versa). 
+- The bi-directional communication between the node and YugabyteDB Anywhere has been established (that is, the IP address can reach the host and vice versa).
 
 #### Installation
 
@@ -793,10 +830,10 @@ You can install a node agent as follows:
    You can install a systemd service on linux machines by running node-agent-installer.sh -t install-service (Requires sudo access).
    ```
 
-4. Run the following command to enable the node agent as a systemd service, which is required for self-upgrade and other functions: 
+4. Run the following command to enable the node agent as a systemd service, which is required for self-upgrade and other functions:
 
    ```sh
-   sudo node-agent-installer.sh -t install-service  
+   sudo node-agent-installer.sh -t install-service
    ```
 
 When the installation has been completed, the configurations are saved in the `config.yml` file located in the `node-agent/config/` directory. You should refrain from manually changing values in this file.
@@ -820,13 +857,13 @@ For secured communication, YugabyteDB Anywhere generates a key pair (private, pu
 
 <!--
 
-You can obtain a list of existing node agents using the following API: 
+You can obtain a list of existing node agents using the following API:
 
 ```http
 GET /api/v1/customers/<customer_id>/node_agents
 ```
 
-To unregister a node agent, use the following API: 
+To unregister a node agent, use the following API:
 
 ```http
 DELETE /api/v1/customers/<customer_id>/node_agents/<node_agent_id>
@@ -834,7 +871,7 @@ DELETE /api/v1/customers/<customer_id>/node_agents/<node_agent_id>
 
 -->
 
-To unregister a node agent, use the following command: 
+To unregister a node agent, use the following command:
 
 ```sh
 node-agent node unregister

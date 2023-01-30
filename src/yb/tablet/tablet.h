@@ -618,6 +618,7 @@ class Tablet : public AbstractTablet, public TransactionIntentApplier {
   }
 
   void SetMemTableFlushFilterFactory(std::function<rocksdb::MemTableFilter()> factory) {
+    std::lock_guard<std::mutex> lock(flush_filter_mutex_);
     mem_table_flush_filter_factory_ = std::move(factory);
   }
 
@@ -811,8 +812,7 @@ class Tablet : public AbstractTablet, public TransactionIntentApplier {
       int64_t batch_idx, // index of this batch in its transaction
       const docdb::LWKeyValueWriteBatchPB& put_batch,
       HybridTime hybrid_time,
-      const rocksdb::UserFrontiers* frontiers,
-      bool external_transaction = false);
+      const rocksdb::UserFrontiers* frontiers);
 
   Result<TransactionOperationContext> CreateTransactionOperationContext(
       const boost::optional<TransactionId>& transaction_id,
@@ -1036,7 +1036,9 @@ class Tablet : public AbstractTablet, public TransactionIntentApplier {
 
   HybridTime DeleteMarkerRetentionTime(const std::vector<rocksdb::FileMetaData*>& inputs);
 
-  std::function<rocksdb::MemTableFilter()> mem_table_flush_filter_factory_;
+  mutable std::mutex flush_filter_mutex_;
+  std::function<rocksdb::MemTableFilter()> mem_table_flush_filter_factory_
+      GUARDED_BY(flush_filter_mutex_);
 
   client::LocalTabletFilter local_tablet_filter_;
 

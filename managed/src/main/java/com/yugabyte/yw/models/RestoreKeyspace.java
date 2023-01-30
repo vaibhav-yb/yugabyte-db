@@ -3,24 +3,17 @@
 package com.yugabyte.yw.models;
 
 import static io.swagger.annotations.ApiModelProperty.AccessMode.READ_ONLY;
-import static play.mvc.Http.Status.BAD_REQUEST;
 
-import com.google.common.collect.ImmutableSet;
 import com.google.common.collect.ImmutableMultimap;
+import com.google.common.collect.ImmutableSet;
 import com.google.common.collect.Multimap;
 import com.yugabyte.yw.common.BackupUtil;
-import com.yugabyte.yw.forms.RestoreBackupParams;
 import com.yugabyte.yw.forms.BackupTableParams;
-import com.yugabyte.yw.models.helpers.TaskType;
-import com.yugabyte.yw.models.Backup;
-import com.yugabyte.yw.models.TaskInfo;
-import com.yugabyte.yw.models.Restore;
+import com.yugabyte.yw.forms.RestoreBackupParams;
 import io.ebean.ExpressionList;
 import io.ebean.Finder;
 import io.ebean.Model;
-import io.ebean.Query;
 import io.ebean.annotation.CreatedTimestamp;
-import io.ebean.annotation.DbJson;
 import io.ebean.annotation.EnumValue;
 import io.ebean.annotation.UpdatedTimestamp;
 import io.swagger.annotations.ApiModel;
@@ -28,17 +21,15 @@ import io.swagger.annotations.ApiModelProperty;
 import java.text.SimpleDateFormat;
 import java.util.Date;
 import java.util.List;
-import java.util.UUID;
 import java.util.Optional;
+import java.util.UUID;
 import javax.persistence.Column;
 import javax.persistence.Entity;
-import javax.persistence.Id;
-import io.ebean.annotation.EnumValue;
 import javax.persistence.EnumType;
 import javax.persistence.Enumerated;
+import javax.persistence.Id;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import play.api.Play;
 import play.libs.Json;
 
 @ApiModel(description = "Keyspace level restores")
@@ -56,8 +47,8 @@ public class RestoreKeyspace extends Model {
     @EnumValue("In Progress")
     InProgress(TaskInfo.State.Initializing, TaskInfo.State.Running),
 
-    @EnumValue("Success")
-    Success(TaskInfo.State.Success),
+    @EnumValue("Completed")
+    Completed(TaskInfo.State.Success),
 
     @EnumValue("Failed")
     Failed(TaskInfo.State.Failure, TaskInfo.State.Unknown, TaskInfo.State.Abort),
@@ -143,14 +134,14 @@ public class RestoreKeyspace extends Model {
   private static final Multimap<State, State> ALLOWED_TRANSITIONS =
       ImmutableMultimap.<State, State>builder()
           .put(State.Created, State.InProgress)
-          .put(State.Created, State.Success)
+          .put(State.Created, State.Completed)
           .put(State.Created, State.Failed)
           .put(State.Created, State.Aborted)
-          .put(State.InProgress, State.Success)
+          .put(State.InProgress, State.Completed)
           .put(State.InProgress, State.Failed)
           .put(State.InProgress, State.Aborted)
           .put(State.Aborted, State.InProgress)
-          .put(State.Aborted, State.Success)
+          .put(State.Aborted, State.Completed)
           .put(State.Aborted, State.Failed)
           .put(State.Failed, State.Aborted)
           .build();
@@ -167,15 +158,12 @@ public class RestoreKeyspace extends Model {
     return restoreState;
   }
 
-  public static RestoreKeyspace create(TaskInfo taskInfo) {
+  public static RestoreKeyspace create(UUID taskUUID, RestoreBackupParams taskDetails) {
     RestoreKeyspace restoreKeyspace = new RestoreKeyspace();
-    RestoreBackupParams taskDetails =
-        Json.fromJson(taskInfo.getTaskDetails(), RestoreBackupParams.class);
     restoreKeyspace.uuid = UUID.randomUUID();
 
-    UUID parentRestoreTaskUUID = taskInfo.getParentUUID();
-    restoreKeyspace.restoreUUID = Restore.fetchByTaskUUID(parentRestoreTaskUUID).get(0).restoreUUID;
-    restoreKeyspace.taskUUID = taskInfo.getTaskUUID();
+    restoreKeyspace.restoreUUID = taskDetails.prefixUUID;
+    restoreKeyspace.taskUUID = taskUUID;
 
     RestoreBackupParams.BackupStorageInfo storageInfo = taskDetails.backupStorageInfoList.get(0);
     restoreKeyspace.storageLocation = storageInfo.storageLocation;
@@ -204,8 +192,9 @@ public class RestoreKeyspace extends Model {
   public static void update(Restore restore, TaskInfo.State parentState) {
     List<RestoreKeyspace> restoreKeyspaceList =
         fetchRestoreKeyspaceFromRestoreUUID(restore.restoreUUID);
+    State restoreKeyspaceState = fetchStateFromTaskInfoState(parentState);
     for (RestoreKeyspace restoreKeyspace : restoreKeyspaceList) {
-      restoreKeyspace.update(restoreKeyspace.taskUUID, parentState);
+      restoreKeyspace.update(restoreKeyspace.taskUUID, restoreKeyspaceState);
     }
   }
 
@@ -214,13 +203,11 @@ public class RestoreKeyspace extends Model {
     save();
   }
 
-  public void update(UUID taskUUID, TaskInfo.State state) {
+  public void update(UUID taskUUID, State state) {
     TaskInfo taskInfo = TaskInfo.getOrBadRequest(taskUUID);
     TaskInfo.State taskState = taskInfo.getTaskState();
     State newRestoreKeyspaceState =
-        (state != null)
-            ? fetchStateFromTaskInfoState(state)
-            : fetchStateFromTaskInfoState(taskState);
+        (state != null) ? state : fetchStateFromTaskInfoState(taskState);
     if (getState().equals(newRestoreKeyspaceState)) {
       LOG.debug(
           "Skipping state transition as restore keyspace is already in the {} state", getState());

@@ -446,8 +446,7 @@ std::vector<ColumnSchema> MakeColumnSchemasFromColDesc(
 class YBPgsqlOp : public YBOperation {
  public:
   YBPgsqlOp(
-      const std::shared_ptr<YBTable>& table, std::string* partition_key,
-      rpc::Sidecars* sidecars);
+      const std::shared_ptr<YBTable>& table, rpc::Sidecars* sidecars);
   ~YBPgsqlOp();
 
   const PgsqlResponsePB& response() const { return *response_; }
@@ -474,15 +473,9 @@ class YBPgsqlOp : public YBOperation {
     return sidecars_;
   }
 
-  Status GetPartitionKey(std::string* partition_key) const override {
-    *partition_key = partition_key_;
-    return Status::OK();
-  }
-
  protected:
   std::unique_ptr<PgsqlResponsePB> response_;
   int64_t sidecar_index_ = -1;
-  std::string partition_key_;
   rpc::Sidecars& sidecars_;
 };
 
@@ -521,6 +514,7 @@ class YBPgsqlWriteOp : public YBPgsqlOp {
   static YBPgsqlWriteOpPtr NewInsert(const YBTablePtr& table, rpc::Sidecars* sidecars);
   static YBPgsqlWriteOpPtr NewUpdate(const YBTablePtr& table, rpc::Sidecars* sidecars);
   static YBPgsqlWriteOpPtr NewDelete(const YBTablePtr& table, rpc::Sidecars* sidecars);
+  static YBPgsqlWriteOpPtr NewFetchSequence(const YBTablePtr& table, rpc::Sidecars* sidecars);
 
  protected:
   virtual Type type() const override { return PGSQL_WRITE; }
@@ -611,7 +605,7 @@ class YBNoOp {
 
 Status InitPartitionKey(
     const Schema& schema, const PartitionSchema& partition_schema,
-    const std::string& last_partition, LWPgsqlReadRequestPB* request);
+    const TablePartitionList& partitions, LWPgsqlReadRequestPB* request);
 
 Status InitPartitionKey(
     const Schema& schema, const PartitionSchema& partition_schema, LWPgsqlWriteRequestPB* request);
@@ -627,6 +621,11 @@ Status GetRangePartitionBounds(
     const LWPgsqlReadRequestPB& request,
     std::vector<docdb::KeyEntryValue>* lower_bound,
     std::vector<docdb::KeyEntryValue>* upper_bound);
+
+bool IsTolerantToPartitionsChange(const YBOperation& op);
+
+Result<const PartitionKey&> TEST_FindPartitionKeyByUpperBound(
+    const TablePartitionList& partitions, const PgsqlReadRequestPB& request);
 
 }  // namespace client
 }  // namespace yb

@@ -23,6 +23,7 @@ import com.yugabyte.yw.commissioner.tasks.subtasks.PreflightNodeCheck;
 import com.yugabyte.yw.commissioner.tasks.subtasks.UniverseSetTlsParams;
 import com.yugabyte.yw.commissioner.tasks.subtasks.UpdateUniverseTags;
 import com.yugabyte.yw.commissioner.tasks.subtasks.WaitForMasterLeader;
+import com.yugabyte.yw.common.NodeAgentClient;
 import com.yugabyte.yw.common.NodeManager;
 import com.yugabyte.yw.common.PlacementInfoUtil;
 import com.yugabyte.yw.common.PlacementInfoUtil.SelectMastersResult;
@@ -30,6 +31,7 @@ import com.yugabyte.yw.common.Util;
 import com.yugabyte.yw.common.certmgmt.EncryptionInTransitUtil;
 import com.yugabyte.yw.common.helm.HelmUtils;
 import com.yugabyte.yw.common.password.RedactingService;
+import com.yugabyte.yw.controllers.handlers.NodeAgentHandler;
 import com.yugabyte.yw.forms.CertsRotateParams;
 import com.yugabyte.yw.forms.UniverseDefinitionTaskParams;
 import com.yugabyte.yw.forms.UniverseDefinitionTaskParams.Cluster;
@@ -1819,6 +1821,10 @@ public abstract class UniverseDefinitionTaskBase extends UniverseTaskBase {
             isNextFallThrough,
             NodeStatus.builder().nodeState(NodeState.Provisioned).build(),
             filteredNodes -> {
+              createInstallNodeAgentTasks(filteredNodes)
+                  .setSubTaskGroupType(SubTaskGroupType.Provisioning);
+              createWaitForNodeAgentTasks(nodesToBeCreated)
+                  .setSubTaskGroupType(SubTaskGroupType.Provisioning);
               createSetupServerTasks(
                       filteredNodes, p -> p.ignoreUseCustomImageConfig = ignoreUseCustomImageConfig)
                   .setSubTaskGroupType(SubTaskGroupType.Provisioning);
@@ -1995,7 +2001,8 @@ public abstract class UniverseDefinitionTaskBase extends UniverseTaskBase {
    *
    * @param nodesToBeStarted nodes on which tserver processes are to be started.
    */
-  public void createStartTserverProcessTasks(Set<NodeDetails> nodesToBeStarted) {
+  public void createStartTserverProcessTasks(
+      Set<NodeDetails> nodesToBeStarted, boolean isYSQLEnabled) {
     // No check done for state as the operations are idempotent.
     // Creates the YB cluster by starting the masters in the create mode.
     createStartTServersTasks(nodesToBeStarted)
@@ -2004,6 +2011,11 @@ public abstract class UniverseDefinitionTaskBase extends UniverseTaskBase {
     // Wait for new masters to be responsive.
     createWaitForServersTasks(nodesToBeStarted, ServerType.TSERVER)
         .setSubTaskGroupType(SubTaskGroupType.ConfigureUniverse);
+
+    // [PLAT-5637] Wait for postgres server to be healthy if YSQL is enabled.
+    if (isYSQLEnabled)
+      createWaitForServersTasks(nodesToBeStarted, ServerType.YSQLSERVER)
+          .setSubTaskGroupType(SubTaskGroupType.ConfigureUniverse);
   }
 
   /**

@@ -23,6 +23,7 @@ import com.yugabyte.yw.commissioner.tasks.params.NodeTaskParams;
 import com.yugabyte.yw.common.DnsManager;
 import com.yugabyte.yw.common.NodeActionType;
 import com.yugabyte.yw.common.certmgmt.EncryptionInTransitUtil;
+import com.yugabyte.yw.common.config.UniverseConfKeys;
 import com.yugabyte.yw.forms.UniverseDefinitionTaskParams.Cluster;
 import com.yugabyte.yw.forms.UniverseDefinitionTaskParams.UserIntent;
 import com.yugabyte.yw.models.NodeInstance;
@@ -232,14 +233,18 @@ public class AddNodeToUniverse extends UniverseDefinitionTaskBase {
         // Wait for new tablet servers to be responsive.
         createWaitForServersTasks(nodeSet, ServerType.TSERVER)
             .setSubTaskGroupType(SubTaskGroupType.ConfigureUniverse);
+
+        // [PLAT-5637] Wait for postgres server to be healthy if YSQL is enabled.
+        if (userIntent.enableYSQL)
+          createWaitForServersTasks(nodeSet, ServerType.YSQLSERVER)
+              .setSubTaskGroupType(SubTaskGroupType.ConfigureUniverse);
       }
 
       if (universe.isYbcEnabled()) {
-        createStartYbcTasks(Arrays.asList(currentNode))
-            .setSubTaskGroupType(SubTaskGroupType.StartingNodeProcesses);
+        createStartYbcTasks(nodeSet).setSubTaskGroupType(SubTaskGroupType.StartingNodeProcesses);
 
-        // Wait for yb-controller to be responsive on each node.
-        createWaitForYbcServerTask(null).setSubTaskGroupType(SubTaskGroupType.ConfigureUniverse);
+        // Wait for yb-controller to be responsive on current node.
+        createWaitForYbcServerTask(nodeSet).setSubTaskGroupType(SubTaskGroupType.ConfigureUniverse);
       }
 
       // Update the swamper target file.
@@ -254,7 +259,7 @@ public class AddNodeToUniverse extends UniverseDefinitionTaskBase {
       // Wait for the master leader to hear from all tservers.
       createWaitForTServerHeartBeatsTask().setSubTaskGroupType(SubTaskGroupType.ConfigureUniverse);
 
-      if (runtimeConfigFactory.forUniverse(universe).getBoolean("yb.wait_for_lb_for_added_nodes")) {
+      if (confGetter.getConfForScope(universe, UniverseConfKeys.waitForLbForAddedNodes)) {
         // Wait for load to balance.
         createWaitForLoadBalanceTask().setSubTaskGroupType(SubTaskGroupType.WaitForDataMigration);
       }

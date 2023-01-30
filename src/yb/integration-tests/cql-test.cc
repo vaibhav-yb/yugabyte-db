@@ -11,6 +11,7 @@
 // under the License.
 //
 
+#include "yb/client/client_master_rpc.h"
 #include "yb/client/table_info.h"
 
 #include "yb/consensus/raft_consensus.h"
@@ -19,7 +20,9 @@
 
 #include "yb/integration-tests/cql_test_base.h"
 
+#include "yb/master/catalog_manager.h"
 #include "yb/master/mini_master.h"
+#include "yb/master/master_ddl.proxy.h"
 
 #include "yb/rocksdb/db.h"
 
@@ -55,6 +58,8 @@ DECLARE_int32(client_read_write_timeout_ms);
 DECLARE_bool(disable_truncate_table);
 DECLARE_bool(cql_always_return_metadata_in_execute_response);
 DECLARE_bool(cql_check_table_schema_in_paging_state);
+DECLARE_bool(use_cassandra_authentication);
+DECLARE_bool(ycql_allow_non_authenticated_password_reset);
 
 namespace yb {
 
@@ -179,6 +184,37 @@ TEST_F(CqlTest, TestUpdateListIndexAfterOverwrite) {
   cql("UPDATE test SET v[0] = 8 WHERE h = 1");
   auto res2 = ASSERT_RESULT(select());
   EXPECT_EQ(res2, "[8, 11, 12]");
+}
+
+TEST_F(CqlTest, TestDeleteListIndex) {
+  auto session = ASSERT_RESULT(EstablishSession(driver_.get()));
+  auto cql = [&](const std::string query) { ASSERT_OK(session.ExecuteQuery(query)); };
+  cql("CREATE TABLE test(h INT, v LIST<INT>, PRIMARY KEY(h))");
+  cql("INSERT INTO test (h, v) VALUES (1, [1, 2, 3])");
+
+  cql("UPDATE test SET v = [4, 5, 6, 7, 8, 9, 10] where h = 1");
+  cql("DELETE v[1], v[4] FROM test WHERE h = 1");
+  ASSERT_EQ(ASSERT_RESULT(session.ExecuteAndRenderToString("SELECT * FROM test")),
+      "1,[4, 6, 7, 9, 10]");
+
+  cql("DELETE v[3] FROM test WHERE h = 1");
+  ASSERT_EQ(ASSERT_RESULT(session.ExecuteAndRenderToString("SELECT * FROM test")),
+      "1,[4, 6, 7, 10]");
+}
+
+TEST_F(CqlTest, TestDeleteMapKey) {
+  auto session = ASSERT_RESULT(EstablishSession(driver_.get()));
+  auto cql = [&](const std::string query) { ASSERT_OK(session.ExecuteQuery(query)); };
+  cql("CREATE TABLE test(h INT, m map<int, varchar>, PRIMARY KEY(h))");
+  cql("INSERT INTO test (h, m) VALUES (1,{12:'abcd', 13:'pqrs', 14:'xyzf', 21:'aqpr', 22:'xyab'})");
+
+  cql("DELETE m[13], m[21] FROM test WHERE h = 1");
+  ASSERT_EQ(ASSERT_RESULT(session.ExecuteAndRenderToString("SELECT * FROM test")),
+      "1,{12 => abcd, 14 => xyzf, 22 => xyab}");
+
+  cql("DELETE m[14] FROM test WHERE h = 1");
+  ASSERT_EQ(ASSERT_RESULT(session.ExecuteAndRenderToString("SELECT * FROM test")),
+      "1,{12 => abcd, 22 => xyab}");
 }
 
 TEST_F(CqlTest, Timeout) {
@@ -690,7 +726,7 @@ void CqlTest::TestAlteredPrepareWithPaging(bool check_schema_in_paging,
   LOG(INFO) << "Client-1: Execute-2 prepared (for version 0 - 2 columns)";
   if (check_schema_in_paging) {
     Status s = session.Execute(stmt);
-    LOG(INFO) << "Expcted error: " << s;
+    LOG(INFO) << "Expected error: " << s;
     ASSERT_TRUE(s.IsQLError());
     ASSERT_NE(s.message().ToBuffer().find(
         "Wrong Metadata Version: Table has been altered. Execute the query again. "
@@ -753,7 +789,7 @@ void CqlTest::TestPrepareWithDropTableWithPaging() {
 
   LOG(INFO) << "Client-1: Execute-2 prepared (continue for deleted table)";
   Status s = session.Execute(stmt);
-  LOG(INFO) << "Expcted error: " << s;
+  LOG(INFO) << "Expected error: " << s;
   ASSERT_TRUE(s.IsServiceUnavailable());
   ASSERT_NE(s.message().ToBuffer().find(
       "All hosts in current policy attempted and were either unavailable or failed"),
@@ -762,7 +798,7 @@ void CqlTest::TestPrepareWithDropTableWithPaging() {
   LOG(INFO) << "Client-1: Prepare (for deleted table)";
   auto prepare_res = session.Prepare(select_stmt);
   ASSERT_FALSE(prepare_res.ok());
-  LOG(INFO) << "Expcted error: " << prepare_res.status();
+  LOG(INFO) << "Expected error: " << prepare_res.status();
   ASSERT_TRUE(prepare_res.status().IsQLError());
   ASSERT_NE(prepare_res.status().message().ToBuffer().find(
       "Object Not Found"), std::string::npos) << prepare_res.status();
@@ -770,7 +806,7 @@ void CqlTest::TestPrepareWithDropTableWithPaging() {
   LOG(INFO) << "Client-2: Prepare (for deleted table)";
   prepare_res = session2.Prepare(select_stmt);
   ASSERT_FALSE(prepare_res.ok());
-  LOG(INFO) << "Expcted error: " << prepare_res.status();
+  LOG(INFO) << "Expected error: " << prepare_res.status();
   ASSERT_TRUE(prepare_res.status().IsQLError());
   ASSERT_NE(prepare_res.status().message().ToBuffer().find(
       "Object Not Found"), std::string::npos) << prepare_res.status();
@@ -785,6 +821,267 @@ TEST_F(CqlTest, PrepareWithDropTableWithPaging) {
 TEST_F(CqlTest, PrepareWithDropTableWithPaging_NoSchemaCheck) {
   FLAGS_cql_check_table_schema_in_paging_state = false;
   TestPrepareWithDropTableWithPaging();
+  LOG(INFO) << "Test finished: " << CURRENT_TEST_CASE_AND_TEST_NAME_STR();
+}
+
+TEST_F(CqlTest, PasswordReset) {
+  const string change_pwd = "ALTER ROLE cassandra WITH PASSWORD = 'updated_password'";
+
+  // Password reset disallowed when ycql_allow_non_authenticated_password_reset = false.
+  FLAGS_use_cassandra_authentication = false;
+  {
+    ASSERT_FALSE(FLAGS_ycql_allow_non_authenticated_password_reset);
+    auto session = ASSERT_RESULT(EstablishSession(driver_.get()));
+    Status s = session.ExecuteQuery(change_pwd);
+    ASSERT_NOK(s);
+    ASSERT_NE(s.message().ToBuffer().find("Unauthorized."), std::string::npos) << s;
+  }
+
+  // Password reset allowed when ycql_allow_non_authenticated_password_reset = true.
+  FLAGS_ycql_allow_non_authenticated_password_reset = true;
+  {
+    auto session = ASSERT_RESULT(EstablishSession(driver_.get()));
+    ASSERT_OK(session.ExecuteQuery(change_pwd));
+  }
+
+  // Login works with the updated password and the user is able to create a superuser.
+  FLAGS_ycql_allow_non_authenticated_password_reset = false;
+  FLAGS_use_cassandra_authentication = true;
+  driver_->SetCredentials("cassandra", "updated_password");
+  {
+    auto session = ASSERT_RESULT(EstablishSession(driver_.get()));
+    ASSERT_OK(session.ExecuteQuery("CREATE ROLE superuser_role WITH SUPERUSER = true AND LOGIN = "
+        "true AND PASSWORD = 'superuser_password'"));
+  }
+
+  // The created superuser account login works.
+  driver_->SetCredentials("superuser_role", "superuser_password");
+  ASSERT_RESULT(EstablishSession(driver_.get()));
+}
+
+TEST_F(CqlTest, SelectAggregateFunctions) {
+  auto session = ASSERT_RESULT(EstablishSession(driver_.get()));
+  ASSERT_OK(session.ExecuteQuery("CREATE TABLE tbl (k INT PRIMARY KEY, v INT, c INT) "
+                                 "WITH tablets = 5 AND transactions = { 'enabled' : true }"));
+  ASSERT_OK(session.ExecuteQuery("CREATE INDEX ON tbl (v)"));
+
+  auto cql = [&](int page_size, const string& query, const string& result) {
+      LOG(INFO) << "Page=" << page_size << " Execute query: " << query;
+      CassandraStatement stmt(query);
+      stmt.SetPageSize(page_size);
+      CassandraResult res = ASSERT_RESULT(session.ExecuteWithResult(stmt));
+      LOG(INFO) << "Result=" << res.RenderToString() << " HasMorePages=" << res.HasMorePages();
+      ASSERT_EQ(result, res.RenderToString());
+      // Expecting single-page result - ignoring ycqlsh command like 'Paging 1'.
+      ASSERT_FALSE(res.HasMorePages());
+    };
+
+  for (int i = 1; i <= 20; ++i) {
+    ASSERT_OK(session.ExecuteQuery(
+        Format("INSERT INTO tbl (k, v, c) VALUES ($0, $1, $2)", i, 10*i, 100*i)));
+  }
+
+  for (int page = 1; page <= 2; ++page) {
+    // LIMIT clause must be ignored for the aggregate functions.
+    for (string limit : {"", " LIMIT 1", " LIMIT 2"}) {
+      cql(page, "select count(*) from tbl" + limit, "20");
+      cql(page, "select count(k), min(k), avg(k), max(k), sum(k) from tbl" + limit,
+                "20,1,10,20,210");
+      cql(page, "select count(v), min(v), avg(v), max(v), sum(v) from tbl" + limit,
+                "20,10,105,200,2100");
+      cql(page, "select count(c), min(c), avg(c), max(c), sum(c) from tbl" + limit,
+                "20,100,1050,2000,21000");
+
+      // Test WHERE clause.
+      // Seq scan.
+      cql(page, "select count(k), min(k), avg(k), max(k), sum(k) from tbl where k != 1" + limit,
+                "19,2,11,20,209");
+      cql(page, "select count(v), min(v), avg(v), max(v), sum(v) from tbl where v > 50" + limit,
+                "15,60,130,200,1950");
+      cql(page, "select count(c), min(c), avg(c), max(c), sum(c) from tbl where v > 50" + limit,
+                "15,600,1300,2000,19500");
+      // Index Only scan. (Covering index.)
+      cql(page, "select count(v), min(v), avg(v), max(v), sum(v) from tbl where v = 50" + limit,
+                "1,50,50,50,50");
+      cql(page, "select count(v), min(v), avg(v), max(v), sum(v) from tbl "
+                    "where v in (50,60,70,80,90)" + limit,
+                "5,50,70,90,350");
+      cql(page, "select count(k), min(k), avg(k), max(k), sum(k) from tbl where v = 50" + limit,
+                "1,5,5,5,5");
+      // Index scan. (Non-covering index.)
+      cql(page, "select count(c), min(c), avg(c), max(c), sum(c) from tbl where v = 50" + limit,
+                "1,500,500,500,500");
+      cql(page, "select count(c), min(c), avg(c), max(c), sum(c) from tbl "
+                    "where v in (50,60,70,80,90)" + limit,
+                "5,500,700,900,3500");
+    }
+  }
+
+  ASSERT_OK(session.ExecuteQuery("TRUNCATE TABLE tbl"));
+  // Same value v=1 for all rows to test if all tablets are scanned when a secondary index is used.
+  for (int i = 1; i <= 20; ++i) {
+    ASSERT_OK(session.ExecuteQuery(
+        Format("INSERT INTO tbl (k, v, c) VALUES ($0, 1, $1)", i, 100*i)));
+  }
+
+  for (int page = 1; page <= 2; ++page) {
+    // LIMIT clause must be ignored for the aggregate functions.
+    for (string limit : {"", " LIMIT 1", " LIMIT 2"}) {
+      // Test WHERE clause.
+      // Index Only scan. (Covering index.)
+      cql(page, "select min(k) from tbl where v = 1" + limit, "1");
+      cql(page, "select count(k) from tbl where v = 1" + limit, "20");
+      cql(page, "select count(k), min(k), avg(k), max(k), sum(k) from tbl where v = 1" + limit,
+                "20,1,10,20,210");
+      // Index scan. (Non-covering index.)
+      cql(page, "select min(c) from tbl where v = 1" + limit, "100");
+      cql(page, "select count(c) from tbl where v = 1" + limit, "20");
+      cql(page, "select count(c), min(c), avg(c), max(c), sum(c) from tbl where v = 1" + limit,
+                "20,100,1050,2000,21000");
+    }
+  }
+
+  LOG(INFO) << "Test finished: " << CURRENT_TEST_CASE_AND_TEST_NAME_STR();
+}
+
+TEST_F(CqlTest, CheckStateAfterDrop) {
+  auto session = ASSERT_RESULT(EstablishSession(driver_.get()));
+  auto cql = [&](const string query) { ASSERT_OK(session.ExecuteQuery(query)); };
+
+  cql("create table tbl (h1 int primary key, c1 int, c2 int, c3 int, c4 int, c5 int) "
+      "with transactions = {'enabled' : true}");
+  for (int j = 1; j <= 20; ++j) {
+    cql(Format("insert into tbl (h1, c1, c2, c3, c4, c5) VALUES ($0, $0, $0, $0, $0, $0)", j));
+  }
+
+  const int num_indexes = 5;
+  // Initiate the Index Backfilling.
+  for (int i = 1; i <= num_indexes; ++i) {
+    cql(Format("create index i$0 on tbl (c$0)", i));
+  }
+
+  // Wait here for the creation end.
+  // Note: in JAVA tests we have 'waitForReadPermsOnAllIndexes' for the same.
+  const YBTableName table_name(YQL_DATABASE_CQL, kCqlTestKeyspace, "tbl");
+  for (int i = 1; i <= num_indexes; ++i) {
+    const TableName name = Format("i$0", i);
+    const client::YBTableName index_name(YQL_DATABASE_CQL, kCqlTestKeyspace, name);
+    ASSERT_OK(LoggedWaitFor(
+        [this, table_name, index_name]() {
+          auto result = client_->WaitUntilIndexPermissionsAtLeast(
+              table_name, index_name, IndexPermissions::INDEX_PERM_READ_WRITE_AND_DELETE);
+          return result.ok() && *result == IndexPermissions::INDEX_PERM_READ_WRITE_AND_DELETE;
+        },
+        90s,
+        "wait for create index '" + name + "' to complete",
+        12s));
+  }
+
+  class CheckHelper {
+    master::CatalogManager& catalog_manager;
+   public:
+    explicit CheckHelper(MiniCluster* cluster) : catalog_manager(CHECK_NOTNULL(EXPECT_RESULT(
+        CHECK_NOTNULL(cluster)->GetLeaderMiniMaster()))->catalog_manager_impl()) {}
+
+    Result<bool> IsDeleteDone(const TableId& table_id) {
+      master::IsDeleteTableDoneRequestPB req;
+      master::IsDeleteTableDoneResponsePB resp;
+      req.set_table_id(table_id);
+      const Status s = catalog_manager.IsDeleteTableDone(&req, &resp);
+      LOG(INFO) << "IsDeleteTableDone response for [id=" << table_id << "]: " << resp.DebugString();
+      if (!s.ok()) {
+        return client::internal::StatusFromResp(resp);
+      }
+      return resp.done();
+    }
+
+    // Check State for all listed running & deleted tables.
+    // Return TRUE if all deleted tables are in DELETED state, else return FALSE for waiting.
+    Result<bool> AreTablesDeleted(const std::vector<string>& running,
+                                  const std::vector<string>& deleted,
+                                  bool retry = true) {
+      using master::SysTablesEntryPB;
+
+      master::ListTablesRequestPB req;
+      master::ListTablesResponsePB resp;
+      req.set_include_not_running(true);
+      req.set_exclude_system_tables(true);
+      // Get all user tables.
+      RETURN_NOT_OK(catalog_manager.ListTables(&req, &resp));
+      LOG(INFO) << "ListTables returned " << resp.tables().size() << " tables";
+
+      // Check RUNNNING tables.
+      for (const string& name : running) {
+        for (const auto& table : resp.tables()) {
+          if (table.name() == name) {
+            LOG(INFO) << "Running '" << table.name() << "' [id=" << table.id() << "] state: "
+                      << SysTablesEntryPB_State_Name(table.state());
+            SCHECK(table.state() == SysTablesEntryPB::RUNNING ||
+                   table.state() == SysTablesEntryPB::ALTERING, IllegalState,
+                   Format("Bad running table state: $0",
+                       SysTablesEntryPB_State_Name(table.state())));
+          }
+        }
+      }
+
+      // Check DELETED tables.
+      bool all_deleted = true;
+      for (const string& name : deleted) {
+        for (const auto& table : resp.tables()) {
+          if (table.name() == name) {
+            LOG(INFO) << "Deleted '" << table.name() << "' [id=" << table.id() << "] state: "
+                      << SysTablesEntryPB_State_Name(table.state());
+            SCHECK(table.state() == SysTablesEntryPB::DELETING ||
+                   table.state() == SysTablesEntryPB::DELETED, IllegalState,
+                   Format("Bad deleted table state: $0",
+                       SysTablesEntryPB_State_Name(table.state())));
+            const bool deleted_state = (table.state() == master::SysTablesEntryPB::DELETED);
+            all_deleted = all_deleted && deleted_state;
+
+            const bool done = VERIFY_RESULT(IsDeleteDone(table.id()));
+            if (retry) {
+              if (done != deleted_state) {
+                // Handle race betrween first ListTables() and this IsDeleteTableDone() calls.
+                LOG(INFO) << "Found difference between ListTables & IsDeleteTableDone - retry...";
+                return AreTablesDeleted(running, deleted, false);
+              }
+            } else {
+              SCHECK(done == deleted_state, IllegalState,
+                     Format("Incorrect 'done' value: $0, state is $1",
+                         done, SysTablesEntryPB_State_Name(table.state())));
+            }
+          }
+        }
+      }
+
+      return all_deleted;
+    }
+  } check(cluster_.get());
+
+  const TableId table_id = ASSERT_RESULT(client::GetTableId(client_.get(), table_name));
+
+  // IsDeleteTableDone() for RUNNING table should fail.
+  Result<bool> res_done = check.IsDeleteDone(table_id);
+  ASSERT_NOK(res_done);
+  LOG(INFO) << "Expected error: " << res_done.status();
+  // Error example: MasterErrorPB::OBJECT_NOT_FOUND:
+  //     IllegalState: The object was NOT deleted: Current schema version=17
+  ASSERT_EQ(master::MasterError(res_done.status()), master::MasterErrorPB::OBJECT_NOT_FOUND);
+  ASSERT_TRUE(res_done.status().IsIllegalState());
+  ASSERT_STR_CONTAINS(res_done.status().message().ToBuffer(), "The object was NOT deleted");
+
+  ASSERT_TRUE(ASSERT_RESULT(check.AreTablesDeleted({"tbl", "i1", "i2"}, {})));
+
+  cql("drop index i1");
+  ASSERT_OK(Wait([&check]() -> Result<bool> {
+    return check.AreTablesDeleted({"tbl", "i2"}, {"i1"});
+  }, CoarseMonoClock::now() + 30s, "Deleted index cleanup"));
+
+  cql("drop table tbl");
+  ASSERT_OK(Wait([&check]() -> Result<bool> {
+    return check.AreTablesDeleted({}, {"tbl", "i1", "i2"});
+  }, CoarseMonoClock::now() + 30s, "Deleted table cleanup"));
+
   LOG(INFO) << "Test finished: " << CURRENT_TEST_CASE_AND_TEST_NAME_STR();
 }
 

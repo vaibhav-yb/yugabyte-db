@@ -265,6 +265,27 @@ public class XClusterConfig extends Model {
     return getTableIdsWithReplicationSetup(true /* done */);
   }
 
+  @JsonIgnore
+  public Set<String> getTableIds(boolean includeMainTables, boolean includeIndexTables) {
+    if (!includeMainTables && !includeIndexTables) {
+      throw new IllegalArgumentException(
+          "Both includeMainTables and includeIndexTables cannot be false");
+    }
+    if (includeMainTables && includeIndexTables) {
+      return this.getTables();
+    }
+    return this.tables
+        .stream()
+        .filter(table -> table.indexTable == includeIndexTables)
+        .map(table -> table.tableId)
+        .collect(Collectors.toSet());
+  }
+
+  @JsonIgnore
+  public Set<String> getTableIdsExcludeIndexTables() {
+    return getTableIds(true /* includeMainTables */, false /* includeIndexTables */);
+  }
+
   public void setTables(Set<String> tableIds) {
     setTables(tableIds, null /* tableIdsNeedBootstrap */);
   }
@@ -434,12 +455,26 @@ public class XClusterConfig extends Model {
   }
 
   @Transactional
-  public void setRestoreTimeForTables(Set<String> tableIds, Date restoreTime) {
+  public void setRestoreForTables(Set<String> tableIds, Restore restore) {
     ensureTableIdsExist(tableIds);
     this.tables
         .stream()
         .filter(tableConfig -> tableIds.contains(tableConfig.tableId))
-        .forEach(tableConfig -> tableConfig.restoreTime = restoreTime);
+        .forEach(tableConfig -> tableConfig.restore = restore);
+    update();
+  }
+
+  @Transactional
+  public void setRestoreTimeForTables(Set<String> tableIds, Date restoreTime, UUID taskUUID) {
+    ensureTableIdsExist(tableIds);
+    this.tables
+        .stream()
+        .filter(tableConfig -> tableIds.contains(tableConfig.tableId))
+        .forEach(
+            tableConfig -> {
+              tableConfig.restoreTime = restoreTime;
+              tableConfig.restore.update(taskUUID, Restore.State.Completed);
+            });
     update();
   }
 

@@ -16,6 +16,24 @@ On this page:
 
 ## Releases
 
+### January 27, 2023
+
+**New Features**
+
+- [YugabyteDB Managed Terraform Provider](https://registry.terraform.io/providers/yugabyte/ybm/latest) generally available. Use the provider to deploy and manage your database clusters in YugabyteDB Managed.
+
+### January 18, 2023
+
+**Database**
+
+- [Stable release](../../faq/yugabytedb-managed-faq/#what-version-of-yugabytedb-does-my-cluster-run-on) updated to [version 2.16.0](../../releases/release-notes/v2.16/#v2.16.0.1) for dedicated clusters. New clusters use the new version by default. Existing clusters will be upgraded in the coming weeks.
+
+### January 13, 2023
+
+**Database**
+
+- [Stable release](../../faq/yugabytedb-managed-faq/#what-version-of-yugabytedb-does-my-cluster-run-on) updated to [version 2.14.6](../../releases/release-notes/v2.14/#v2.14.6.0) for dedicated clusters. New clusters use the new version by default. Existing clusters will be upgraded in the coming weeks.
+
 ### December 21, 2022
 
 **New Features**
@@ -26,6 +44,12 @@ On this page:
 **Database**
 
 - [Stable release](../../faq/yugabytedb-managed-faq/#what-version-of-yugabytedb-does-my-cluster-run-on) updated to version 2.14.5 for dedicated clusters. New clusters use the new version by default. Existing clusters will be upgraded in the coming weeks.
+
+### December 12, 2022
+
+**New Features**
+
+- [YugabyteDB Managed REST API](https://yugabyte.stoplight.io/docs/managed-apis) generally available. Use the REST API to deploy and manage your database clusters in YugabyteDB Managed programmatically.
 
 ### November 28, 2022
 
@@ -321,8 +345,6 @@ The following **AWS regions** are available:
 - **Metrics** - Some clusters in European regions may show occasional spikes in the YSQL Operations/sec chart. This is due to cluster health checks and can be ignored.
 - **Widely-dispersed regions** - For multi-region clusters with widely-dispersed regions, Performance Advisor, Slow Queries, and some metrics may not return any results.
 - **Read replicas**
-  - The replication factor for a read replica region can't be changed after creation.
-  - The sum of the replication factor for all read replicas of a cluster can't be greater than 7.
   - Read replicas currently need to use the same instance type as the Primary cluster.
   - For clusters in AWS, removed read replicas can't be added back to the same region if the cluster has other read replicas. To add a read replica back to the same region, first remove all the read replicas and then add them all back.
 

@@ -2,46 +2,32 @@
 
 package com.yugabyte.yw.models;
 
-import com.yugabyte.yw.common.BackupUtil;
 import static com.yugabyte.yw.models.helpers.CommonUtils.appendInClause;
 import static com.yugabyte.yw.models.helpers.CommonUtils.appendLikeClause;
 import static com.yugabyte.yw.models.helpers.CommonUtils.performPagedQuery;
 import static io.swagger.annotations.ApiModelProperty.AccessMode.READ_ONLY;
 
-import com.google.common.collect.ImmutableSet;
 import com.google.common.collect.ImmutableMultimap;
+import com.google.common.collect.ImmutableSet;
 import com.google.common.collect.Multimap;
-import com.yugabyte.yw.forms.UniverseDefinitionTaskParams;
-import com.yugabyte.yw.forms.UniverseDefinitionTaskParams.UserIntent;
-import com.yugabyte.yw.forms.RestoreBackupParams.BackupStorageInfo;
+import com.yugabyte.yw.common.BackupUtil;
 import com.yugabyte.yw.forms.RestoreBackupParams;
-import com.yugabyte.yw.models.helpers.TaskType;
-import com.yugabyte.yw.models.RestoreResp;
+import com.yugabyte.yw.forms.UniverseDefinitionTaskParams;
 import com.yugabyte.yw.models.RestoreResp.RestoreRespBuilder;
+import com.yugabyte.yw.models.filters.RestoreFilter;
+import com.yugabyte.yw.models.helpers.TaskType;
 import com.yugabyte.yw.models.paging.PagedQuery;
 import com.yugabyte.yw.models.paging.PagedQuery.SortByIF;
 import com.yugabyte.yw.models.paging.PagedQuery.SortDirection;
-import com.yugabyte.yw.forms.filters.RestoreApiFilter;
-import com.yugabyte.yw.forms.paging.RestorePagedApiQuery;
-import com.yugabyte.yw.models.paging.RestorePagedQuery;
-import com.yugabyte.yw.models.filters.RestoreFilter;
-import com.yugabyte.yw.models.paging.RestorePagedResponse;
 import com.yugabyte.yw.models.paging.RestorePagedApiResponse;
-import java.util.Optional;
-import java.util.regex.Matcher;
-import java.util.regex.Pattern;
-import com.yugabyte.yw.models.RestoreKeyspace;
-import com.yugabyte.yw.models.TaskInfo;
-import com.fasterxml.jackson.annotation.JsonIgnore;
-import com.fasterxml.jackson.databind.JsonNode;
+import com.yugabyte.yw.models.paging.RestorePagedQuery;
+import com.yugabyte.yw.models.paging.RestorePagedResponse;
 import io.ebean.ExpressionList;
 import io.ebean.Finder;
-import io.ebean.Junction;
 import io.ebean.Model;
 import io.ebean.PersistenceContextScope;
 import io.ebean.Query;
 import io.ebean.annotation.CreatedTimestamp;
-import io.ebean.annotation.DbJson;
 import io.ebean.annotation.EnumValue;
 import io.ebean.annotation.UpdatedTimestamp;
 import io.swagger.annotations.ApiModel;
@@ -51,20 +37,20 @@ import java.util.ArrayList;
 import java.util.Date;
 import java.util.HashSet;
 import java.util.List;
-import java.util.Map;
+import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 import javax.persistence.Column;
 import javax.persistence.Entity;
-import javax.persistence.Id;
 import javax.persistence.EnumType;
 import javax.persistence.Enumerated;
+import javax.persistence.Id;
 import org.apache.commons.collections.CollectionUtils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import play.api.Play;
-import play.libs.Json;
 
 @ApiModel(description = "Universe level restores")
 @Entity
@@ -103,8 +89,8 @@ public class Restore extends Model {
     @EnumValue("In Progress")
     InProgress(TaskInfo.State.Initializing, TaskInfo.State.Running),
 
-    @EnumValue("Success")
-    Success(TaskInfo.State.Success),
+    @EnumValue("Completed")
+    Completed(TaskInfo.State.Success),
 
     @EnumValue("Failed")
     Failed(TaskInfo.State.Failure, TaskInfo.State.Unknown, TaskInfo.State.Abort),
@@ -201,14 +187,14 @@ public class Restore extends Model {
   private static final Multimap<State, State> ALLOWED_TRANSITIONS =
       ImmutableMultimap.<State, State>builder()
           .put(State.Created, State.InProgress)
-          .put(State.Created, State.Success)
+          .put(State.Created, State.Completed)
           .put(State.Created, State.Failed)
           .put(State.Created, State.Aborted)
-          .put(State.InProgress, State.Success)
+          .put(State.InProgress, State.Completed)
           .put(State.InProgress, State.Failed)
           .put(State.InProgress, State.Aborted)
           .put(State.Aborted, State.InProgress)
-          .put(State.Aborted, State.Success)
+          .put(State.Aborted, State.Completed)
           .put(State.Aborted, State.Failed)
           .build();
 
@@ -239,17 +225,16 @@ public class Restore extends Model {
     return restoreState;
   }
 
-  public static Restore create(TaskInfo taskInfo) {
+  public static Restore create(UUID taskUUID, RestoreBackupParams taskDetails) {
     Restore restore = new Restore();
-    RestoreBackupParams taskDetails =
-        Json.fromJson(taskInfo.getTaskDetails(), RestoreBackupParams.class);
     restore.restoreUUID = taskDetails.prefixUUID;
     restore.universeUUID = taskDetails.universeUUID;
     restore.customerUUID = taskDetails.customerUUID;
-    restore.taskUUID = taskInfo.getTaskUUID();
-
-    String storageLocation = taskDetails.backupStorageInfoList.get(0).storageLocation;
-
+    restore.taskUUID = taskUUID;
+    String storageLocation = "";
+    if (!CollectionUtils.isEmpty(taskDetails.backupStorageInfoList)) {
+      storageLocation = taskDetails.backupStorageInfoList.get(0).storageLocation;
+    }
     Matcher matcher = PATTERN.matcher(storageLocation);
     if (matcher.find()) {
       restore.sourceUniverseUUID = UUID.fromString(matcher.group(0));
@@ -258,23 +243,21 @@ public class Restore extends Model {
     restore.sourceUniverseName =
         isSourceUniversePresent ? Universe.getOrBadRequest(restore.sourceUniverseUUID).name : "";
     restore.storageConfigUUID = taskDetails.storageConfigUUID;
-    restore.setState(Restore.fetchStateFromTaskInfoState(taskInfo.getTaskState()));
-    restore.setCreateTime(taskInfo.getCreationTime());
-    restore.setUpdateTime(taskInfo.getLastUpdateTime());
+    restore.setState(State.InProgress);
+    restore.setUpdateTime(restore.getCreateTime());
     restore.save();
     return restore;
   }
 
-  public void update(UUID taskUUID, TaskInfo.State finalState) {
+  public void update(UUID taskUUID, State finalState) {
     TaskInfo taskInfo = TaskInfo.getOrBadRequest(taskUUID);
-    State newRestoreState = fetchStateFromTaskInfoState(finalState);
-    if (getState().equals(newRestoreState)) {
+    if (getState().equals(finalState)) {
       LOG.debug("Skipping state transition as restore is already in the {} state", getState());
-    } else if (ALLOWED_TRANSITIONS.containsEntry(getState(), newRestoreState)) {
-      LOG.debug("Restore state transitioned from {} to {}", getState(), newRestoreState);
-      setState(newRestoreState);
+    } else if (ALLOWED_TRANSITIONS.containsEntry(getState(), finalState)) {
+      LOG.debug("Restore state transitioned from {} to {}", getState(), finalState);
+      setState(finalState);
     } else {
-      LOG.error("Ignored INVALID STATE TRANSITION  {} -> {}", getState(), newRestoreState);
+      LOG.error("Ignored INVALID STATE TRANSITION  {} -> {}", getState(), finalState);
     }
     setUpdateTime(taskInfo.getLastUpdateTime());
     save();
@@ -285,9 +268,12 @@ public class Restore extends Model {
     save();
   }
 
-  public static void updateRestoreSizeForRestore(UUID restoreKeyspaceSubTaskUUID, long backupSize) {
-    UUID restoreTaskUUID = TaskInfo.getOrBadRequest(restoreKeyspaceSubTaskUUID).getParentUUID();
-    Restore restore = Restore.fetchByTaskUUID(restoreTaskUUID).get(0);
+  public static void updateRestoreSizeForRestore(UUID restoreUUID, long backupSize) {
+    Optional<Restore> restoreIfPresent = Restore.fetchRestore(restoreUUID);
+    if (!restoreIfPresent.isPresent()) {
+      return;
+    }
+    Restore restore = restoreIfPresent.get();
     UniverseDefinitionTaskParams universeTaskParams =
         Universe.getOrBadRequest(restore.universeUUID).getUniverseDetails();
     int replicationFactor = universeTaskParams.getPrimaryCluster().userIntent.replicationFactor;
@@ -333,12 +319,13 @@ public class Restore extends Model {
     RestoreRespBuilder builder =
         RestoreResp.builder()
             .restoreUUID(restore.restoreUUID)
-            .creationTime(restore.getCreateTime())
+            .createTime(restore.getCreateTime())
             .updateTime(restore.getUpdateTime())
             .targetUniverseName(targetUniverseName)
             .sourceUniverseName(restore.sourceUniverseName)
             .customerUUID(restore.customerUUID)
             .universeUUID(restore.universeUUID)
+            .sourceUniverseUUID(restore.sourceUniverseUUID)
             .state(state)
             .restoreSizeInBytes(restore.restoreSizeInBytes)
             .restoreKeyspaceList(restoreKeyspaceList)

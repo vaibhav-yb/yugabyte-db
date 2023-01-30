@@ -12,13 +12,9 @@ import com.google.api.services.compute.Compute;
 import com.google.auth.http.HttpCredentialsAdapter;
 import com.google.auth.oauth2.GoogleCredentials;
 import com.yugabyte.yw.cloud.CloudAPI;
-import com.yugabyte.yw.common.utils.Pair;
 import com.yugabyte.yw.models.Provider;
 import com.yugabyte.yw.models.Region;
 import com.yugabyte.yw.models.helpers.NodeID;
-import lombok.extern.slf4j.Slf4j;
-import org.apache.commons.lang.StringUtils;
-
 import java.io.ByteArrayInputStream;
 import java.util.List;
 import java.util.Map;
@@ -26,6 +22,8 @@ import java.util.Set;
 import java.util.UUID;
 import java.util.function.Function;
 import java.util.stream.Collectors;
+import lombok.extern.slf4j.Slf4j;
+import org.apache.commons.lang3.StringUtils;
 
 @Slf4j
 public class GCPCloudImpl implements CloudAPI {

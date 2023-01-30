@@ -150,6 +150,9 @@ class TransactionParticipant : public TransactionStatusManager {
 
   void Handle(std::unique_ptr<tablet::UpdateTxnOperation> request, int64_t term);
 
+  Result<IsExternalTransaction> IsExternalTransactionResult(
+      const TransactionId& transaction_id) override;
+
   void Cleanup(TransactionIdSet&& set) override;
 
   // Used to pass arguments to ProcessReplicated.

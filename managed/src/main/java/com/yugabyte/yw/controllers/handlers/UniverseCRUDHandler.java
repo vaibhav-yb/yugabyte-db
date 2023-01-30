@@ -30,6 +30,9 @@ import com.yugabyte.yw.common.certmgmt.CertConfigType;
 import com.yugabyte.yw.common.certmgmt.CertificateHelper;
 import com.yugabyte.yw.common.certmgmt.EncryptionInTransitUtil;
 import com.yugabyte.yw.common.certmgmt.providers.VaultPKI;
+import com.yugabyte.yw.common.config.CustomerConfKeys;
+import com.yugabyte.yw.common.config.GlobalConfKeys;
+import com.yugabyte.yw.common.config.RuntimeConfGetter;
 import com.yugabyte.yw.common.config.RuntimeConfigFactory;
 import com.yugabyte.yw.common.config.impl.SettableRuntimeConfigFactory;
 import com.yugabyte.yw.common.gflags.GFlagsUtil;
@@ -100,6 +103,8 @@ public class UniverseCRUDHandler {
   @Inject RuntimeConfigFactory runtimeConfigFactory;
 
   @Inject SettableRuntimeConfigFactory settableRuntimeConfigFactory;
+
+  @Inject RuntimeConfGetter confGetter;
 
   @Inject KubernetesManagerFactory kubernetesManagerFactory;
   @Inject PasswordPolicyService passwordPolicyService;
@@ -437,32 +442,18 @@ public class UniverseCRUDHandler {
     }
     boolean cloudEnabled =
         runtimeConfigFactory.forCustomer(customer).getBoolean("yb.cloud.enabled");
+    boolean isAuthEnforced = confGetter.getConfForScope(customer, CustomerConfKeys.isAuthEnforced);
 
     for (Cluster c : taskParams.clusters) {
       Provider provider = Provider.getOrBadRequest(UUID.fromString(c.userIntent.provider));
       // Set the provider code.
       c.userIntent.providerType = Common.CloudType.valueOf(provider.code);
-      c.validate(!cloudEnabled);
+      c.validate(!cloudEnabled, isAuthEnforced);
       // Check if for a new create, no value is set, we explicitly set it to UNEXPOSED.
       if (c.userIntent.enableExposingService
           == UniverseDefinitionTaskParams.ExposingServiceState.NONE) {
         c.userIntent.enableExposingService =
             UniverseDefinitionTaskParams.ExposingServiceState.UNEXPOSED;
-      }
-
-      if (c.userIntent.providerType.equals(Common.CloudType.kubernetes)) {
-        try {
-          checkK8sProviderAvailability(provider, customer);
-        } catch (IllegalArgumentException e) {
-          throw new PlatformServiceException(BAD_REQUEST, e.getMessage());
-        }
-        checkHelmChartExists(c.userIntent.ybSoftwareVersion);
-        // TODO(bhavin192): there should be some validation on the
-        // universe_name when creating the universe, because we cannot
-        // have more than 43 characters for universe_name + az_name
-        // when using new naming style. The length of longest AZ name
-        // should be picked up for that provider and then checked
-        // against the give universe_name.
       }
 
       // Set the node exporter config based on the provider
@@ -573,9 +564,10 @@ public class UniverseCRUDHandler {
           taskType = TaskType.CreateKubernetesUniverse;
           universe.updateConfig(
               ImmutableMap.of(Universe.HELM2_LEGACY, Universe.HelmLegacy.V3.toString()));
-          universe.save();
+          universe.save(); // RFC should we remove this? we are saving later in the method.
+          // Moreover We might reject the create request in following statements.
           // This flag will be used for testing purposes as well. Don't remove.
-          if (runtimeConfigFactory.globalRuntimeConf().getBoolean("yb.use_new_helm_naming")) {
+          if (confGetter.getGlobalConf(GlobalConfKeys.useNewHelmNaming)) {
             if (Util.compareYbVersions(primaryIntent.ybSoftwareVersion, "2.15.4.0") >= 0) {
               taskParams.useNewHelmNamingStyle = true;
             } else {
@@ -585,6 +577,17 @@ public class UniverseCRUDHandler {
               }
             }
           }
+          if (!taskParams.useNewHelmNamingStyle) {
+            for (Cluster c : taskParams.clusters) {
+              Provider provider = Provider.getOrBadRequest(UUID.fromString(c.userIntent.provider));
+              try {
+                checkK8sProviderAvailability(provider, customer);
+              } catch (IllegalArgumentException e) {
+                throw new PlatformServiceException(BAD_REQUEST, e.getMessage());
+              }
+            }
+          }
+          checkHelmChartExists(primaryCluster.userIntent.ybSoftwareVersion);
         } else {
           if (primaryCluster.userIntent.enableIPV6) {
             throw new PlatformServiceException(
@@ -992,9 +995,11 @@ public class UniverseCRUDHandler {
 
     // Set the provider code.
     Provider provider = Provider.getOrBadRequest(UUID.fromString(addOnCluster.userIntent.provider));
+    boolean cloudEnabled =
+        runtimeConfigFactory.forCustomer(customer).getBoolean("yb.cloud.enabled");
+    boolean isAuthEnforced = confGetter.getConfForScope(customer, CustomerConfKeys.isAuthEnforced);
     addOnCluster.userIntent.providerType = Common.CloudType.valueOf(provider.code);
-    addOnCluster.validate(
-        !runtimeConfigFactory.forCustomer(customer).getBoolean("yb.cloud.enabled"));
+    addOnCluster.validate(!cloudEnabled, isAuthEnforced);
 
     TaskType taskType = TaskType.AddOnClusterCreate;
     if (addOnCluster.userIntent.providerType.equals(Common.CloudType.kubernetes)) {
@@ -1066,14 +1071,18 @@ public class UniverseCRUDHandler {
     // Set the provider code.
     Provider provider =
         Provider.getOrBadRequest(UUID.fromString(readOnlyCluster.userIntent.provider));
+    boolean cloudEnabled =
+        runtimeConfigFactory.forCustomer(customer).getBoolean("yb.cloud.enabled");
+    boolean isAuthEnforced = confGetter.getConfForScope(customer, CustomerConfKeys.isAuthEnforced);
     readOnlyCluster.userIntent.providerType = Common.CloudType.valueOf(provider.code);
-    readOnlyCluster.validate(
-        !runtimeConfigFactory.forCustomer(customer).getBoolean("yb.cloud.enabled"));
+    readOnlyCluster.validate(!cloudEnabled, isAuthEnforced);
 
     TaskType taskType = TaskType.ReadOnlyClusterCreate;
     if (readOnlyCluster.userIntent.providerType.equals(Common.CloudType.kubernetes)) {
       try {
-        checkK8sProviderAvailability(provider, customer);
+        if (!universe.getUniverseDetails().useNewHelmNamingStyle) {
+          checkK8sProviderAvailability(provider, customer);
+        }
         taskType = TaskType.ReadOnlyKubernetesClusterCreate;
       } catch (IllegalArgumentException e) {
         throw new PlatformServiceException(BAD_REQUEST, e.getMessage());

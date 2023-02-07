@@ -199,11 +199,6 @@ void MakeNewProtoRecord(
   record_to_be_added->CopyFrom(*proto_record);
   record_to_be_added->mutable_row_message()->CopyFrom(row_message);
   auto result = DocHybridTime::DecodeFromEnd(&doc_ht);
-  if (result.ok()) {
-    record_to_be_added->mutable_row_message()->set_commit_time((*result).hybrid_time().value());
-  } else {
-    LOG(WARNING) << "Failed to get commit hybrid time for intent key: " << intent.key_buf.c_str();
-  }
   *write_id = intent.write_id;
   *reverse_index_key = intent.reverse_index_key;
 }

@@ -68,7 +68,9 @@ public enum Type {
   DATE (DataType.DATE, "date"),
   TIME (DataType.TIME, "time"),
   JSONB (DataType.JSONB, "jsonb"),
-  USER_DEFINED_TYPE (DataType.USER_DEFINED_TYPE, "user_defined_type");
+  USER_DEFINED_TYPE (DataType.USER_DEFINED_TYPE, "user_defined_type"),
+  NULL_VALUE_TYPE (DataType.NULL_VALUE_TYPE, "null_value_type"),
+  GIN_NULL (DataType.GIN_NULL, "gin_null");
 
   private final DataType dataType;
   private final String name;
@@ -181,6 +183,8 @@ public enum Type {
       case DATE: return DATE;
       case TIME: return TIME;
       case JSONB: return JSONB;
+      case NULL_VALUE_TYPE: return NULL_VALUE_TYPE;
+      case GIN_NULL: return GIN_NULL;
 
       default:
         throw new IllegalArgumentException("The provided data type doesn't map" +

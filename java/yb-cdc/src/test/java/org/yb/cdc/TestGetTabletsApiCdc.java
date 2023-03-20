@@ -54,7 +54,8 @@ public class TestGetTabletsApiCdc extends CDCBaseClass {
     statement.execute("create table test (a int primary key, b int);");
   }
 
-  // This test is to verify the fix for GitHub#:
+  // This test is to verify the fix for the following ticket
+  // GitHub #16481: https://github.com/yugabyte/yugabyte-db/issues/16481
   @Test
   public void verifyGetTabletListApiOnColocatedTables() throws Exception {
     final String COLOCATED_DB = "colocated_db";
@@ -94,22 +95,36 @@ public class TestGetTabletsApiCdc extends CDCBaseClass {
       }
     }
 
-    // Now call new API on all the tables
+    // Call the GetTabletListToPollForCDC API on all the tables so that we know it is not failing.
     for (String tableId : tableIds) {
       YBTable table = ybClient.openTableByUUID(tableId);
-      GetTabletListToPollForCDCResponse response =
+      try {
+        // The API should not throw any exception.
+        GetTabletListToPollForCDCResponse response =
           ybClient.getTabletListToPollForCdc(table, dbStreamId, tableId);
-      for (TabletCheckpointPair tabletCheckpointPair : response.getTabletCheckpointPairList()) {
-        LOGGER.info("Table {} got tablet in response {} ", tableId,
-                    tabletCheckpointPair.getTabletLocations().getTabletId().toStringUtf8());
+        for (TabletCheckpointPair tabletCheckpointPair : response.getTabletCheckpointPairList()) {
+          LOGGER.info("Table {} got tablet in response {} ", tableId,
+            tabletCheckpointPair.getTabletLocations().getTabletId().toStringUtf8());
+        }
+      } catch (Exception e) {
+        fail("Failed test because it the API GetTabletListToPollForCDC threw exception " + e);
       }
     }
 
-    // Cleanup the custom database created in this test before moving for further cleanup.
-//    statement.execute("drop database if exists " + COLOCATED_DB + ";");
-//
-//    // Custom wait for this database to be deleted.
-//    wait(5000);
+    // Cleanup the tables created in the colocated database for this test.
+    try (Connection conn = DriverManager.getConnection(url, props)) {
+      Statement st = conn.createStatement();
+
+      st.execute("DROP TABLE IF EXISTS test_1;");
+      st.execute("DROP TABLE IF EXISTS test_2;");
+      st.execute("DROP TABLE IF EXISTS test_3;");
+
+      // Close statement and connection
+      st.close();
+    }
+
+    // Drop the colocated database created as a part of this test.
+    statement.execute("DROP DATABASE " + COLOCATED_DB + ";");
   }
 
   @Test

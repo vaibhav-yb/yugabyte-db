@@ -54,33 +54,31 @@ public class TestGetTabletsApiCdc extends CDCBaseClass {
     statement.execute("create table test (a int primary key, b int);");
   }
 
+  // This test is to verify the fix for GitHub#:
   @Test
   public void verifyGetTabletListApiOnColocatedTables() throws Exception {
-    statement.execute("drop database if exists colocated_db;");
-    statement.execute("create database colocated_db with colocated = true;");
+    final String COLOCATED_DB = "colocated_db";
+    statement.execute("drop database if exists " + COLOCATED_DB + ";");
+    statement.execute("create database " + COLOCATED_DB + " with colocated = true;");
 
-    final InetSocketAddress pgAddress = miniCluster.getPostgresContactPoints()
-      .get(0);
-    String url = String.format(
-      "jdbc:yugabytedb://%s:%d/%s",
-      pgAddress.getHostName(),
-      pgAddress.getPort(),
-      "colocated_db"
-    );
+    final InetSocketAddress pgAddress = miniCluster.getPostgresContactPoints().get(0);
+    String url = String.format("jdbc:yugabytedb://%s:%d/%s", pgAddress.getHostName(),
+                               pgAddress.getPort(), COLOCATED_DB);
     Properties props = new Properties();
     props.setProperty("user", DEFAULT_PG_USER);
-    Connection conn = DriverManager.getConnection(url, props);
-    Statement st = conn.createStatement();
+    try (Connection conn = DriverManager.getConnection(url, props)) {
+      Statement st = conn.createStatement();
 
-    st.execute("CREATE TABLE test_1 (id INT PRIMARY KEY, name TEXT) WITH (COLOCATED = true);");
-    st.execute("CREATE TABLE test_2 (text_key TEXT PRIMARY KEY) WITH (COLOCATED = true);");
-    st.execute("CREATE TABLE test_3 (hours FLOAT PRIMARY KEY, hours_in_text VARCHAR(40)) WITH (COLOCATED = true);");
+      st.execute("CREATE TABLE test_1 (id INT PRIMARY KEY, name TEXT) WITH (COLOCATED = true);");
+      st.execute("CREATE TABLE test_2 (text_key TEXT PRIMARY KEY) WITH (COLOCATED = true);");
+      st.execute("CREATE TABLE test_3 (hours FLOAT PRIMARY KEY, hours_in_text VARCHAR(40)) " +
+                 "WITH (COLOCATED = true);");
 
-    // Close statement and connection
-    st.close();
-    conn.close();
+      // Close statement and connection
+      st.close();
+    }
 
-    testSubscriber = new CDCSubscriber("colocated_db", "test_1", getMasterAddresses());
+    testSubscriber = new CDCSubscriber(COLOCATED_DB, "test_1", getMasterAddresses());
     testSubscriber.createStream("proto");
     String dbStreamId = testSubscriber.getDbStreamId();
 
@@ -89,22 +87,29 @@ public class TestGetTabletsApiCdc extends CDCBaseClass {
 
     ListTablesResponse resp = ybClient.getTablesList();
     for (MasterDdlOuterClass.ListTablesResponsePB.TableInfo tableInfo : resp.getTableInfoList()) {
-      if (tableInfo.getName().equals("test_1") || tableInfo.getName().equals("test_2") || tableInfo.getName().equals("test_3")) {
+      if (tableInfo.getName().equals("test_1")
+            || tableInfo.getName().equals("test_2")
+            || tableInfo.getName().equals("test_3")) {
         tableIds.add(tableInfo.getId().toStringUtf8());
       }
     }
 
     // Now call new API on all the tables
-    String firstTable = tableIds.get(0); // Call on 2nd table all the time
     for (String tableId : tableIds) {
-      firstTable = tableId;
-      YBTable table = ybClient.openTableByUUID(firstTable);
-      LOGGER.info("VKVK Calling API for table " + table.getName() + " with tableId " + table.getTableId());
-      GetTabletListToPollForCDCResponse response = ybClient.getTabletListToPollForCdc(table, dbStreamId, firstTable);
-      for (TabletCheckpointPair tcp : response.getTabletCheckpointPairList()) {
-        LOGGER.info("Table " + firstTable + " got tablet " + tcp.getTabletLocations().getTabletId().toStringUtf8());
+      YBTable table = ybClient.openTableByUUID(tableId);
+      GetTabletListToPollForCDCResponse response =
+          ybClient.getTabletListToPollForCdc(table, dbStreamId, tableId);
+      for (TabletCheckpointPair tabletCheckpointPair : response.getTabletCheckpointPairList()) {
+        LOGGER.info("Table {} got tablet in response {} ", tableId,
+                    tabletCheckpointPair.getTabletLocations().getTabletId().toStringUtf8());
       }
     }
+
+    // Cleanup the custom database created in this test before moving for further cleanup.
+//    statement.execute("drop database if exists " + COLOCATED_DB + ";");
+//
+//    // Custom wait for this database to be deleted.
+//    wait(5000);
   }
 
   @Test

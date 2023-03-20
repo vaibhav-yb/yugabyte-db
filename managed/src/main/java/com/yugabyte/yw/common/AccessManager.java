@@ -9,6 +9,7 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.google.inject.Inject;
+import com.typesafe.config.Config;
 import com.yugabyte.yw.commissioner.Commissioner;
 import com.yugabyte.yw.commissioner.Common;
 import com.yugabyte.yw.commissioner.tasks.params.RotateAccessKeyParams;
@@ -43,12 +44,13 @@ import java.util.stream.Collectors;
 import javax.inject.Singleton;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.commons.lang3.StringUtils;
+import play.libs.Json;
 
 @Singleton
 @Slf4j
 public class AccessManager extends DevopsBase {
 
-  private final play.Configuration appConfig;
+  private final Config appConfig;
   private final Commissioner commissioner;
 
   private static final String YB_CLOUD_COMMAND_TYPE = "access";
@@ -58,7 +60,7 @@ public class AccessManager extends DevopsBase {
   public static final String STORAGE_PATH = "yb.storage.path";
 
   @Inject
-  public AccessManager(play.Configuration appConfig, Commissioner commissioner) {
+  public AccessManager(Config appConfig, Commissioner commissioner) {
     this.appConfig = appConfig;
     this.commissioner = commissioner;
   }
@@ -220,6 +222,8 @@ public class AccessManager extends DevopsBase {
     keyInfo.deleteRemote = deleteRemote;
     keyInfo.keyPairName = keyCode;
     keyInfo.sshPrivateKeyContent = new String(Files.readAllBytes(destination));
+    // In case of upload, keys will be user provided.
+    keyInfo.setManagementState(AccessKey.KeyInfo.KeyManagementState.SelfManaged);
 
     // TODO: Move this code for ProviderDetails update elsewhere
     ProviderDetails details = provider.details;
@@ -422,6 +426,8 @@ public class AccessManager extends DevopsBase {
       keyInfo.vaultFile = vaultResponse.get("vault_file").asText();
       keyInfo.vaultPasswordFile = vaultResponse.get("vault_password").asText();
       keyInfo.keyPairName = keyCode;
+      // In case of add, keys will be YBA managed.
+      keyInfo.setManagementState(AccessKey.KeyInfo.KeyManagementState.YBAManaged);
       try {
         Path privateKeyPath = Paths.get(keyInfo.privateKey);
         keyInfo.sshPrivateKeyContent = new String(Files.readAllBytes(privateKeyPath));
@@ -512,8 +518,7 @@ public class AccessManager extends DevopsBase {
     }
 
     if (Common.CloudType.valueOf(provider.code) == Common.CloudType.aws) {
-      ObjectMapper mapper = play.libs.Json.newDefaultMapper();
-      ArrayNode ret = mapper.getNodeFactory().arrayNode();
+      ArrayNode ret = Json.mapper().getNodeFactory().arrayNode();
       regions
           .stream()
           .map(r -> deleteKey(provider.uuid, r.uuid, keyCode, deleteRemote))

@@ -63,9 +63,6 @@ public class AccessManagerTest extends FakeDBApplication {
   @InjectMocks AccessManager accessManager;
 
   @Mock ShellProcessHandler shellProcessHandler;
-
-  @Mock play.Configuration appConfig;
-
   @Mock RuntimeConfigFactory runtimeConfigFactory;
 
   @Mock Config mockConfig;
@@ -90,7 +87,7 @@ public class AccessManagerTest extends FakeDBApplication {
     defaultCustomer = ModelFactory.testCustomer();
     defaultProvider = ModelFactory.awsProvider(defaultCustomer);
     defaultRegion = Region.create(defaultProvider, "us-west-2", "US West 2", "yb-image");
-    when(appConfig.getString("yb.storage.path")).thenReturn(TMP_STORAGE_PATH);
+    when(mockConfig.getString("yb.storage.path")).thenReturn(TMP_STORAGE_PATH);
     when(runtimeConfigFactory.globalRuntimeConf()).thenReturn(mockConfig);
     command = ArgumentCaptor.forClass(List.class);
     cloudCredentials = ArgumentCaptor.forClass(Map.class);
@@ -389,6 +386,9 @@ public class AccessManagerTest extends FakeDBApplication {
         TMP_KEYS_PATH + File.separator + defaultProvider.uuid + "/private.key");
     assertValue(keyInfo, "vaultFile", tmpVaultFile);
     assertValue(keyInfo, "vaultPasswordFile", tmpVaultPassword);
+    assertEquals(
+        keyInfo.get("managementState").textValue(),
+        AccessKey.KeyInfo.KeyManagementState.YBAManaged.toString());
   }
 
   @Test
@@ -441,6 +441,9 @@ public class AccessManagerTest extends FakeDBApplication {
     String expectedPath =
         String.join("/", TMP_KEYS_PATH, idKey.get("providerUUID").asText(), expectedFilename);
     assertEquals(expectedPath, accessKey.getKeyInfo().privateKey);
+    assertEquals(
+        accessKey.getKeyInfo().getManagementState(),
+        AccessKey.KeyInfo.KeyManagementState.SelfManaged);
     defaultProvider.refresh();
     assertEquals("some-user", defaultProvider.details.sshUser);
     Path keyFile = Paths.get(expectedPath);
@@ -566,7 +569,7 @@ public class AccessManagerTest extends FakeDBApplication {
 
   @Test
   public void testInvalidKeysBasePath() {
-    when(appConfig.getString("yb.storage.path")).thenReturn("/sys/foo");
+    when(mockConfig.getString("yb.storage.path")).thenReturn("/sys/foo");
     Mockito.verify(shellProcessHandler, times(0)).run(command.capture(), anyMap());
     RuntimeException re =
         assertThrows(

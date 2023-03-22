@@ -23,12 +23,14 @@ public class TestGetTableSchema extends BasePgSQLTest {
   private static final Logger LOG = LoggerFactory.getLogger(TestGetTableSchema.class);
 
   @Test
-  public void testGetTableSchema() throws Exception {
+  public void testGetTableSchema() {
     LOG.info("Starting test testGetTableSchema");
-    final String createTable = "CREATE TABLE test_table (id oid);";
+    final String createTable = "CREATE TABLE test_table (id oid PRIMARY KEY, arr int[]);";
+    final String createIndex = "CREATE INDEX ON test_table USING ybgin(arr);";
     try (Statement st = connection.createStatement()) {
-      // Create tables.
+      // Create table and index.
       st.execute(createTable);
+      st.execute(createIndex);
 
       YBClient ybClient = miniCluster.getClient();
 

@@ -8033,6 +8033,9 @@
           "description" : "Node exporter user",
           "type" : "string"
         },
+        "nodeIp" : {
+          "type" : "string"
+        },
         "parallelism" : {
           "description" : "Number of concurrent commands to run on nodes over SSH",
           "format" : "int32",
@@ -8108,7 +8111,7 @@
           "type" : "string"
         }
       },
-      "required" : [ "creatingUser", "currentIdx", "currentYbcTaskId", "platformUrl", "platformVersion", "prefixUUID", "sleepAfterMasterRestartMillis", "sleepAfterTServerRestartMillis", "universeUUID" ],
+      "required" : [ "creatingUser", "currentIdx", "currentYbcTaskId", "nodeIp", "platformUrl", "platformVersion", "prefixUUID", "sleepAfterMasterRestartMillis", "sleepAfterTServerRestartMillis", "universeUUID" ],
       "type" : "object"
     },
     "RestoreKeyspace" : {
@@ -17098,7 +17101,7 @@
     },
     "/api/v1/customers/{cUUID}/tasks/{tUUID}/retry" : {
       "post" : {
-        "description" : "Retry a Universe task.",
+        "description" : "Retry a Universe or Provider task.",
         "operationId" : "retryTask",
         "parameters" : [ {
           "format" : "uuid",
@@ -17117,14 +17120,14 @@
           "200" : {
             "description" : "successful operation",
             "schema" : {
-              "$ref" : "#/definitions/UniverseResp"
+              "$ref" : "#/definitions/YBPTask"
             }
           }
         },
         "security" : [ {
           "apiKeyAuth" : [ ]
         } ],
-        "summary" : "Retry a Universe task",
+        "summary" : "Retry a Universe or Provider task",
         "tags" : [ "Customer Tasks" ]
       }
     },

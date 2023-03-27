@@ -19,6 +19,7 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyBoolean;
 import static org.mockito.ArgumentMatchers.anyList;
 import static org.mockito.ArgumentMatchers.anyMap;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.doReturn;
 import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.lenient;
@@ -288,7 +289,8 @@ public class XClusterConfigControllerTest extends FakeDBApplication {
 
     try {
       when(mockListTablesResponse.getTableInfoList()).thenReturn(tableInfoList);
-      when(mockClient.getTablesList(null, true, null)).thenReturn(mockListTablesResponse);
+      when(mockClient.getTablesList(eq(null), anyBoolean(), eq(null)))
+          .thenReturn(mockListTablesResponse);
     } catch (Exception e) {
       e.printStackTrace();
     }
@@ -358,7 +360,8 @@ public class XClusterConfigControllerTest extends FakeDBApplication {
     initClientGetTablesList();
 
     Result result =
-        doRequestWithAuthTokenAndBody("POST", apiEndpoint, user.createAuthToken(), createRequest);
+        FakeApiHelper.doRequestWithAuthTokenAndBody(
+            "POST", apiEndpoint, user.createAuthToken(), createRequest);
     assertOk(result);
 
     assertNumXClusterConfigs(1);
@@ -394,7 +397,7 @@ public class XClusterConfigControllerTest extends FakeDBApplication {
     String invalidCustomerAPIEndpoint = "/api/customers/" + invalidCustomer + "/xcluster_configs";
 
     Result result =
-        doRequestWithAuthTokenAndBody(
+        FakeApiHelper.doRequestWithAuthTokenAndBody(
             "POST", invalidCustomerAPIEndpoint, user.createAuthToken(), createRequest);
     assertEquals(contentAsString(result), BAD_REQUEST, result.status());
     String expectedErrStr =
@@ -414,7 +417,7 @@ public class XClusterConfigControllerTest extends FakeDBApplication {
     Result result =
         assertPlatformException(
             () ->
-                doRequestWithAuthTokenAndBody(
+                FakeApiHelper.doRequestWithAuthTokenAndBody(
                     "POST", apiEndpoint, user.createAuthToken(), createRequest));
     assertEquals(contentAsString(result), BAD_REQUEST, result.status());
     assertResponseError("Cannot find universe " + invalidUUID, result);
@@ -431,7 +434,7 @@ public class XClusterConfigControllerTest extends FakeDBApplication {
     Result result =
         assertPlatformException(
             () ->
-                doRequestWithAuthTokenAndBody(
+                FakeApiHelper.doRequestWithAuthTokenAndBody(
                     "POST", apiEndpoint, user.createAuthToken(), createRequest));
     assertEquals(contentAsString(result), BAD_REQUEST, result.status());
     assertResponseError("Cannot find universe " + invalidUUID, result);
@@ -448,7 +451,7 @@ public class XClusterConfigControllerTest extends FakeDBApplication {
     Result result =
         assertPlatformException(
             () ->
-                doRequestWithAuthTokenAndBody(
+                FakeApiHelper.doRequestWithAuthTokenAndBody(
                     "POST", apiEndpoint, user.createAuthToken(), createRequest));
     assertEquals(contentAsString(result), BAD_REQUEST, result.status());
     String expectedErrMsg =
@@ -471,7 +474,7 @@ public class XClusterConfigControllerTest extends FakeDBApplication {
     Result result =
         assertPlatformException(
             () ->
-                doRequestWithAuthTokenAndBody(
+                FakeApiHelper.doRequestWithAuthTokenAndBody(
                     "POST", apiEndpoint, user.createAuthToken(), createRequest));
     assertEquals(contentAsString(result), BAD_REQUEST, result.status());
     assertResponseError("{\"name\":[\"error.required\"]}", result);
@@ -490,7 +493,7 @@ public class XClusterConfigControllerTest extends FakeDBApplication {
     Result result =
         assertPlatformException(
             () ->
-                doRequestWithAuthTokenAndBody(
+                FakeApiHelper.doRequestWithAuthTokenAndBody(
                     "POST", apiEndpoint, user.createAuthToken(), createRequest));
     assertEquals(contentAsString(result), BAD_REQUEST, result.status());
     assertResponseError("{\"name\":[\"error.maxLength\"]}", result);
@@ -506,7 +509,7 @@ public class XClusterConfigControllerTest extends FakeDBApplication {
     Result result =
         assertPlatformException(
             () ->
-                doRequestWithAuthTokenAndBody(
+                FakeApiHelper.doRequestWithAuthTokenAndBody(
                     "POST", apiEndpoint, user.createAuthToken(), createRequest));
     assertEquals(contentAsString(result), BAD_REQUEST, result.status());
     assertResponseError("{\"sourceUniverseUUID\":[\"error.required\"]}", result);
@@ -522,7 +525,7 @@ public class XClusterConfigControllerTest extends FakeDBApplication {
     Result result =
         assertPlatformException(
             () ->
-                doRequestWithAuthTokenAndBody(
+                FakeApiHelper.doRequestWithAuthTokenAndBody(
                     "POST", apiEndpoint, user.createAuthToken(), createRequest));
     assertEquals(contentAsString(result), BAD_REQUEST, result.status());
     assertResponseError("{\"targetUniverseUUID\":[\"error.required\"]}", result);
@@ -538,7 +541,7 @@ public class XClusterConfigControllerTest extends FakeDBApplication {
     Result result =
         assertPlatformException(
             () ->
-                doRequestWithAuthTokenAndBody(
+                FakeApiHelper.doRequestWithAuthTokenAndBody(
                     "POST", apiEndpoint, user.createAuthToken(), createRequest));
     assertEquals(contentAsString(result), BAD_REQUEST, result.status());
     assertResponseError("{\"tables\":[\"error.required\"]}", result);
@@ -557,7 +560,8 @@ public class XClusterConfigControllerTest extends FakeDBApplication {
 
     String getAPIEndpoint = apiEndpoint + "/" + xClusterConfig.uuid;
 
-    Result result = doRequestWithAuthToken("GET", getAPIEndpoint, user.createAuthToken());
+    Result result =
+        FakeApiHelper.doRequestWithAuthToken("GET", getAPIEndpoint, user.createAuthToken());
     assertOk(result);
     validateGetXClusterResponse(xClusterConfig, result);
     validateGetXClusterLagResponse(result);
@@ -582,7 +586,8 @@ public class XClusterConfigControllerTest extends FakeDBApplication {
 
     String getAPIEndpoint = apiEndpoint + "/" + xClusterConfig.uuid;
 
-    Result result = doRequestWithAuthToken("GET", getAPIEndpoint, user.createAuthToken());
+    Result result =
+        FakeApiHelper.doRequestWithAuthToken("GET", getAPIEndpoint, user.createAuthToken());
     assertOk(result);
 
     try {
@@ -606,7 +611,8 @@ public class XClusterConfigControllerTest extends FakeDBApplication {
     String invalidCustomerAPIEndpoint = "/api/customers/" + invalidCustomer + "/xcluster_configs";
     String getAPIEndpoint = invalidCustomerAPIEndpoint + "/" + xClusterConfig.uuid;
 
-    Result result = doRequestWithAuthToken("GET", getAPIEndpoint, user.createAuthToken());
+    Result result =
+        FakeApiHelper.doRequestWithAuthToken("GET", getAPIEndpoint, user.createAuthToken());
     assertEquals(contentAsString(result), BAD_REQUEST, result.status());
     String expectedErrStr =
         String.format(
@@ -625,7 +631,9 @@ public class XClusterConfigControllerTest extends FakeDBApplication {
 
     Result result =
         assertPlatformException(
-            () -> doRequestWithAuthToken("GET", getAPIEndpoint, user.createAuthToken()));
+            () ->
+                FakeApiHelper.doRequestWithAuthToken(
+                    "GET", getAPIEndpoint, user.createAuthToken()));
     assertEquals(contentAsString(result), BAD_REQUEST, result.status());
     String expectedErrMsg = String.format("Cannot find XClusterConfig %s", nonexistentUUID);
     assertResponseError(expectedErrMsg, result);
@@ -652,7 +660,8 @@ public class XClusterConfigControllerTest extends FakeDBApplication {
 
     String getAPIEndpoint = apiEndpoint + "/" + xClusterConfig.uuid;
 
-    Result result = doRequestWithAuthToken("GET", getAPIEndpoint, user.createAuthToken());
+    Result result =
+        FakeApiHelper.doRequestWithAuthToken("GET", getAPIEndpoint, user.createAuthToken());
     assertOk(result);
 
     validateGetXClusterResponse(xClusterConfig, result);
@@ -676,7 +685,7 @@ public class XClusterConfigControllerTest extends FakeDBApplication {
     ObjectNode editNameRequest = Json.newObject().put("name", configName + "-renamed");
 
     Result result =
-        doRequestWithAuthTokenAndBody(
+        FakeApiHelper.doRequestWithAuthTokenAndBody(
             "PUT", editAPIEndpoint, user.createAuthToken(), editNameRequest);
     assertOk(result);
 
@@ -715,7 +724,7 @@ public class XClusterConfigControllerTest extends FakeDBApplication {
     editTablesRequest.putArray("tables").addAll(modifiedTables);
 
     Result result =
-        doRequestWithAuthTokenAndBody(
+        FakeApiHelper.doRequestWithAuthTokenAndBody(
             "PUT", editAPIEndpoint, user.createAuthToken(), editTablesRequest);
     assertOk(result);
 
@@ -749,7 +758,7 @@ public class XClusterConfigControllerTest extends FakeDBApplication {
     ObjectNode editStatusRequest = Json.newObject().put("status", "Paused");
 
     Result result =
-        doRequestWithAuthTokenAndBody(
+        FakeApiHelper.doRequestWithAuthTokenAndBody(
             "PUT", editAPIEndpoint, user.createAuthToken(), editStatusRequest);
     assertOk(result);
 
@@ -785,7 +794,7 @@ public class XClusterConfigControllerTest extends FakeDBApplication {
     ObjectNode editNameRequest = Json.newObject().put("name", configName + "-renamed");
 
     Result result =
-        doRequestWithAuthTokenAndBody(
+        FakeApiHelper.doRequestWithAuthTokenAndBody(
             "PUT", editAPIEndpoint, user.createAuthToken(), editNameRequest);
     assertEquals(contentAsString(result), BAD_REQUEST, result.status());
     String expectedErrMsg =
@@ -810,7 +819,7 @@ public class XClusterConfigControllerTest extends FakeDBApplication {
     Result result =
         assertPlatformException(
             () ->
-                doRequestWithAuthTokenAndBody(
+                FakeApiHelper.doRequestWithAuthTokenAndBody(
                     "PUT", editAPIEndpoint, user.createAuthToken(), editEmptyRequest));
     assertEquals(contentAsString(result), BAD_REQUEST, result.status());
     assertResponseError("Must specify an edit operation", result);
@@ -834,13 +843,10 @@ public class XClusterConfigControllerTest extends FakeDBApplication {
     Result result =
         assertPlatformException(
             () ->
-                doRequestWithAuthTokenAndBody(
+                FakeApiHelper.doRequestWithAuthTokenAndBody(
                     "PUT", editAPIEndpoint, user.createAuthToken(), editMultipleOperations));
     assertEquals(contentAsString(result), BAD_REQUEST, result.status());
-    assertResponseError(
-        "Exactly one edit request (either editName, editStatus, "
-            + "editTables) is allowed in one call.",
-        result);
+    assertResponseError("Exactly one edit request is allowed in one call", result);
     assertNoTasksCreated();
     assertAuditEntry(0, customer.uuid);
 
@@ -862,7 +868,7 @@ public class XClusterConfigControllerTest extends FakeDBApplication {
     Result result =
         assertPlatformException(
             () ->
-                doRequestWithAuthTokenAndBody(
+                FakeApiHelper.doRequestWithAuthTokenAndBody(
                     "PUT", editAPIEndpoint, user.createAuthToken(), editStatusRequest));
     assertEquals(contentAsString(result), BAD_REQUEST, result.status());
     assertResponseError("{\"name\":[\"error.maxLength\"]}", result);
@@ -884,7 +890,7 @@ public class XClusterConfigControllerTest extends FakeDBApplication {
     Result result =
         assertPlatformException(
             () ->
-                doRequestWithAuthTokenAndBody(
+                FakeApiHelper.doRequestWithAuthTokenAndBody(
                     "PUT", editAPIEndpoint, user.createAuthToken(), editStatusRequest));
     assertEquals(contentAsString(result), BAD_REQUEST, result.status());
     assertResponseError(
@@ -908,7 +914,7 @@ public class XClusterConfigControllerTest extends FakeDBApplication {
     Result result =
         assertPlatformException(
             () ->
-                doRequestWithAuthTokenAndBody(
+                FakeApiHelper.doRequestWithAuthTokenAndBody(
                     "PUT", editAPIEndpoint, user.createAuthToken(), editTablesRequest));
     assertEquals(contentAsString(result), BAD_REQUEST, result.status());
     assertResponseError("Must specify an edit operation", result);
@@ -928,7 +934,7 @@ public class XClusterConfigControllerTest extends FakeDBApplication {
     Result result =
         assertPlatformException(
             () ->
-                doRequestWithAuthTokenAndBody(
+                FakeApiHelper.doRequestWithAuthTokenAndBody(
                     "PUT", editAPIEndpoint, user.createAuthToken(), editNameRequest));
     assertEquals(contentAsString(result), BAD_REQUEST, result.status());
     String expectedErrMsg = String.format("Cannot find XClusterConfig %s", nonexistentUUID);
@@ -958,7 +964,7 @@ public class XClusterConfigControllerTest extends FakeDBApplication {
     Result result =
         assertPlatformException(
             () ->
-                doRequestWithAuthTokenAndBody(
+                FakeApiHelper.doRequestWithAuthTokenAndBody(
                     "PUT", editAPIEndpoint, user.createAuthToken(), editNameRequest));
     assertEquals(contentAsString(result), BAD_REQUEST, result.status());
     assertResponseError("XClusterConfig with same name already exists", result);
@@ -976,7 +982,8 @@ public class XClusterConfigControllerTest extends FakeDBApplication {
 
     String deleteAPIEndpoint = apiEndpoint + "/" + xClusterConfig.uuid;
 
-    Result result = doRequestWithAuthToken("DELETE", deleteAPIEndpoint, user.createAuthToken());
+    Result result =
+        FakeApiHelper.doRequestWithAuthToken("DELETE", deleteAPIEndpoint, user.createAuthToken());
     assertOk(result);
 
     JsonNode resultJson = Json.parse(contentAsString(result));
@@ -1008,7 +1015,8 @@ public class XClusterConfigControllerTest extends FakeDBApplication {
     String invalidCustomerAPIEndpoint = "/api/customers/" + invalidCustomer + "/xcluster_configs";
     String deleteAPIEndpoint = invalidCustomerAPIEndpoint + "/" + xClusterConfig.uuid;
 
-    Result result = doRequestWithAuthToken("DELETE", deleteAPIEndpoint, user.createAuthToken());
+    Result result =
+        FakeApiHelper.doRequestWithAuthToken("DELETE", deleteAPIEndpoint, user.createAuthToken());
     assertEquals(contentAsString(result), BAD_REQUEST, result.status());
     String expectedErrMsg =
         String.format(
@@ -1027,7 +1035,9 @@ public class XClusterConfigControllerTest extends FakeDBApplication {
 
     Result result =
         assertPlatformException(
-            () -> doRequestWithAuthToken("DELETE", deleteAPIEndpoint, user.createAuthToken()));
+            () ->
+                FakeApiHelper.doRequestWithAuthToken(
+                    "DELETE", deleteAPIEndpoint, user.createAuthToken()));
     assertEquals(contentAsString(result), BAD_REQUEST, result.status());
     String expectedErrMsg = String.format("Cannot find XClusterConfig %s", nonexistentUUID);
     assertResponseError(expectedErrMsg, result);
@@ -1039,7 +1049,8 @@ public class XClusterConfigControllerTest extends FakeDBApplication {
   public void testSync() {
     String syncAPIEndpoint = apiEndpoint + "/sync?targetUniverseUUID=" + targetUniverseUUID;
 
-    Result result = doRequestWithAuthToken("POST", syncAPIEndpoint, user.createAuthToken());
+    Result result =
+        FakeApiHelper.doRequestWithAuthToken("POST", syncAPIEndpoint, user.createAuthToken());
     assertOk(result);
 
     JsonNode resultJson = Json.parse(contentAsString(result));
@@ -1065,7 +1076,8 @@ public class XClusterConfigControllerTest extends FakeDBApplication {
     String syncAPIEndpoint =
         invalidCustomerAPIEndpoint + "/sync?targetUniverseUUID=" + targetUniverseUUID;
 
-    Result result = doRequestWithAuthToken("POST", syncAPIEndpoint, user.createAuthToken());
+    Result result =
+        FakeApiHelper.doRequestWithAuthToken("POST", syncAPIEndpoint, user.createAuthToken());
     assertEquals(contentAsString(result), BAD_REQUEST, result.status());
     String expectedErrMsg =
         String.format(
@@ -1082,7 +1094,9 @@ public class XClusterConfigControllerTest extends FakeDBApplication {
 
     Result result =
         assertPlatformException(
-            () -> doRequestWithAuthToken("POST", syncAPIEndpoint, user.createAuthToken()));
+            () ->
+                FakeApiHelper.doRequestWithAuthToken(
+                    "POST", syncAPIEndpoint, user.createAuthToken()));
     assertEquals(contentAsString(result), BAD_REQUEST, result.status());
     assertResponseError("Cannot find universe " + invalidUUID, result);
     assertNoTasksCreated();
@@ -1094,7 +1108,8 @@ public class XClusterConfigControllerTest extends FakeDBApplication {
     String invalidUUID = "foo";
     String syncAPIEndpoint = apiEndpoint + "/sync?targetUniverseUUID=" + invalidUUID;
 
-    Result result = doRequestWithAuthToken("POST", syncAPIEndpoint, user.createAuthToken());
+    Result result =
+        FakeApiHelper.doRequestWithAuthToken("POST", syncAPIEndpoint, user.createAuthToken());
     assertEquals(contentAsString(result), BAD_REQUEST, result.status());
     String expectedErrMsg =
         String.format(

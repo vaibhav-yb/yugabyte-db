@@ -17,6 +17,8 @@
 #include "yb/client/table_info.h"
 #include "yb/client/yb_table_name.h"
 
+
+#include "yb/common/colocated_util.h"
 #include "yb/common/pg_system_attr.h"
 #include "yb/common/ql_type.h"
 #include "yb/common/ql_wire_protocol.h"
@@ -44,6 +46,7 @@
 #include "yb/client/yb_op.h"
 #include "yb/master/master_util.h"
 #include "yb/util/debug-util.h"
+#include "yb/util/thread.h"
 
 using std::string;
 using namespace std::literals;
@@ -1790,22 +1793,26 @@ Status CatalogManager::IsBootstrapRequired(
 
     // TODO: Submit the task to a thread pool.
     // Capture everything by value to increase their refcounts.
-    std::thread async_task([this, table_id, stream_id, deadline, data_lock, task_completed,
-                            table_bootstrap_required, finished_tasks, total_tasks, promise] {
-      bool bootstrap_required = false;
-      auto status = IsTableBootstrapRequired(table_id, stream_id, deadline, &bootstrap_required);
-      std::lock_guard<std::mutex> lock(*data_lock);
-      if (*task_completed) {
-        return;  // Prevent calling set_value below twice.
-      }
-      (*table_bootstrap_required)[table_id] = bootstrap_required;
-      if (!status.ok() || ++(*finished_tasks) == total_tasks) {
-        // Short-circuit if error already encountered.
-        *task_completed = true;
-        promise->set_value(status);
-      }
-    });
-    async_task.detach();
+    scoped_refptr<Thread> async_task;
+    RETURN_NOT_OK(Thread::Create(
+        "xrepl_catalog_manager", "is_bootstrap_required",
+        [this, table_id, stream_id, deadline, data_lock, task_completed, table_bootstrap_required,
+         finished_tasks, total_tasks, promise] {
+          bool bootstrap_required = false;
+          auto status =
+              IsTableBootstrapRequired(table_id, stream_id, deadline, &bootstrap_required);
+          std::lock_guard<std::mutex> lock(*data_lock);
+          if (*task_completed) {
+            return;  // Prevent calling set_value below twice.
+          }
+          (*table_bootstrap_required)[table_id] = bootstrap_required;
+          if (!status.ok() || ++(*finished_tasks) == total_tasks) {
+            // Short-circuit if error already encountered.
+            *task_completed = true;
+            promise->set_value(status);
+          }
+        },
+        &async_task));
   }
 
   // Wait until the first promise is raised, and prepare response.

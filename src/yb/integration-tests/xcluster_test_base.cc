@@ -65,13 +65,19 @@ Status XClusterTestBase::InitClusters(const MiniClusterOptions& opts) {
 
   producer_cluster_.mini_cluster_ = std::make_unique<MiniCluster>(producer_opts);
 
-  RETURN_NOT_OK(producer_cluster()->StartSync());
+  {
+    TEST_SetThreadPrefixScoped prefix_se("P");
+    RETURN_NOT_OK(producer_cluster()->StartSync());
+  }
 
   auto consumer_opts = opts;
   consumer_opts.cluster_id = "consumer";
   consumer_cluster_.mini_cluster_ = std::make_unique<MiniCluster>(consumer_opts);
 
-  RETURN_NOT_OK(consumer_cluster()->StartSync());
+  {
+    TEST_SetThreadPrefixScoped prefix_se("C");
+    RETURN_NOT_OK(consumer_cluster()->StartSync());
+  }
 
   RETURN_NOT_OK(RunOnBothClusters([&opts](MiniCluster* cluster) {
     return cluster->WaitForTabletServerCount(opts.num_tablet_servers);
@@ -86,6 +92,7 @@ Status XClusterTestBase::InitClusters(const MiniClusterOptions& opts) {
 void XClusterTestBase::TearDown() {
   LOG(INFO) << "Destroying CDC Clusters";
   if (consumer_cluster()) {
+    TEST_SetThreadPrefixScoped prefix_se("C");
     if (consumer_cluster_.pg_supervisor_) {
       consumer_cluster_.pg_supervisor_->Stop();
     }
@@ -94,6 +101,7 @@ void XClusterTestBase::TearDown() {
   }
 
   if (producer_cluster()) {
+    TEST_SetThreadPrefixScoped prefix_se("P");
     if (producer_cluster_.pg_supervisor_) {
       producer_cluster_.pg_supervisor_->Stop();
     }
@@ -510,14 +518,15 @@ Status XClusterTestBase::WaitForValidSafeTimeOnAllTServers(
 
     RETURN_NOT_OK(WaitFor(
         [&]() -> Result<bool> {
-          auto safe_time =
+          auto safe_time_result =
               tserver->server()->GetXClusterSafeTimeMap().GetSafeTime(namespace_id);
-          if (!safe_time) {
+          if (!safe_time_result || !*safe_time_result) {
             return false;
           }
-          CHECK(safe_time->is_valid());
+          CHECK(safe_time_result.get()->is_valid());
           return true;
-        }, safe_time_propagation_timeout_,
+        },
+        safe_time_propagation_timeout_,
         Format("Wait for safe_time of namespace $0 to be valid", namespace_id)));
   }
 

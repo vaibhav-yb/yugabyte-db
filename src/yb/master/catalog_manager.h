@@ -286,6 +286,8 @@ class CatalogManager : public tserver::TabletPeerLookupIf,
 
   Status CreateTestEchoService();
 
+  Status CreatePgAutoAnalyzeService();
+
   // Get the information about an in-progress create operation.
   Status IsCreateTableDone(const IsCreateTableDoneRequestPB* req,
                            IsCreateTableDoneResponsePB* resp) override;
@@ -789,6 +791,8 @@ class CatalogManager : public tserver::TabletPeerLookupIf,
       const ChangeMasterClusterConfigRequestPB* req,
       ChangeMasterClusterConfigResponsePB* resp) override;
 
+  Status GetXClusterConfig(GetMasterXClusterConfigResponsePB* resp) override;
+  Status GetXClusterConfig(SysXClusterConfigEntryPB* config) override;
   Result<uint32_t> GetXClusterConfigVersion() const;
 
   // Validator for placement information with respect to cluster configuration

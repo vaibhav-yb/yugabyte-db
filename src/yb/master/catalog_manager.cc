@@ -75,6 +75,7 @@
 #include "yb/client/schema.h"
 #include "yb/client/universe_key_client.h"
 
+#include "yb/common/colocated_util.h"
 #include "yb/common/common.pb.h"
 #include "yb/common/common_flags.h"
 #include "yb/common/constants.h"
@@ -4896,6 +4897,32 @@ Status CatalogManager::CreateTestEchoService() {
   }
 
   service_created = true;
+  return Status::OK();
+}
+
+Status CatalogManager::CreatePgAutoAnalyzeService() {
+  static bool pg_auto_analyze_service_created = false;
+  if (pg_auto_analyze_service_created) {
+    return Status::OK();
+  }
+
+  client::YBSchemaBuilder schema_builder;
+  schema_builder.AddColumn(kPgAutoAnalyzeTableId)->HashPrimaryKey()->Type(DataType::STRING);
+  schema_builder.AddColumn(kPgAutoAnalyzeMutations)->Type(DataType::INT64);
+  schema_builder.AddColumn(kPgAutoAnalyzeLastAnalyzeInfo)->Type(DataType::JSONB);
+  schema_builder.AddColumn(kPgAutoAnalyzeCurrentAnalyzeInfo)->Type(DataType::JSONB);
+
+  client::YBSchema yb_schema;
+  CHECK_OK(schema_builder.Build(&yb_schema));
+
+  auto s = CreateStatefulService(StatefulServiceKind::PG_AUTO_ANALYZE, yb_schema);
+  // It is possible that the table was already created. If so, there is nothing to do so we just
+  // ignore the "AlreadyPresent" error.
+  if (!s.ok() && !s.IsAlreadyPresent()) {
+    return s;
+  }
+
+  pg_auto_analyze_service_created = true;
   return Status::OK();
 }
 
@@ -12079,6 +12106,17 @@ Status CatalogManager::SetClusterConfig(
 
   l.Commit();
 
+  return Status::OK();
+}
+
+Status CatalogManager::GetXClusterConfig(GetMasterXClusterConfigResponsePB* resp) {
+  return GetXClusterConfig(resp->mutable_xcluster_config());
+}
+
+Status CatalogManager::GetXClusterConfig(SysXClusterConfigEntryPB* config) {
+  auto xcluster_config = XClusterConfig();
+  DCHECK(xcluster_config) << "Missing xcluster config for master!";
+  *config = xcluster_config->LockForRead()->pb;
   return Status::OK();
 }
 

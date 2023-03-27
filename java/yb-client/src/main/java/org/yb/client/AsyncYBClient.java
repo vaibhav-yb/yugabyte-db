@@ -111,11 +111,13 @@ import org.yb.CommonTypes.YQLDatabase;
 import org.yb.Schema;
 import org.yb.annotations.InterfaceAudience;
 import org.yb.annotations.InterfaceStability;
+import org.yb.cdc.CdcConsumer.XClusterRole;
 import org.yb.master.CatalogEntityInfo;
 import org.yb.master.MasterClientOuterClass;
 import org.yb.master.MasterClientOuterClass.GetTableLocationsResponsePB;
 import org.yb.master.MasterDdlOuterClass;
 import org.yb.master.MasterReplicationOuterClass;
+import org.yb.master.MasterTypes.MasterErrorPB;
 import org.yb.util.*;
 
 import javax.net.ssl.KeyManagerFactory;
@@ -311,7 +313,7 @@ public class AsyncYBClient implements AutoCloseable {
     this.bootstrap = b.createBootstrap(eventLoopGroup);
     this.masterAddresses = b.masterAddresses;
     this.masterTable = new YBTable(this, MASTER_TABLE_NAME_PLACEHOLDER,
-        MASTER_TABLE_NAME_PLACEHOLDER, null, null);
+        MASTER_TABLE_NAME_PLACEHOLDER, null, null, false);
     this.defaultOperationTimeoutMs = b.defaultOperationTimeoutMs;
     this.defaultAdminOperationTimeoutMs = b.defaultAdminOperationTimeoutMs;
     this.certFile = b.certFile;
@@ -1268,6 +1270,21 @@ public class AsyncYBClient implements AutoCloseable {
   }
 
   /**
+   * It sets the universe role for transactional xClusters.
+   *
+   * @param role The role to set the universe to
+   * @return A deferred object that yields a {@link ChangeXClusterRoleResponse} which contains
+   *         an {@link MasterErrorPB} object specifying whether the operation was successful
+   */
+  public Deferred<ChangeXClusterRoleResponse> changeXClusterRole(XClusterRole role) {
+    checkIsClosed();
+    ChangeXClusterRoleRequest request =
+        new ChangeXClusterRoleRequest(this.masterTable, role);
+    request.setTimeoutMillis(defaultAdminOperationTimeoutMs);
+    return sendRpcToTablet(request);
+  }
+
+  /**
    * It returns a list of CDC streams for a tableId or namespacedId based on its arguments.
    *
    * <p>Note: For xCluster purposes, use tableId and set {@code idType} to {@code TABLE_ID}.</p>
@@ -1524,7 +1541,8 @@ public class AsyncYBClient implements AutoCloseable {
             response.getSchema(),
             response.getPartitionSchema(),
             response.getTableType(),
-            response.getNamespace());
+            response.getNamespace(),
+            response.isColocated());
         return helper.attemptOpen(response.isCreateTableDone(), table, name);
       }
     });
@@ -1551,7 +1569,8 @@ public class AsyncYBClient implements AutoCloseable {
             response.getSchema(),
             response.getPartitionSchema(),
             response.getTableType(),
-            response.getNamespace());
+            response.getNamespace(),
+            response.isColocated());
         return helper.attemptOpen(response.isCreateTableDone(), table, tableUUID);
       }
     });

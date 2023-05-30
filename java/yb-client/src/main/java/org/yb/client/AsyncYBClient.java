@@ -1886,6 +1886,9 @@ public class AsyncYBClient implements AutoCloseable {
         request instanceof SplitTabletRequest ||
         request instanceof FlushTableRequest) {
       tablet = getFirstTablet(tableId);
+      if (tablet == null) {
+        LOG.info("getFirstTablet returned null remote tablet for tableId " + tableId);
+      }
     }
     // Set the propagated timestamp so that the next time we send a message to
     // the server the message includes the last propagated timestamp.
@@ -1902,6 +1905,8 @@ public class AsyncYBClient implements AutoCloseable {
         final Deferred<R> d = request.getDeferred();
         tabletClient.sendRpc(request);
         return d;
+      } else {
+        LOG.info("TabletClient null for remote tablet " + tablet.getTabletId().toString());
       }
     }
 
@@ -1921,6 +1926,14 @@ public class AsyncYBClient implements AutoCloseable {
     Deferred<GetTableLocationsResponsePB> returnedD =
         locateTablet(request.getTable(), partitionKey, true);
 
+    try {
+      GetTableLocationsResponsePB resp = returnedD.join();
+      if (resp.hasError()) {
+        LOG.info("GetTableLocations returned with error: " + resp.getError());
+      }
+    } catch (Exception e) {
+      LOG.info("Exception while joining the deferred " + returnedD);
+    }
     return AsyncUtil.addCallbacksDeferring(returnedD, cb, eb);
   }
 
@@ -2253,6 +2266,9 @@ public class AsyncYBClient implements AutoCloseable {
       // looked up the tablet we're interested in.  Every once in a while
       // this will save us a Master lookup.
       RemoteTablet tablet = getTablet(tableId, partitionKey);
+      if (tablet == null) {
+        LOG.info("RemoteTablet is null while fetching for " + tableId);
+      }
       if (tablet != null && clientFor(tablet) != null) {
         return Deferred.fromResult(null);  // Looks like no lookup needed.
       }

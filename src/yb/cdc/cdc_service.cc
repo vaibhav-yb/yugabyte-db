@@ -3791,7 +3791,8 @@ Result<CDCSDKCheckpointPB> CDCServiceImpl::GetLastCheckpointFromCdcState(
   const auto& entry = *entry_opt;
   auto& cdc_sdk_op_id = *entry.checkpoint;
 
-  if (ignore_unpolled_tablets && !entry.last_replication_time && request_source == CDCRequestSource::CDCSDK) {
+  if (ignore_unpolled_tablets && !entry.last_replication_time
+        && request_source == CDCRequestSource::CDCSDK) {
     // This would mean the row is un-polled through GetChanges, since the 'kCdcLastReplicationTime'
     // column is null. There is a small window where children tablets after tablet split have a
     // valid checkpoint but they will not have the 'kCdcLastReplicationTime' value set.

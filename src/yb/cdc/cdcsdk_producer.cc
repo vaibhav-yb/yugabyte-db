@@ -2324,12 +2324,13 @@ Status GetChangesForCDCSDK(
           resp_records_size += resp->cdc_sdk_proto_records(resp_num_records).ByteSizeLong();
         }
 
+        LOG(INFO) << "VKVK Response records size printed here after batch, resp_records_size: "
+                << resp_records_size
+                << ", threshold: " << FLAGS_cdc_stream_records_threshold_size_bytes
+                << ", resp_num_records: " << resp_num_records << ", tablet_id: " << tablet_id;
+
         if (resp_records_size >= FLAGS_cdc_stream_records_threshold_size_bytes) {
-          VLOG(1) << "Response records size crossed the thresold size. Will stream rest of the "
-                     "records in next GetChanges Call. resp_records_size: "
-                  << resp_records_size
-                  << ", threshold: " << FLAGS_cdc_stream_records_threshold_size_bytes
-                  << ", resp_num_records: " << resp_num_records << ", tablet_id: " << tablet_id;
+          LOG(INFO) << "VKVK breaking response because the threshold reached limit";
           break;
         }
 
@@ -2395,7 +2396,7 @@ Status GetChangesForCDCSDK(
               op_id.term = msg->id().term();
               op_id.index = msg->id().index();
 
-              VLOG(3) << "Will stream records for a multi-shard transaction. op_id: "
+              LOG(INFO) << "Will stream records for a multi-shard transaction. op_id: "
                       << msg->id().ShortDebugString() << ", tablet_id: " << tablet_id
                       << ", transaction_id: " << txn_id << ", commit_time: " << *commit_timestamp;
 
@@ -2672,7 +2673,7 @@ Status GetChangesForCDCSDK(
         record_from_op_id);
   }
 
-  VLOG(1) << "Sending GetChanges response. cdcsdk_checkpoint: "
+  LOG(INFO) << "Sending GetChanges response. cdcsdk_checkpoint: "
           << resp->cdc_sdk_checkpoint().ShortDebugString()
           << ", safe_hybrid_time: " << resp->safe_hybrid_time()
           << ", wal_segment_index: " << resp->wal_segment_index()

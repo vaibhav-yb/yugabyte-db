@@ -43,10 +43,14 @@
 #include "yb/tablet/tablet_metadata.h"
 #include "yb/tablet/tablet_peer.h"
 #include "yb/tablet/tablet.h"
+#include "yb/tablet/tablet_types.pb.h"
 #include "yb/tablet/transaction_participant.h"
 
 #include "yb/util/flags.h"
 #include "yb/util/logging.h"
+#include "yb/util/opid.h"
+#include "yb/util/status.h"
+#include "yb/util/status_format.h"
 
 using std::string;
 
@@ -1088,6 +1092,14 @@ Status PopulateCDCSDKWriteRecord(
                                     row_message->op() == RowMessage_Op_UPDATE)) {
       Slice sub_doc_key = key;
       dockv::SubDocKey decoded_key;
+      
+      auto key_bounds = tablet_ptr->key_bounds();
+      LOG(INFO) << "VKVK key bounds lower: " << key_bounds.lower << " and upper: " << key_bounds.upper;
+      if (!key_bounds.IsWithinBounds(key)) {
+        LOG(INFO) << "VKVK key is not within bounds, will skip this record having primary key " << primary_key.data();
+        return Status::OK();
+      }
+
       RETURN_NOT_OK(decoded_key.DecodeFrom(&sub_doc_key, dockv::HybridTimeRequired::kFalse));
       if (colocated) {
         colocation_id = decoded_key.doc_key().colocation_id();
@@ -2027,6 +2039,13 @@ Status HandleGetChangesForSnapshotRequest(
   auto txn_participant = tablet_ptr->transaction_participant();
   ReadHybridTime time;
 
+  if (tablet_ptr->metadata()->tablet_data_state() == tablet::TABLET_DATA_SPLIT_COMPLETED) {
+    // Todo: return here that the tablet is split
+    return STATUS_FORMAT(
+      TabletSplit, "Tablet split detected on tablet while snapshot: $0, will move to children immediately", tablet_id
+    );
+  }
+
   // It is first call in snapshot then take snapshot.
   if ((from_op_id.key().empty()) && (from_op_id.snapshot_time() == 0)) {
     tablet::RemoveIntentsData data;
@@ -2310,6 +2329,8 @@ Status GetChangesForCDCSDK(
                           << safe_hybrid_time_req << ", consistent_safe_time "
                           << consistent_stream_safe_time;
         break;
+      } else {
+        LOG(INFO) << "VKVK read " << wal_records.size() << " wal records";
       }
 
       auto txn_participant = tablet_ptr->transaction_participant();
@@ -2369,6 +2390,14 @@ Status GetChangesForCDCSDK(
                  "consistent_safe_time: "
               << consistent_stream_safe_time << "safe_hybrid_time_req: " << safe_hybrid_time_req
               << ", tablet_id: " << tablet_id << ", wal_msg: " << msg->ShortDebugString();
+          break;
+        }
+
+        if (tablet_ptr->metadata()->tablet_data_state() == tablet::TABLET_DATA_SPLIT_COMPLETED) {
+          // If we detect that the tablet is split then no need to iterate over the messages further.
+          saw_split_op = true;
+          report_tablet_split = true;
+          split_op_id = op_id;
           break;
         }
 
@@ -2534,6 +2563,8 @@ Status GetChangesForCDCSDK(
               break;
             }
 
+            LOG(INFO) << "VKVK read a split_op on tablet " << tablet_id;
+
             // Set 'saw_split_op' to true only if the split op is for the current tablet.
             saw_split_op = true;
 
@@ -2558,6 +2589,7 @@ Status GetChangesForCDCSDK(
                 LOG(INFO) << "Found SPLIT_OP record with OpId: " << op_id
                           << ", for parent tablet: " << tablet_id
                           << ", will stream all seen records until now.";
+                // Todo Vaibhav: This is where we will need to report the split to the client.
               } else {
                 // If 'GetChangesForCDCSDK' was called with the OpId just before the SplitOp's
                 // record, and if there is no more data to stream and we can notify the client
@@ -2620,9 +2652,15 @@ Status GetChangesForCDCSDK(
   // If the split_op_id is equal to the checkpoint i.e the OpId of the last actionable message, we
   // know that after the split there are no more actionable messages, and this confirms that the
   // SPLIT OP was succesfull.
-  if (!snapshot_operation && split_op_id.term == checkpoint.term() &&
-      split_op_id.index == checkpoint.index()) {
-    report_tablet_split = true;
+  // if (!snapshot_operation && split_op_id.term == checkpoint.term() &&
+  //     split_op_id.index == checkpoint.index()) {
+  //   LOG(INFO) << "VKVK setting report tablet split to true";
+  //   report_tablet_split = true;
+  // }
+  if (!snapshot_operation && report_tablet_split) {
+    return STATUS_FORMAT(
+      TabletSplit, "Tablet split detected on tablet: $0, will move to children immediately", tablet_id
+    );
   }
 
   if (consumption) {
@@ -2653,6 +2691,8 @@ Status GetChangesForCDCSDK(
   }
 
   if (report_tablet_split) {
+    // TODO Vaibhav: This log will also change, even when there are records to stream.
+    LOG(INFO) << "VKVK setting status as tablet split";
     return STATUS_FORMAT(
         TabletSplit, "Tablet Split on tablet: $0, no more records to stream", tablet_id);
   }

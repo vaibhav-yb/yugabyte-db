@@ -290,6 +290,13 @@ class CDCSDKYsqlTest : public CDCSDKTestBase {
       const google::protobuf::RepeatedPtrField<master::TabletLocationsPB>& tablets,
       const GetChangesResponsePB* change_resp,
       const TableId table_id = "");
+  
+  Result<GetChangesResponsePB> UpdateCheckpoint(
+      const xrepl::StreamId& stream_id,
+      const google::protobuf::RepeatedPtrField<master::TabletLocationsPB>& tablets,
+      const uint32_t tablet_idx,
+      const GetChangesResponsePB* change_resp,
+      const TableId table_id = "");
 
   std::unique_ptr<tserver::TabletServerAdminServiceProxy> GetTServerAdminProxy(
       const uint32_t tserver_index);
@@ -427,6 +434,12 @@ class CDCSDKYsqlTest : public CDCSDKTestBase {
   Result<GetChangesResponsePB> GetChangesFromCDCSnapshot(
       const xrepl::StreamId& stream_id,
       const google::protobuf::RepeatedPtrField<master::TabletLocationsPB>& tablets,
+      const TableId& colocated_table_id = "");
+
+  Result<GetChangesResponsePB> GetChangesFromCDCSnapshot(
+      const xrepl::StreamId& stream_id,
+      const google::protobuf::RepeatedPtrField<master::TabletLocationsPB>& tablets,
+      const uint32_t tablet_idx,
       const TableId& colocated_table_id = "");
 
   void TestGetChanges(

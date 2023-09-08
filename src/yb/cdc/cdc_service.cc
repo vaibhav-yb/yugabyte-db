@@ -1655,6 +1655,7 @@ void CDCServiceImpl::GetChanges(
             &CDCServiceImpl::UpdateChildrenTabletsOnSplitOp, this, producer_tablet, _1),
         mem_tracker, get_changes_deadline, &record, &msgs_holder, resp, &last_readable_index);
   } else {
+    LOG(INFO) << "VKVK calling getChanges in cdc_service";
     uint64_t commit_timestamp;
     OpId last_streamed_op_id;
     auto cached_schema_details = impl_->GetOrAddSchema(producer_tablet, req->need_schema_info());
@@ -1682,6 +1683,7 @@ void CDCServiceImpl::GetChanges(
         GetCompositeAttsMapFromCache(namespace_name, cql_namespace), resp->mutable_error(),
         CDCErrorPB::INTERNAL_ERROR, context);
 
+    LOG(INFO) << "VKVK calling getChangesForCDCSDK";
     status = GetChangesForCDCSDK(
         stream_id, req->tablet_id(), cdc_sdk_from_op_id, record, tablet_peer, mem_tracker, enum_map,
         composite_atts_map, client(), &msgs_holder, resp, &commit_timestamp, &cached_schema_details,
@@ -1709,6 +1711,7 @@ void CDCServiceImpl::GetChanges(
       // Clean all the records which got added in the resp, till the enum cache miss failure is
       // encountered.
       resp->clear_cdc_sdk_proto_records();
+      LOG(INFO) << "VKVK got cache miss error, trying getchangesforcdcsdk again";
       status = GetChangesForCDCSDK(
           stream_id, req->tablet_id(), cdc_sdk_from_op_id, record, tablet_peer, mem_tracker,
           enum_map, composite_atts_map, client(), &msgs_holder, resp, &commit_timestamp,
@@ -1718,6 +1721,7 @@ void CDCServiceImpl::GetChanges(
     }
     // This specific error indicates that a tablet split occured on the tablet.
     if (status.IsTabletSplit()) {
+      LOG(INFO) << "VKVK status has tablet split set";
       status = UpdateChildrenTabletsOnSplitOpForCDCSDK(producer_tablet);
       RPC_STATUS_RETURN_ERROR(status, resp->mutable_error(), CDCErrorPB::INTERNAL_ERROR, context);
 
@@ -1750,6 +1754,8 @@ void CDCServiceImpl::GetChanges(
           tablet_peer->LeaderTerm() == original_leader_term,
       STATUS_FORMAT(NotFound, "Not leader for $0", req->tablet_id()), resp->mutable_error(),
       CDCErrorPB::TABLET_NOT_FOUND, context);
+
+  // TODO Vaibhav: This might be the place where we will need to check for split in every single call
 
   // Store information about the last server read & remote client ACK.
   uint64_t last_record_hybrid_time =
@@ -1844,6 +1850,7 @@ void CDCServiceImpl::GetChanges(
       resp, producer_tablet, tablet_peer, from_op_id, record.GetSourceType(), last_readable_index);
 
   if (report_tablet_split) {
+    LOG(INFO) << "VKVK reporting tablet split on tablet " << producer_tablet.tablet_id;
     RPC_STATUS_RETURN_ERROR(
         impl_->EraseTabletAndStreamEntry(producer_tablet), resp->mutable_error(),
         CDCErrorPB::INTERNAL_ERROR, context);

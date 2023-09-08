@@ -240,7 +240,7 @@ namespace cdc {
     auto conn = VERIFY_RESULT(cluster->ConnectToDB(kNamespaceName));
     LOG(INFO) << "Writing " << end - start << " row(s) within transaction";
 
-    RETURN_NOT_OK(conn.Execute("BEGIN"));
+    // RETURN_NOT_OK(conn.Execute("BEGIN"));
     for (uint32_t i = start; i < end; ++i) {
       if (!optional_cols_name.empty()) {
         std::stringstream columns_name;
@@ -268,11 +268,11 @@ namespace cdc {
         RETURN_NOT_OK(conn.ExecuteFormat(statement, table_name));
       }
     }
-    if (flag) {
-      RETURN_NOT_OK(conn.Execute("COMMIT"));
-    } else {
-      RETURN_NOT_OK(conn.Execute("ABORT"));
-    }
+    // if (flag) {
+    //   RETURN_NOT_OK(conn.Execute("COMMIT"));
+    // } else {
+    //   RETURN_NOT_OK(conn.Execute("ABORT"));
+    // }
     return Status::OK();
   }
 
@@ -754,6 +754,28 @@ namespace cdc {
     GetChangesResponsePB change_resp2;
     PrepareChangeRequest(
         &change_req2, stream_id, tablets, 0, change_resp->cdc_sdk_checkpoint().index(),
+        change_resp->cdc_sdk_checkpoint().term(), change_resp->cdc_sdk_checkpoint().key(),
+        change_resp->cdc_sdk_checkpoint().write_id(),
+        change_resp->cdc_sdk_checkpoint().snapshot_time(), table_id);
+    RpcController get_changes_rpc;
+    RETURN_NOT_OK(cdc_proxy_->GetChanges(change_req2, &change_resp2, &get_changes_rpc));
+    if (change_resp2.has_error()) {
+      return StatusFromPB(change_resp2.error().status());
+    }
+
+    return change_resp2;
+  }
+
+  Result<GetChangesResponsePB> CDCSDKYsqlTest::UpdateCheckpoint(
+      const xrepl::StreamId& stream_id,
+      const google::protobuf::RepeatedPtrField<master::TabletLocationsPB>& tablets,
+      const uint32_t tablet_idx,
+      const GetChangesResponsePB* change_resp,
+      const TableId table_id) {
+    GetChangesRequestPB change_req2;
+    GetChangesResponsePB change_resp2;
+    PrepareChangeRequest(
+        &change_req2, stream_id, tablets, tablet_idx, change_resp->cdc_sdk_checkpoint().index(),
         change_resp->cdc_sdk_checkpoint().term(), change_resp->cdc_sdk_checkpoint().key(),
         change_resp->cdc_sdk_checkpoint().write_id(),
         change_resp->cdc_sdk_checkpoint().snapshot_time(), table_id);
@@ -1515,6 +1537,23 @@ namespace cdc {
     GetChangesRequestPB change_req;
     GetChangesResponsePB change_resp;
     PrepareChangeRequest(&change_req, stream_id, tablets, 0, 0, 0, "", -1, 0, colocated_table_id);
+    RpcController get_changes_rpc;
+    RETURN_NOT_OK(cdc_proxy_->GetChanges(change_req, &change_resp, &get_changes_rpc));
+
+    if (change_resp.has_error()) {
+      return StatusFromPB(change_resp.error().status());
+    }
+    return change_resp;
+  }
+
+  Result<GetChangesResponsePB> CDCSDKYsqlTest::GetChangesFromCDCSnapshot(
+      const xrepl::StreamId& stream_id,
+      const google::protobuf::RepeatedPtrField<master::TabletLocationsPB>& tablets,
+      const uint32_t tablet_idx,
+      const TableId& colocated_table_id) {
+    GetChangesRequestPB change_req;
+    GetChangesResponsePB change_resp;
+    PrepareChangeRequest(&change_req, stream_id, tablets, tablet_idx, 0, 0, "", -1, 0, colocated_table_id);
     RpcController get_changes_rpc;
     RETURN_NOT_OK(cdc_proxy_->GetChanges(change_req, &change_resp, &get_changes_rpc));
 

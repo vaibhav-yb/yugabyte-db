@@ -396,11 +396,13 @@ TEST_F(CDCSDKYsqlTest, YB_DISABLE_TEST_IN_TSAN(TestGetChangesAfterSplit)) {
   // Call GetChanges on the children tablets now to ensure that we receive records from
   // them now.
   GetChangesResponsePB child_resp_1 =
-      ASSERT_RESULT(GetChangesFromCDC(stream_id, tablets_after_split, &change_resp_1.cdc_sdk_checkpoint(), 0));
+      ASSERT_RESULT(GetChangesFromCDC(stream_id, tablets_after_split,
+                                      &change_resp_1.cdc_sdk_checkpoint(), 0));
   LOG(INFO) << "Child response 1 size: " << child_resp_1.cdc_sdk_proto_records_size();
 
   GetChangesResponsePB child_resp_2 =
-      ASSERT_RESULT(GetChangesFromCDC(stream_id, tablets_after_split, &change_resp_1.cdc_sdk_checkpoint(), 1));
+      ASSERT_RESULT(GetChangesFromCDC(stream_id, tablets_after_split,
+                                      &change_resp_1.cdc_sdk_checkpoint(), 1));
   LOG(INFO) << "Child response 2 size: " << child_resp_2.cdc_sdk_proto_records_size();
 
   // Total count of records should be as expected.

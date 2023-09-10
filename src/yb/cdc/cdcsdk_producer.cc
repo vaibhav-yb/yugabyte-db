@@ -1095,7 +1095,8 @@ Status PopulateCDCSDKWriteRecord(
 
       auto key_bounds = tablet_ptr->key_bounds();
       if (!key_bounds.IsWithinBounds(key)) {
-        VLOG(1) << "Key for the read record is not within tablet bounds, skipping the key: " << primary_key.data();
+        VLOG(1) << "Key for the read record is not within tablet bounds, skipping the key: "
+                << primary_key.data();
         // Todo: Is returning an OK status correct thing here?
         return Status::OK();
       }

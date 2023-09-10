@@ -43,10 +43,14 @@
 #include "yb/tablet/tablet_metadata.h"
 #include "yb/tablet/tablet_peer.h"
 #include "yb/tablet/tablet.h"
+#include "yb/tablet/tablet_types.pb.h"
 #include "yb/tablet/transaction_participant.h"
 
 #include "yb/util/flags.h"
 #include "yb/util/logging.h"
+#include "yb/util/opid.h"
+#include "yb/util/status.h"
+#include "yb/util/status_format.h"
 
 using std::string;
 
@@ -1088,6 +1092,14 @@ Status PopulateCDCSDKWriteRecord(
                                     row_message->op() == RowMessage_Op_UPDATE)) {
       Slice sub_doc_key = key;
       dockv::SubDocKey decoded_key;
+
+      auto key_bounds = tablet_ptr->key_bounds();
+      if (!key_bounds.IsWithinBounds(key)) {
+        VLOG(1) << "Key for the read record is not within tablet bounds, skipping the key: " << primary_key.data();
+        // Todo: Is returning an OK status correct thing here?
+        return Status::OK();
+      }
+
       RETURN_NOT_OK(decoded_key.DecodeFrom(&sub_doc_key, dockv::HybridTimeRequired::kFalse));
       if (colocated) {
         colocation_id = decoded_key.doc_key().colocation_id();
@@ -2372,6 +2384,15 @@ Status GetChangesForCDCSDK(
           break;
         }
 
+        if (tablet_ptr->metadata()->tablet_data_state() == tablet::TABLET_DATA_SPLIT_COMPLETED) {
+          // No need to iterate further if tablet split is detected.
+          // Todo: See if this check can be put outside the loop where we iterate on records.
+          saw_split_op = true;
+          report_tablet_split = true;
+          split_op_id = op_id;
+          break;
+        }
+
         switch (msg->op_type()) {
           case consensus::OperationType::UPDATE_TRANSACTION_OP:
             // Ignore intents.
@@ -2620,9 +2641,14 @@ Status GetChangesForCDCSDK(
   // If the split_op_id is equal to the checkpoint i.e the OpId of the last actionable message, we
   // know that after the split there are no more actionable messages, and this confirms that the
   // SPLIT OP was succesfull.
-  if (!snapshot_operation && split_op_id.term == checkpoint.term() &&
-      split_op_id.index == checkpoint.index()) {
-    report_tablet_split = true;
+  // If we have earlier detected that the tablet has completed splitting then we should return the
+  // the split error to the client.
+  if (!snapshot_operation && report_tablet_split) {
+    LOG(INFO) << "Tablet split detected for tablet " << tablet_id
+              << ", moving to children tablets immediately";
+    return STATUS_FORMAT(
+      TabletSplit, "Tablet split detected on $0", tablet_id
+    );
   }
 
   if (consumption) {
@@ -2654,7 +2680,8 @@ Status GetChangesForCDCSDK(
 
   if (report_tablet_split) {
     return STATUS_FORMAT(
-        TabletSplit, "Tablet Split on tablet: $0, no more records to stream", tablet_id);
+        TabletSplit, "Tablet Split on tablet: $0, will stream further records from children",
+        tablet_id);
   }
 
   // We do not populate SAFEPOINT records in two scenarios:

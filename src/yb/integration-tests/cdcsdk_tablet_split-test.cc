@@ -11,9 +11,11 @@
 // under the License.
 
 #include "yb/cdc/cdc_service.pb.h"
+#include "yb/gutil/dynamic_annotations.h"
 #include "yb/integration-tests/cdcsdk_ysql_test_base.h"
 
 #include "yb/cdc/cdc_state_table.h"
+#include "yb/util/test_macros.h"
 
 namespace yb {
 namespace cdc {
@@ -351,6 +353,58 @@ TEST_F(CDCSDKYsqlTest, YB_DISABLE_TEST_IN_TSAN(TestGetChangesOnChildrenOnSplit))
   GetChangesResponsePB child_resp_2 =
       ASSERT_RESULT(GetChangesFromCDC(stream_id, tablets_after_split, nullptr, 1,
                                       safe_hybrid_time, wal_segment_index, false));
+}
+
+TEST_F(CDCSDKYsqlTest, YB_DISABLE_TEST_IN_TSAN(TestGetChangesAfterSplit)) {
+  ANNOTATE_UNPROTECTED_WRITE(FLAGS_update_min_cdc_indices_interval_secs) = 1;
+  ANNOTATE_UNPROTECTED_WRITE(FLAGS_cdc_state_checkpoint_update_interval_ms) = 1;
+  ANNOTATE_UNPROTECTED_WRITE(FLAGS_aborted_intent_cleanup_ms) = 1000;
+  ANNOTATE_UNPROTECTED_WRITE(FLAGS_cdc_populate_end_markers_transactions) = false;
+  google::protobuf::RepeatedPtrField<master::TabletLocationsPB> tablets;
+  ASSERT_OK(SetUpWithParams(3, 1, false));
+  const uint32_t num_tablets = 1;
+
+  auto table = ASSERT_RESULT(CreateTable(&test_cluster_, kNamespaceName, kTableName, num_tablets));
+  ASSERT_OK(test_client()->GetTablets(table, 0, &tablets, /* partition_list_version =*/nullptr));
+  ASSERT_EQ(tablets.size(), num_tablets);
+
+  xrepl::StreamId stream_id = ASSERT_RESULT(CreateDBStream(IMPLICIT));
+  auto resp = ASSERT_RESULT(SetCDCCheckpoint(stream_id, tablets));
+  ASSERT_FALSE(resp.has_error());
+  GetChangesResponsePB change_resp_1 = ASSERT_RESULT(GetChangesFromCDC(stream_id, tablets));
+
+  TableId table_id = ASSERT_RESULT(GetTableId(&test_cluster_, kNamespaceName, kTableName));
+  ASSERT_OK(WriteRowsHelper(1, 10, &test_cluster_, true));
+  ASSERT_OK(test_client()->FlushTables(
+      {table.table_id()}, /* add_indexes = */ false, /* timeout_secs = */ 30,
+      /* is_compaction = */ true));
+  std::this_thread::sleep_for(std::chrono::milliseconds(FLAGS_aborted_intent_cleanup_ms));
+  ASSERT_OK(test_cluster_.mini_cluster_->CompactTablets());
+  SleepFor(MonoDelta::FromSeconds(30));
+
+  WaitUntilSplitIsSuccesful(tablets.Get(0).tablet_id(), table);
+
+  // Call GetChanges and ensure that it fails on parent since it has been split now.
+  ASSERT_NOK(GetChangesFromCDC(stream_id, tablets, &change_resp_1.cdc_sdk_checkpoint()));
+
+  google::protobuf::RepeatedPtrField<master::TabletLocationsPB> tablets_after_split;
+  ASSERT_OK(test_client()->GetTablets(table, 0, &tablets_after_split,
+                                      /* partition_list_version =*/nullptr));
+
+  ASSERT_EQ(2, tablets_after_split.size());
+
+  // Call GetChanges on the children tablets now to ensure that we receive records from
+  // them now.
+  GetChangesResponsePB child_resp_1 =
+      ASSERT_RESULT(GetChangesFromCDC(stream_id, tablets_after_split, &change_resp_1.cdc_sdk_checkpoint(), 0));
+  LOG(INFO) << "Child response 1 size: " << child_resp_1.cdc_sdk_proto_records_size();
+
+  GetChangesResponsePB child_resp_2 =
+      ASSERT_RESULT(GetChangesFromCDC(stream_id, tablets_after_split, &change_resp_1.cdc_sdk_checkpoint(), 1));
+  LOG(INFO) << "Child response 2 size: " << child_resp_2.cdc_sdk_proto_records_size();
+
+  // Total count of records should be as expected.
+  // TODO: Add assertion here.
 }
 
 TEST_F(CDCSDKYsqlTest, YB_DISABLE_TEST_IN_TSAN(TestGetChangesOnParentTabletAfterTabletSplit)) {

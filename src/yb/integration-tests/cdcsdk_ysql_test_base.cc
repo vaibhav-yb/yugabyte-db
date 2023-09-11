@@ -272,7 +272,7 @@ namespace cdc {
         RETURN_NOT_OK(conn.ExecuteFormat(statement, table_name));
       }
     }
-    
+
     if (transaction_enabled) {
       if (flag) {
         RETURN_NOT_OK(conn.Execute("COMMIT"));

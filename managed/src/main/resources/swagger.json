@@ -2677,7 +2677,7 @@
       "properties" : {
         "components" : {
           "items" : {
-            "enum" : [ "UniverseLogs", "ApplicationLogs", "OutputFiles", "ErrorFiles", "CoreFiles", "GFlags", "Instance", "ConsensusMeta", "TabletMeta", "YbcLogs", "K8sInfo", "NodeAgent" ],
+            "enum" : [ "UniverseLogs", "OutputFiles", "ErrorFiles", "CoreFiles", "GFlags", "Instance", "ConsensusMeta", "TabletMeta", "YbcLogs", "K8sInfo", "NodeAgent", "ApplicationLogs" ],
             "type" : "string"
           },
           "type" : "array"
@@ -5080,6 +5080,10 @@
           "$ref" : "#/definitions/ImageBundleDetails",
           "description" : "Image Bundle Details"
         },
+        "metadata" : {
+          "$ref" : "#/definitions/Metadata",
+          "description" : "Metadata for imageBundle"
+        },
         "name" : {
           "description" : "Image Bundle Name",
           "type" : "string"
@@ -5207,21 +5211,23 @@
     "InstanceTypeDetails" : {
       "properties" : {
         "arch" : {
+          "description" : "Architecture for the instance.",
           "enum" : [ "x86_64", "aarch64" ],
           "type" : "string"
         },
         "tenancy" : {
+          "description" : "Tenancy for the instance.",
           "enum" : [ "Shared", "Dedicated", "Host" ],
           "type" : "string"
         },
         "volumeDetailsList" : {
+          "description" : "Volume Details for the instance.",
           "items" : {
             "$ref" : "#/definitions/VolumeDetails"
           },
           "type" : "array"
         }
       },
-      "required" : [ "arch", "tenancy", "volumeDetailsList" ],
       "type" : "object"
     },
     "InstanceTypeKey" : {
@@ -5998,6 +6004,19 @@
         }
       },
       "required" : [ "masters" ],
+      "type" : "object"
+    },
+    "Metadata" : {
+      "properties" : {
+        "type" : {
+          "enum" : [ "YBA_ACTIVE", "YBA_DEPRECATED", "CUSTOM" ],
+          "type" : "string"
+        },
+        "version" : {
+          "type" : "string"
+        }
+      },
+      "required" : [ "type", "version" ],
       "type" : "object"
     },
     "Metric" : {
@@ -10554,7 +10573,7 @@
         "components" : {
           "description" : "List of components to be included in the support bundle",
           "items" : {
-            "enum" : [ "UniverseLogs", "ApplicationLogs", "OutputFiles", "ErrorFiles", "CoreFiles", "GFlags", "Instance", "ConsensusMeta", "TabletMeta", "YbcLogs", "K8sInfo", "NodeAgent" ],
+            "enum" : [ "UniverseLogs", "OutputFiles", "ErrorFiles", "CoreFiles", "GFlags", "Instance", "ConsensusMeta", "TabletMeta", "YbcLogs", "K8sInfo", "NodeAgent", "ApplicationLogs" ],
             "type" : "string"
           },
           "type" : "array"
@@ -13017,10 +13036,17 @@
           "type" : "string"
         },
         "role" : {
-          "description" : "User role",
+          "description" : "User role. Deprecated. Use field roleResourceDefinitions instead.",
           "enum" : [ "ConnectOnly", "ReadOnly", "BackupAdmin", "Admin", "SuperAdmin" ],
           "example" : "Admin",
           "type" : "string"
+        },
+        "roleResourceDefinitions" : {
+          "description" : "List of roles and resource groups defined for user.",
+          "items" : {
+            "$ref" : "#/definitions/RoleResourceDefinition"
+          },
+          "type" : "array"
         },
         "timezone" : {
           "description" : "User timezone",
@@ -13028,7 +13054,7 @@
           "type" : "string"
         }
       },
-      "required" : [ "email", "role" ],
+      "required" : [ "email" ],
       "type" : "object"
     },
     "UserWithFeatures" : {
@@ -20688,7 +20714,7 @@
             "description" : "successful operation",
             "schema" : {
               "items" : {
-                "enum" : [ "UniverseLogs", "ApplicationLogs", "OutputFiles", "ErrorFiles", "CoreFiles", "GFlags", "Instance", "ConsensusMeta", "TabletMeta", "YbcLogs", "K8sInfo", "NodeAgent" ],
+                "enum" : [ "UniverseLogs", "OutputFiles", "ErrorFiles", "CoreFiles", "GFlags", "Instance", "ConsensusMeta", "TabletMeta", "YbcLogs", "K8sInfo", "NodeAgent", "ApplicationLogs" ],
                 "type" : "string"
               },
               "type" : "array"
@@ -24769,7 +24795,8 @@
         "tags" : [ "User management" ]
       },
       "put" : {
-        "description" : "",
+        "deprecated" : true,
+        "description" : "Deprecated. Use this method instead: setRoleBinding.",
         "operationId" : "updateUserRole",
         "parameters" : [ {
           "format" : "uuid",

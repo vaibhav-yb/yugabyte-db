@@ -303,7 +303,7 @@ TEST_F(CDCSDKYsqlTest, YB_DISABLE_TEST_IN_TSAN(TestGetChangesAfterTabletSplitWit
   // Since split is complete at this stage, parent tablet will report an error
   // and we should be able to get the records from the children.
   ASSERT_NOK(GetChangesFromCDC(stream_id, tablets, &change_resp_1.cdc_sdk_checkpoint()));
-  
+
   // Get children tablets.
   ASSERT_OK(test_client()->GetTablets(table, 0, &tablets, /* partition_list_version =*/nullptr));
   ASSERT_EQ(2, tablets.size());
@@ -312,7 +312,7 @@ TEST_F(CDCSDKYsqlTest, YB_DISABLE_TEST_IN_TSAN(TestGetChangesAfterTabletSplitWit
       ASSERT_RESULT(GetChangesFromCDC(stream_id, tablets, &change_resp_1.cdc_sdk_checkpoint(), 0));
   GetChangesResponsePB child_resp_2 =
       ASSERT_RESULT(GetChangesFromCDC(stream_id, tablets, &change_resp_1.cdc_sdk_checkpoint(), 1));
-  
+
   ASSERT_GE(
     child_resp_1.cdc_sdk_proto_records_size() + child_resp_2.cdc_sdk_proto_records_size(), 200);
   LOG(INFO) << "Number of records after restart: " << child_resp_1.cdc_sdk_proto_records_size()
@@ -1117,12 +1117,12 @@ TEST_F(CDCSDKYsqlTest, YB_DISABLE_TEST_IN_TSAN(TestGetTabletListToPollForCDCWith
   // These calls will return errors since the tablet have been split further.
   ASSERT_NOK(GetChangesFromCDC(stream_id, tablets_after_first_split,
                                &change_resp_1.cdc_sdk_checkpoint(), 0));
-  
+
   // Get the final set of tablets.
   google::protobuf::RepeatedPtrField<master::TabletLocationsPB> final_tablets;
   ASSERT_OK(test_client()->GetTablets(
       table, 0, &final_tablets, /* partition_list_version =*/nullptr));
-  
+
   GetChangesResponsePB resp_1 = ASSERT_RESULT(
       GetChangesFromCDC(stream_id, final_tablets, &change_resp_1.cdc_sdk_checkpoint(), 0));
   GetChangesResponsePB resp_2 = ASSERT_RESULT(
@@ -1263,10 +1263,10 @@ TEST_F(
       ASSERT_RESULT(GetChangesFromCDC(stream_id, tablets_2, &change_resp.cdc_sdk_checkpoint(), 0));
   GetChangesResponsePB change_resp_2 =
       ASSERT_RESULT(GetChangesFromCDC(stream_id, tablets_2, &change_resp.cdc_sdk_checkpoint(), 1));
-  
+
   // Ignore the DDL records in the responses and sum the rest of them.
   uint32_t proto_record_count = 0;
-  
+
   for (auto record : change_resp_1.cdc_sdk_proto_records()) {
     if (record.row_message().op() != RowMessage::DDL) {
       ++proto_record_count;

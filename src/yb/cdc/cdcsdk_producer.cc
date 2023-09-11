@@ -1097,8 +1097,7 @@ Status PopulateCDCSDKWriteRecord(
       if (!key_bounds.IsWithinBounds(key)) {
         VLOG(1) << "Key for the read record is not within tablet bounds, skipping the key: "
                 << primary_key.data();
-        // Todo: Is returning an OK status correct thing here?
-        return Status::OK();
+        continue;
       }
 
       RETURN_NOT_OK(decoded_key.DecodeFrom(&sub_doc_key, dockv::HybridTimeRequired::kFalse));
@@ -2382,15 +2381,6 @@ Status GetChangesForCDCSDK(
                  "consistent_safe_time: "
               << consistent_stream_safe_time << "safe_hybrid_time_req: " << safe_hybrid_time_req
               << ", tablet_id: " << tablet_id << ", wal_msg: " << msg->ShortDebugString();
-          break;
-        }
-
-        if (tablet_ptr->metadata()->tablet_data_state() == tablet::TABLET_DATA_SPLIT_COMPLETED) {
-          // No need to iterate further if tablet split is detected.
-          // Todo: See if this check can be put outside the loop where we iterate on records.
-          saw_split_op = true;
-          report_tablet_split = true;
-          split_op_id = op_id;
           break;
         }
 

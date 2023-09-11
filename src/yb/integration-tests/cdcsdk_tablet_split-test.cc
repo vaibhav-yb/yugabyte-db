@@ -299,14 +299,24 @@ TEST_F(CDCSDKYsqlTest, YB_DISABLE_TEST_IN_TSAN(TestGetChangesAfterTabletSplitWit
 
   // We must still be able to get the remaining records from the parent tablet even after master is
   // restarted.
-  change_resp_1 =
-      ASSERT_RESULT(GetChangesFromCDC(stream_id, tablets, &change_resp_1.cdc_sdk_checkpoint()));
-  ASSERT_GE(change_resp_1.cdc_sdk_proto_records_size(), 200);
-  LOG(INFO) << "Number of records after restart: " << change_resp_1.cdc_sdk_proto_records_size();
 
-  // Now that there are no more records to stream, further calls of 'GetChangesFromCDC' to the same
-  // tablet should fail.
+  // Since split is complete at this stage, parent tablet will report an error
+  // and we should be able to get the records from the children.
   ASSERT_NOK(GetChangesFromCDC(stream_id, tablets, &change_resp_1.cdc_sdk_checkpoint()));
+  
+  // Get children tablets.
+  ASSERT_OK(test_client()->GetTablets(table, 0, &tablets, /* partition_list_version =*/nullptr));
+  ASSERT_EQ(2, tablets.size());
+
+  GetChangesResponsePB child_resp_1 =
+      ASSERT_RESULT(GetChangesFromCDC(stream_id, tablets, &change_resp_1.cdc_sdk_checkpoint(), 0));
+  GetChangesResponsePB child_resp_2 =
+      ASSERT_RESULT(GetChangesFromCDC(stream_id, tablets, &change_resp_1.cdc_sdk_checkpoint(), 1));
+  
+  ASSERT_GE(
+    child_resp_1.cdc_sdk_proto_records_size() + child_resp_2.cdc_sdk_proto_records_size(), 200);
+  LOG(INFO) << "Number of records after restart: " << child_resp_1.cdc_sdk_proto_records_size()
+      + child_resp_2.cdc_sdk_proto_records_size();
 }
 
 TEST_F(CDCSDKYsqlTest, YB_DISABLE_TEST_IN_TSAN(TestGetChangesOnChildrenOnSplit)) {
@@ -374,7 +384,7 @@ TEST_F(CDCSDKYsqlTest, YB_DISABLE_TEST_IN_TSAN(TestGetChangesAfterSplit)) {
   GetChangesResponsePB change_resp_1 = ASSERT_RESULT(GetChangesFromCDC(stream_id, tablets));
 
   TableId table_id = ASSERT_RESULT(GetTableId(&test_cluster_, kNamespaceName, kTableName));
-  ASSERT_OK(WriteRowsHelper(1, 10, &test_cluster_, true));
+  ASSERT_OK(WriteRowsHelper(1, 10, &test_cluster_, true, false));
   ASSERT_OK(test_client()->FlushTables(
       {table.table_id()}, /* add_indexes = */ false, /* timeout_secs = */ 30,
       /* is_compaction = */ true));
@@ -1062,10 +1072,8 @@ TEST_F(CDCSDKYsqlTest, YB_DISABLE_TEST_IN_TSAN(TestGetTabletListToPollForCDCWith
 
   WaitUntilSplitIsSuccesful(tablets_after_first_split.Get(0).tablet_id(), table, 3);
 
-  change_resp_1 =
-      ASSERT_RESULT(GetChangesFromCDC(stream_id, tablets, &change_resp_1.cdc_sdk_checkpoint()));
-  ASSERT_GE(change_resp_1.cdc_sdk_proto_records_size(), 200);
-  LOG(INFO) << "Number of records after restart: " << change_resp_1.cdc_sdk_proto_records_size();
+  // GetChanges call would fail since the tablet is split.
+  ASSERT_NOK(GetChangesFromCDC(stream_id, tablets, &change_resp_1.cdc_sdk_checkpoint()));
 
   // We are calling: "GetTabletListToPollForCDC" when the tablet split on the parent tablet has
   // still not been communicated to the client. Hence we should get only the original parent tablet.
@@ -1106,10 +1114,26 @@ TEST_F(CDCSDKYsqlTest, YB_DISABLE_TEST_IN_TSAN(TestGetTabletListToPollForCDCWith
   }
   ASSERT_TRUE(saw_first_child && saw_second_child);
 
-  change_resp_1 = ASSERT_RESULT(
-      GetChangesFromCDC(stream_id, tablets_after_first_split, &change_resp_1.cdc_sdk_checkpoint()));
-  ASSERT_NOK(
-      GetChangesFromCDC(stream_id, tablets_after_first_split, &change_resp_1.cdc_sdk_checkpoint()));
+  // These calls will return errors since the tablet have been split further.
+  ASSERT_NOK(GetChangesFromCDC(stream_id, tablets_after_first_split,
+                               &change_resp_1.cdc_sdk_checkpoint(), 0));
+  
+  // Get the final set of tablets.
+  google::protobuf::RepeatedPtrField<master::TabletLocationsPB> final_tablets;
+  ASSERT_OK(test_client()->GetTablets(
+      table, 0, &final_tablets, /* partition_list_version =*/nullptr));
+  
+  GetChangesResponsePB resp_1 = ASSERT_RESULT(
+      GetChangesFromCDC(stream_id, final_tablets, &change_resp_1.cdc_sdk_checkpoint(), 0));
+  GetChangesResponsePB resp_2 = ASSERT_RESULT(
+      GetChangesFromCDC(stream_id, final_tablets, &change_resp_1.cdc_sdk_checkpoint(), 1));
+  GetChangesResponsePB resp_3 = ASSERT_RESULT(
+      GetChangesFromCDC(stream_id, final_tablets, &change_resp_1.cdc_sdk_checkpoint(), 2));
+
+  uint32_t final_record_count =
+    resp_1.cdc_sdk_proto_records_size() + resp_2.cdc_sdk_proto_records_size()
+      + resp_3.cdc_sdk_proto_records_size();
+  ASSERT_GE(final_record_count, 200);
 }
 
 TEST_F(CDCSDKYsqlTest, YB_DISABLE_TEST_IN_TSAN(TestTabletSplitOnAddedTableForCDC)) {
@@ -1175,6 +1199,7 @@ TEST_F(CDCSDKYsqlTest, YB_DISABLE_TEST_IN_TSAN(TestTabletSplitOnAddedTableForCDC
 
 TEST_F(
     CDCSDKYsqlTest, YB_DISABLE_TEST_IN_TSAN(TestTabletSplitOnAddedTableForCDCWithMasterRestart)) {
+  ANNOTATE_UNPROTECTED_WRITE(FLAGS_cdc_populate_end_markers_transactions) = false;
   ASSERT_OK(SetUpWithParams(1, 1, false));
 
   const uint32_t num_tablets = 1;
@@ -1228,15 +1253,34 @@ TEST_F(
   ASSERT_OK(test_cluster_.mini_cluster_->CompactTablets());
   WaitUntilSplitIsSuccesful(tablets_2.Get(0).tablet_id(), table_2);
 
-  // Verify GetChanges returns records even after tablet split, i.e tablets of the newly added table
-  // are hidden instead of being deleted.
-  change_resp =
-      ASSERT_RESULT(GetChangesFromCDC(stream_id, tablets_2, &change_resp.cdc_sdk_checkpoint()));
-  ASSERT_GE(change_resp.cdc_sdk_proto_records_size(), 200);
+  // Get the new set of tablets after split.
+  ASSERT_OK(
+      test_client()->GetTablets(table_2, 0, &tablets_2, /* partition_list_version =*/nullptr));
+  ASSERT_EQ(tablets_2.size(), 2);
 
-  // Now that all the required records have been streamed, verify that the tablet split error is
-  // reported.
-  ASSERT_NOK(GetChangesFromCDC(stream_id, tablets_2, &change_resp.cdc_sdk_checkpoint()));
+  // Verify GetChanges returns records on the new set of tablets.
+  GetChangesResponsePB change_resp_1 =
+      ASSERT_RESULT(GetChangesFromCDC(stream_id, tablets_2, &change_resp.cdc_sdk_checkpoint(), 0));
+  GetChangesResponsePB change_resp_2 =
+      ASSERT_RESULT(GetChangesFromCDC(stream_id, tablets_2, &change_resp.cdc_sdk_checkpoint(), 1));
+  
+  // Ignore the DDL records in the responses and sum the rest of them.
+  uint32_t proto_record_count = 0;
+  
+  for (auto record : change_resp_1.cdc_sdk_proto_records()) {
+    if (record.row_message().op() != RowMessage::DDL) {
+      ++proto_record_count;
+    }
+  }
+
+  for (auto record : change_resp_2.cdc_sdk_proto_records()) {
+    if (record.row_message().op() != RowMessage::DDL) {
+      ++proto_record_count;
+    }
+  }
+
+  // Verify the count of records for the table.
+  ASSERT_EQ(proto_record_count, 199);
 }
 
 TEST_F(CDCSDKYsqlTest, YB_DISABLE_TEST_IN_TSAN(TestTabletSplitDuringSnapshot)) {
@@ -1532,25 +1576,39 @@ TEST_F(CDCSDKYsqlTest, YB_DISABLE_TEST_IN_TSAN(TestRecordCountsAfterMultipleTabl
   ASSERT_OK(test_client()->FlushTables({table.table_id()}, false, 100, false));
 
   const int expected_total_records = 3006;
-  const int expected_total_splits = 4;
+  // const int expected_total_splits = 4;
   // The array stores counts of DDL, INSERT, UPDATE, DELETE, READ, TRUNCATE, BEGIN, COMMIT in that
   // order.
-  const int expected_records_count[] = {9, 999, 0, 0, 0, 0, 999, 999};
+  const int expected_records_count[] = {5, 999, 0, 0, 0, 0, 999, 999};
 
   int total_records = 0;
-  int total_splits = 0;
   int record_count[] = {0, 0, 0, 0, 0, 0, 0, 0};
 
-  GetRecordsAndSplitCount(
-      stream_id, tablets[0].tablet_id(), table_id, record_count, &total_records, &total_splits);
+  google::protobuf::RepeatedPtrField<master::TabletLocationsPB> final_tablets;
+  ASSERT_OK(test_client()->GetTablets(table, 0, &final_tablets, nullptr));
+  ASSERT_EQ(final_tablets.size(), 5);
+
+  for (int i = 0; i < final_tablets.size(); ++i) {
+    // Call GetChanges will a nullptr checkpoint.
+    GetChangesResponsePB resp =
+      ASSERT_RESULT(GetChangesFromCDC(stream_id, final_tablets, nullptr, i));
+
+    for (auto record : resp.cdc_sdk_proto_records()) {
+      UpdateRecordCount(record, record_count);
+      ++total_records;
+    }
+  }
+
+  // GetRecordsAndSplitCount(
+  //     stream_id, tablets[0].tablet_id(), table_id, record_count, &total_records, &total_splits);
 
   for (int i = 0; i < 8; i++) {
     ASSERT_EQ(expected_records_count[i], record_count[i]);
   }
 
-  LOG(INFO) << "Got " << total_records << " records and " << total_splits << " tablet splits";
+  LOG(INFO) << "Got " << total_records << " records";
   ASSERT_EQ(expected_total_records, total_records);
-  ASSERT_EQ(expected_total_splits, total_splits);
+  // ASSERT_EQ(expected_total_splits, total_splits);
 }
 
 TEST_F(
@@ -1560,6 +1618,7 @@ TEST_F(
   ANNOTATE_UNPROTECTED_WRITE(FLAGS_cdc_state_checkpoint_update_interval_ms) = 0;
   ANNOTATE_UNPROTECTED_WRITE(FLAGS_aborted_intent_cleanup_ms) = 1000;
   ANNOTATE_UNPROTECTED_WRITE(FLAGS_cdc_parent_tablet_deletion_task_retry_secs) = 1;
+  ANNOTATE_UNPROTECTED_WRITE(FLAGS_cdc_populate_end_markers_transactions) = false;
 
   google::protobuf::RepeatedPtrField<master::TabletLocationsPB> tablets;
   ASSERT_OK(SetUpWithParams(3, 1, false));

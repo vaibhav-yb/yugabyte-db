@@ -211,7 +211,13 @@ class CDCSDKYsqlTest : public CDCSDKTestBase {
 
   Status WriteRowsHelper(
       uint32_t start, uint32_t end, Cluster* cluster, bool flag, uint32_t num_cols = 2,
-      const char* const table_name = kTableName, const vector<string>& optional_cols_name = {});
+      const char* const table_name = kTableName, const vector<string>& optional_cols_name = {},
+      const bool trasaction_enabled = true);
+
+  Status WriteRowsHelper(
+      uint32_t start, uint32_t end, Cluster* cluster, bool flag, bool transaction_enabled) {
+    return WriteRowsHelper(start, end, cluster, flag, 2, kTableName, {}, transaction_enabled);
+  }
 
   Status CreateTableWithoutPK(Cluster* cluster);
 

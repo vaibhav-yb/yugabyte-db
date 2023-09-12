@@ -384,7 +384,7 @@ TEST_F(CDCSDKYsqlTest, YB_DISABLE_TEST_IN_TSAN(TestGetChangesAfterSplit)) {
   GetChangesResponsePB change_resp_1 = ASSERT_RESULT(GetChangesFromCDC(stream_id, tablets));
 
   TableId table_id = ASSERT_RESULT(GetTableId(&test_cluster_, kNamespaceName, kTableName));
-  ASSERT_OK(WriteRowsHelper(1, 10, &test_cluster_, true, false));
+  ASSERT_OK(WriteRowsHelper(1, 10, &test_cluster_, true, 2, kTableName, {}, false));
   ASSERT_OK(test_client()->FlushTables(
       {table.table_id()}, /* add_indexes = */ false, /* timeout_secs = */ 30,
       /* is_compaction = */ true));

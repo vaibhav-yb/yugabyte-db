@@ -2285,6 +2285,15 @@ Status GetChangesForCDCSDK(
     bool saw_non_actionable_message = false;
     std::unordered_set<std::string> streamed_txns;
 
+    if (tablet_ptr->metadata()->tablet_data_state() == tablet::TABLET_DATA_SPLIT_COMPLETED) {
+      // This indicates that the tablet being polled has been split and in this case we should
+      // tell the client immediately about the split.
+      LOG(INFO) << "Tablet split detected for tablet " << tablet_id
+                << ", moving to children tablets immediately";
+      return STATUS_FORMAT(
+        TabletSplit, "Tablet split detected on $0", tablet_id);
+    }
+
     // It's possible that a batch of messages in read_ops after fetching from
     // 'ReadReplicatedMessagesForCDC' , will not have any actionable messages. In which case we
     // keep retrying by fetching the next batch, until either we get an actionable message or reach
@@ -2632,8 +2641,6 @@ Status GetChangesForCDCSDK(
   // If the split_op_id is equal to the checkpoint i.e the OpId of the last actionable message, we
   // know that after the split there are no more actionable messages, and this confirms that the
   // SPLIT OP was succesfull.
-  // If we have earlier detected that the tablet has completed splitting then we should return the
-  // the split error to the client.
   if (!snapshot_operation && report_tablet_split) {
     LOG(INFO) << "Tablet split detected for tablet " << tablet_id
               << ", moving to children tablets immediately";

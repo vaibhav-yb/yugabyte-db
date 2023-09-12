@@ -1663,21 +1663,6 @@ void CDCServiceImpl::GetChanges(
         tablet_peer->shared_tablet_safe(), resp->mutable_error(), CDCErrorPB::INTERNAL_ERROR,
         context);
 
-    if (tablet_ptr->metadata()->tablet_data_state() == tablet::TABLET_DATA_SPLIT_COMPLETED) {
-      auto s = UpdateChildrenTabletsOnSplitOpForCDCSDK(producer_tablet);
-      RPC_STATUS_RETURN_ERROR(s, resp->mutable_error(), CDCErrorPB::INTERNAL_ERROR, context);
-
-      RPC_STATUS_RETURN_ERROR(
-          impl_->EraseTabletAndStreamEntry(producer_tablet), resp->mutable_error(),
-          CDCErrorPB::INTERNAL_ERROR, context);
-
-      SetupErrorAndRespond(
-          resp->mutable_error(),
-          STATUS(TabletSplit, Format("Tablet Split detected on $0", req->tablet_id())),
-          CDCErrorPB::TABLET_SPLIT, &context);
-      return;
-    }
-
     auto namespace_name = tablet_ptr->metadata()->namespace_name();
     auto last_sent_checkpoint = impl_->GetLastStreamedOpId(producer_tablet);
     // If from_op_id is more than the last sent op_id, it indicates a potential stale schema entry.

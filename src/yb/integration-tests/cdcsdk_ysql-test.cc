@@ -10,6 +10,7 @@
 // or implied.  See the License for the specific language governing permissions and limitations
 // under the License.
 
+#include "yb/cdc/cdc_service.pb.h"
 #include "yb/integration-tests/cdcsdk_ysql_test_base.h"
 
 #include "yb/cdc/cdc_state_table.h"
@@ -5271,20 +5272,33 @@ TEST_F(CDCSDKYsqlTest, YB_DISABLE_TEST_IN_TSAN(TestGetTabletListToPollForCDCWith
 
   WaitUntilSplitIsSuccesful(tablets.Get(0).tablet_id(), table);
 
-  ASSERT_OK(WaitForGetChangesToFetchRecords(
-      &change_resp_1, stream_id, tablets, 199, &change_resp_1.cdc_sdk_checkpoint()));
-
-  ASSERT_GE(change_resp_1.cdc_sdk_proto_records_size(), 200);
-  LOG(INFO) << "Number of records after restart: " << change_resp_1.cdc_sdk_proto_records_size();
-
-  // Now that there are no more records to stream, further calls of 'GetChangesFromCDC' to the same
-  // tablet should fail.
+  // Further calls of 'GetChangesFromCDC' to the same tablet should fail.
   ASSERT_NOK(GetChangesFromCDC(stream_id, tablets, &change_resp_1.cdc_sdk_checkpoint()));
   LOG(INFO) << "The tablet split error is now communicated to the client.";
+
+  // Store parent tablet id so that we can later assert that we no longer see the entry
+  // corresponding to the parent tablet.
+  TabletId parent_tablet_id = tablets[0].tablet_id();
 
   auto get_tablets_resp =
       ASSERT_RESULT(GetTabletListToPollForCDC(stream_id, table_id, tablets[0].tablet_id()));
   ASSERT_EQ(get_tablets_resp.tablet_checkpoint_pairs().size(), 2);
+
+  // Since the tablet is split, we will need to call further GetChanges on children tablets.
+  ASSERT_OK(test_client()->GetTablets(table, 0, &tablets, /* partition_list_version =*/nullptr));
+  ASSERT_EQ(tablets.size(), 2);
+
+  SleepFor(MonoDelta::FromSeconds(5));
+
+  GetChangesResponsePB resp_1 =
+      ASSERT_RESULT(GetChangesFromCDC(stream_id, tablets, &change_resp_1.cdc_sdk_checkpoint(), 0));
+
+  GetChangesResponsePB resp_2 =
+      ASSERT_RESULT(GetChangesFromCDC(stream_id, tablets, &change_resp_1.cdc_sdk_checkpoint(), 1));
+
+  ASSERT_GE(resp_1.cdc_sdk_proto_records_size() + resp_2.cdc_sdk_proto_records_size(), 200);
+  LOG(INFO) << "Number of records after restart: "
+            << resp_1.cdc_sdk_proto_records_size() + resp_2.cdc_sdk_proto_records_size();
 
   // Wait until the 'cdc_parent_tablet_deletion_task_' has run.
   SleepFor(MonoDelta::FromSeconds(2));
@@ -5294,8 +5308,6 @@ TEST_F(CDCSDKYsqlTest, YB_DISABLE_TEST_IN_TSAN(TestGetTabletListToPollForCDCWith
 
   bool saw_row_child_one = false;
   bool saw_row_child_two = false;
-  // We should no longer see the entry corresponding to the parent tablet.
-  TabletId parent_tablet_id = tablets[0].tablet_id();
   for (const auto& tablet_checkpoint_pair : get_tablets_resp.tablet_checkpoint_pairs()) {
     const auto& tablet_id = tablet_checkpoint_pair.tablet_locations().tablet_id();
     ASSERT_TRUE(parent_tablet_id != tablet_id);

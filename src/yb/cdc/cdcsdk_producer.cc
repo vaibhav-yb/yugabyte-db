@@ -1283,7 +1283,7 @@ Status PopulateCDCSDKWriteRecord(
 
   // If there are no records added, we do not need to populate the begin-commit block
   // and we should return from here.
-  if (records_added == 0) {
+  if (records_added == 0 && !resp->mutable_cdc_sdk_proto_records()->empty()) {
     VLOG(2) << "Removing the added BEGIN record because there are no other records to add";
     resp->mutable_cdc_sdk_proto_records()->RemoveLast();
     return Status::OK();

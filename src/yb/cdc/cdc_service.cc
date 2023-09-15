@@ -524,7 +524,12 @@ class CDCServiceImpl::Impl {
       const std::array<const master::TabletLocationsPB*, 2>& tablets,
       const OpId& split_op_id) {
     std::lock_guard l(mutex_);
+    if (info.replication_group_id == nullptr) {
+      LOG(INFO) << "Replication group ID is null";
+    }
+
     for (const auto& tablet : tablets) {
+      LOG(INFO) << "VKVK tablet being added as children " << tablet->tablet_id();
       ProducerTabletInfo producer_info{
           info.replication_group_id, info.stream_id, tablet->tablet_id()};
       tablet_checkpoints_.emplace(TabletCheckpointInfo{
@@ -1447,7 +1452,7 @@ Result<google::protobuf::RepeatedPtrField<master::TabletLocationsPB>> CDCService
 
   LOG(INFO) << "VKVK tablets while returning GetTablets for stream ID " << stream_id;
   for (auto tablet : all_tablets) {
-    LOG(INFO) << "VKVk table " << tablet.table_id() << " and " << tablet.tablet_id();
+    LOG(INFO) << "VKVK table " << tablet.table_id() << " and " << tablet.tablet_id();
   }
 
   return all_tablets;
@@ -1711,9 +1716,6 @@ void CDCServiceImpl::GetChanges(
       // Clean all the records which got added in the resp, till the enum cache miss failure is
       // encountered.
       resp->clear_cdc_sdk_proto_records();
-      if (!producer_tablet) {
-        LOG(INFO) << "VKVK producer tablet is null";
-      }
       status = GetChangesForCDCSDK(
           stream_id, req->tablet_id(), cdc_sdk_from_op_id, record, tablet_peer, mem_tracker,
           enum_map, composite_atts_map, client(), &msgs_holder, resp, &commit_timestamp,

@@ -523,12 +523,14 @@ class CDCServiceImpl::Impl {
       const ProducerTabletInfo& info,
       const std::array<const master::TabletLocationsPB*, 2>& tablets,
       const OpId& split_op_id) {
+    LOG(INFO) << "Taking a lock after entering the method AddEntriesForChildrenTabletsOnSplitOp";
     std::lock_guard l(mutex_);
-    if (info.replication_group_id == nullptr) {
-      LOG(INFO) << "Replication group ID is null";
-    }
+
+    LOG(INFO) << "Split OpId for parent " << info.tablet_id << " is "
+              << split_op_id.term << ":" << split_op_id.index;
 
     for (const auto& tablet : tablets) {
+      LOG(INFO) << "VKVK inside the loop to process tablets";
       LOG(INFO) << "VKVK tablet being added as children " << tablet->tablet_id();
       ProducerTabletInfo producer_info{
           info.replication_group_id, info.stream_id, tablet->tablet_id()};

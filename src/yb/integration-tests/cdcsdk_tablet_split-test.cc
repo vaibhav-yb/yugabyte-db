@@ -1634,6 +1634,89 @@ TEST_F(CDCSDKYsqlTest, YB_DISABLE_TEST_IN_TSAN(TestRecordCountsAfterMultipleTabl
   // ASSERT_EQ(expected_total_splits, total_splits);
 }
 
+TEST_F(CDCSDKYsqlTest, YB_DISABLE_TEST_IN_TSAN(TestSplitAfterSplit)) {
+  ANNOTATE_UNPROTECTED_WRITE(FLAGS_update_min_cdc_indices_interval_secs) = 1;
+  ANNOTATE_UNPROTECTED_WRITE(FLAGS_cdc_state_checkpoint_update_interval_ms) = 0;
+  ANNOTATE_UNPROTECTED_WRITE(FLAGS_aborted_intent_cleanup_ms) = 1000;
+  ANNOTATE_UNPROTECTED_WRITE(FLAGS_cdc_parent_tablet_deletion_task_retry_secs) = 1;
+
+  google::protobuf::RepeatedPtrField<master::TabletLocationsPB> tablets;
+  ASSERT_OK(SetUpWithParams(1, 1, false));
+  const uint32_t num_tablets = 1;
+
+  auto table = ASSERT_RESULT(CreateTable(&test_cluster_, kNamespaceName, kTableName, num_tablets));
+  ASSERT_OK(test_client()->GetTablets(table, 0, &tablets, nullptr));
+  ASSERT_EQ(tablets.size(), num_tablets);
+
+  xrepl::StreamId stream_id = ASSERT_RESULT(CreateDBStream(IMPLICIT));
+  auto resp = ASSERT_RESULT(SetCDCCheckpoint(stream_id, tablets));
+  ASSERT_FALSE(resp.has_error());
+
+  TableId table_id = ASSERT_RESULT(GetTableId(&test_cluster_, kNamespaceName, kTableName));
+  ASSERT_OK(WriteRows(1, 200, &test_cluster_));
+  ASSERT_OK(test_client()->FlushTables({table.table_id()}, false, 100, false));
+
+  WaitUntilSplitIsSuccesful(tablets.Get(0).tablet_id(), table);
+
+  ASSERT_OK(WriteRows(200, 400, &test_cluster_));
+  ASSERT_OK(test_client()->FlushTables({table.table_id()}, false, 100, false));
+
+  google::protobuf::RepeatedPtrField<master::TabletLocationsPB> tablets_after_first_split;
+  ASSERT_OK(test_client()->GetTablets(table, 0, &tablets_after_first_split, nullptr));
+  ASSERT_EQ(tablets_after_first_split.size(), 2);
+
+  WaitUntilSplitIsSuccesful(tablets_after_first_split.Get(0).tablet_id(), table, 3);
+  WaitUntilSplitIsSuccesful(tablets_after_first_split.Get(1).tablet_id(), table, 4);
+
+  // Don't insert anything, just split the tablets further
+  // ASSERT_OK(WriteRows(400, 600, &test_cluster_));
+  ASSERT_OK(test_client()->FlushTables({table.table_id()}, false, 100, false));
+
+  ASSERT_RESULT(GetChangesFromCDC(stream_id, tablets_after_first_split, nullptr, 0));
+  ASSERT_RESULT(GetChangesFromCDC(stream_id, tablets_after_first_split, nullptr, 1));
+
+  google::protobuf::RepeatedPtrField<master::TabletLocationsPB> tablets_after_third_split;
+  ASSERT_OK(test_client()->GetTablets(table, 0, &tablets_after_third_split, nullptr));
+  ASSERT_EQ(tablets_after_third_split.size(), 4);
+
+  WaitUntilSplitIsSuccesful(tablets_after_third_split.Get(1).tablet_id(), table, 5);
+
+  // ASSERT_OK(WriteRows(600, 1000, &test_cluster_));
+  // ASSERT_OK(test_client()->FlushTables({table.table_id()}, false, 100, false));
+
+  const int expected_total_records = 3002;
+  // const int expected_total_splits = 4;
+  // The array stores counts of DDL, INSERT, UPDATE, DELETE, READ, TRUNCATE, BEGIN, COMMIT in that
+  // order.
+  const int expected_records_count[] = {5, 601, 0, 0, 0, 0, 999, 999};
+
+  int total_records = 0;
+  int record_count[] = {0, 0, 0, 0, 0, 0, 0, 0};
+
+  google::protobuf::RepeatedPtrField<master::TabletLocationsPB> final_tablets;
+  ASSERT_OK(test_client()->GetTablets(table, 0, &final_tablets, nullptr));
+  ASSERT_EQ(final_tablets.size(), 5);
+
+  for (int i = 0; i < final_tablets.size(); ++i) {
+    // Call GetChanges will a nullptr checkpoint.
+    GetChangesResponsePB resp =
+      ASSERT_RESULT(GetChangesFromCDC(stream_id, final_tablets, nullptr, i));
+
+    for (auto record : resp.cdc_sdk_proto_records()) {
+      UpdateRecordCount(record, record_count);
+      ++total_records;
+    }
+  }
+
+  for (int i = 0; i < 8; i++) {
+    ASSERT_EQ(expected_records_count[i], record_count[i]);
+  }
+
+  LOG(INFO) << "Got " << total_records << " records";
+  ASSERT_EQ(expected_total_records, total_records);
+  // ASSERT_EQ(expected_total_splits, total_splits);
+}
+
 TEST_F(
     CDCSDKYsqlTest,
     YB_DISABLE_TEST_IN_TSAN(TestRecordCountsAfterMultipleTabletSplitsInMultiNodeCluster)) {

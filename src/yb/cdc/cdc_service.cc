@@ -3912,7 +3912,7 @@ Status CDCServiceImpl::UpdateChildrenTabletsOnSplitOpForCDCSDK(const ProducerTab
 
   // Add the entries for the children tablets in 'cdc_state_metadata_' and 'tablet_checkpoints_'.
   LOG(INFO) << "Added entries for children tablets to cdc_state_metadata_ for chilren "
-            << children_tablets[0]->tablet_id() << " and " << children_tablets[1]->tablet_id(); 
+            << children_tablets[0]->tablet_id() << " and " << children_tablets[1]->tablet_id();
   RETURN_NOT_OK_SET_CODE(
       impl_->AddEntriesForChildrenTabletsOnSplitOp(info, children_tablets, children_op_id),
       CDCError(CDCErrorPB::INTERNAL_ERROR));

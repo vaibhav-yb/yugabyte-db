@@ -634,7 +634,7 @@ TEST_F(CDCSDKYsqlTest, YB_DISABLE_TEST_IN_TSAN(TestCDCSDKConsistentStreamWithTab
 
   google::protobuf::RepeatedPtrField<master::TabletLocationsPB> final_tablets;
   ASSERT_OK(test_client()->GetTablets(table, 0, &final_tablets, nullptr));
-  
+
   GetAllPendingChangesResponse pending_changes_resp;
   // auto parent_get_changes = GetAllPendingChangesFromCdc(stream_id, tablets);
   for (int i = 0; i < final_tablets.size(); ++i) {

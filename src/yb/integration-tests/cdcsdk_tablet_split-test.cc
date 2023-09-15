@@ -516,7 +516,7 @@ TEST_F(CDCSDKYsqlTest, YB_DISABLE_TEST_IN_TSAN(TestGetChangesMultipleStreamsTabl
   ASSERT_OK(test_client()->GetTablets(table, 0, &tablets_after_split, nullptr));
 
   ASSERT_NOK(GetChangesFromCDC(stream_id_1, tablets, &change_resp_1.cdc_sdk_checkpoint()));
-  
+
   GetChangesResponsePB stream_1_resp_1 =
       ASSERT_RESULT(GetChangesFromCDC(stream_id_1, tablets_after_split,
                                       &change_resp_1.cdc_sdk_checkpoint(), 0));
@@ -543,7 +543,7 @@ TEST_F(CDCSDKYsqlTest, YB_DISABLE_TEST_IN_TSAN(TestGetChangesMultipleStreamsTabl
     200);
   LOG(INFO) << "Number of records on first stream after split: "
             << stream_2_resp_1.cdc_sdk_proto_records_size()
-                 + stream_2_resp_2.cdc_sdk_proto_records_size();                 
+                 + stream_2_resp_2.cdc_sdk_proto_records_size();
 }
 
 TEST_F(CDCSDKYsqlTest, YB_DISABLE_TEST_IN_TSAN(TestSetCDCCheckpointAfterTabletSplit)) {
@@ -1677,7 +1677,7 @@ TEST_F(
 
   google::protobuf::RepeatedPtrField<master::TabletLocationsPB> final_tablets;
   ASSERT_OK(test_client()->GetTablets(table, 0, &final_tablets, nullptr));
-  
+
   for (int i = 0; i < final_tablets.size(); ++i) {
     GetChangesResponsePB resp =
         ASSERT_RESULT(GetChangesFromCDC(stream_id, final_tablets, nullptr, i));

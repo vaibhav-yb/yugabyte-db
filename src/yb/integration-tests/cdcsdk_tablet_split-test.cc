@@ -1601,7 +1601,7 @@ TEST_F(CDCSDKYsqlTest, YB_DISABLE_TEST_IN_TSAN(TestRecordCountsAfterMultipleTabl
   ASSERT_OK(WriteRows(600, 1000, &test_cluster_));
   ASSERT_OK(test_client()->FlushTables({table.table_id()}, false, 100, false));
 
-  const int expected_total_records = 3006;
+  const int expected_total_records = 3002;
   // const int expected_total_splits = 4;
   // The array stores counts of DDL, INSERT, UPDATE, DELETE, READ, TRUNCATE, BEGIN, COMMIT in that
   // order.
@@ -1667,7 +1667,7 @@ TEST_F(
   ASSERT_OK(test_client()->GetTablets(table, 0, &tablets_after_first_split, nullptr));
   ASSERT_EQ(tablets_after_first_split.size(), 2);
 
-  const int expected_total_records = 1200;
+  const int expected_total_records = 1199;
   // The array stores counts of DDL, INSERT, UPDATE, DELETE, READ, TRUNCATE, BEGIN, COMMIT in that
   // order.
   const int expected_records_count[] = {2, 399, 0, 0, 0, 0, 399, 399};

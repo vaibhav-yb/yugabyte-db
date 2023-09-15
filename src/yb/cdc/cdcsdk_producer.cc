@@ -1054,6 +1054,8 @@ Status PopulateCDCSDKWriteRecord(
   // We'll use DocDB key hash to identify the records that belong to the same row.
   Slice prev_key;
 
+  uint32_t records_added = 0;
+
   bool colocated = tablet_ptr->metadata()->colocated();
   Schema schema = Schema();
   SchemaVersion schema_version = std::numeric_limits<uint32_t>::max();
@@ -1147,6 +1149,7 @@ Status PopulateCDCSDKWriteRecord(
 
       // Write pair contains record for different row. Create a new CDCRecord in this case.
       proto_record = resp->add_cdc_sdk_proto_records();
+      ++records_added;
       row_message = proto_record->mutable_row_message();
       modified_columns.clear();
       row_message->set_pgschema_name(schema.SchemaName());
@@ -1276,6 +1279,14 @@ Status PopulateCDCSDKWriteRecord(
         row_message->add_old_tuple();
       }
     }
+  }
+
+  // If there are no records added, we do not need to populate the begin-commit block
+  // and we should return from here.
+  if (records_added == 0) {
+    VLOG(2) << "Removing the added BEGIN record because there are no other records to add";
+    resp->mutable_cdc_sdk_proto_records()->RemoveLast();
+    return Status::OK();
   }
 
   if (FLAGS_cdc_populate_end_markers_transactions) {

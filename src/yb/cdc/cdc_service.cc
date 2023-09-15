@@ -1448,6 +1448,11 @@ Result<google::protobuf::RepeatedPtrField<master::TabletLocationsPB>> CDCService
     all_tablets.MergeFrom(tablets);
   }
 
+  LOG(INFO) << "VKVK tablets while returning GetTablets for stream ID " << stream_id;
+  for (auto tablet : all_tablets) {
+    LOG(INFO) << "VKVk table " << tablet.table_id() << " and " << tablet.tablet_id();
+  }
+
   return all_tablets;
 }
 
@@ -1718,6 +1723,8 @@ void CDCServiceImpl::GetChanges(
     }
     // This specific error indicates that a tablet split occured on the tablet.
     if (status.IsTabletSplit()) {
+      LOG(INFO) << "VKVK updating children tablets on detected split from cdcsdk_producer "
+                << "on tablet " << producer_tablet.tablet_id;
       status = UpdateChildrenTabletsOnSplitOpForCDCSDK(producer_tablet);
       RPC_STATUS_RETURN_ERROR(status, resp->mutable_error(), CDCErrorPB::INTERNAL_ERROR, context);
 
@@ -3887,16 +3894,25 @@ Status CDCServiceImpl::UpdateChildrenTabletsOnSplitOpForCDCSDK(const ProducerTab
     if (tablet.has_split_parent_tablet_id() && tablet.split_parent_tablet_id() == info.tablet_id) {
       children_tablets[found_children] = &tablet;
       found_children += 1;
+      LOG(INFO) << " VKVK found a children tablet " << tablet.tablet_id()
+                << " for parent " << info.tablet_id;
 
       if (found_children == 2) {
         break;
       }
     }
   }
+
+  if (found_children != 2) {
+    LOG(INFO) << "VKVK could not find 2 children for the parent " << info.tablet_id;
+  }
+
   LOG_IF(DFATAL, found_children != 2)
       << "Could not find the two split children for the tablet: " << info.tablet_id;
 
   // Add the entries for the children tablets in 'cdc_state_metadata_' and 'tablet_checkpoints_'.
+  LOG(INFO) << "Added entries for children tablets to cdc_state_metadata_ for chilren "
+            << children_tablets[0]->tablet_id() << " and " << children_tablets[1]->tablet_id(); 
   RETURN_NOT_OK_SET_CODE(
       impl_->AddEntriesForChildrenTabletsOnSplitOp(info, children_tablets, children_op_id),
       CDCError(CDCErrorPB::INTERNAL_ERROR));

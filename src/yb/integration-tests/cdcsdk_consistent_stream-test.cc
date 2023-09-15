@@ -632,13 +632,22 @@ TEST_F(CDCSDKYsqlTest, YB_DISABLE_TEST_IN_TSAN(TestCDCSDKConsistentStreamWithTab
   const int expected_count_2[] = {3, 4 * num_batches * inserts_per_batch, 0, 0, 0, 0};
   int count[] = {0, 0, 0, 0, 0, 0, 0, 0};
 
-  auto parent_get_changes = GetAllPendingChangesFromCdc(stream_id, tablets);
-  for (size_t i = 0; i < parent_get_changes.records.size(); i++) {
-    auto record = parent_get_changes.records[i];
-    UpdateRecordCount(record, count);
+  google::protobuf::RepeatedPtrField<master::TabletLocationsPB> final_tablets;
+  ASSERT_OK(test_client()->GetTablets(table, 0, &final_tablets, nullptr));
+  
+  GetAllPendingChangesResponse pending_changes_resp;
+  // auto parent_get_changes = GetAllPendingChangesFromCdc(stream_id, tablets);
+  for (int i = 0; i < final_tablets.size(); ++i) {
+    GetChangesResponsePB resp =
+        ASSERT_RESULT(GetChangesFromCDC(stream_id, final_tablets, nullptr, i));
+
+    for (auto record : resp.cdc_sdk_proto_records()) {
+      pending_changes_resp.records.push_back(record);
+      UpdateRecordCount(record, count);
+    }
   }
 
-  CheckRecordsConsistency(parent_get_changes.records);
+  CheckRecordsConsistency(pending_changes_resp.records);
   for (int i = 0; i < 8; i++) {
     ASSERT_EQ(expected_count_1[i], count[i]);
   }
@@ -657,7 +666,7 @@ TEST_F(CDCSDKYsqlTest, YB_DISABLE_TEST_IN_TSAN(TestCDCSDKConsistentStreamWithTab
     tablet_ptr->CopyFrom(new_tablet);
 
     auto child_get_changes = GetAllPendingChangesFromCdc(stream_id, tablets, &new_checkpoint);
-    vector<CDCSDKProtoRecordPB> child_plus_parent = parent_get_changes.records;
+    vector<CDCSDKProtoRecordPB> child_plus_parent = pending_changes_resp.records;
     for (size_t i = 0; i < child_get_changes.records.size(); i++) {
       auto record = child_get_changes.records[i];
       child_plus_parent.push_back(record);

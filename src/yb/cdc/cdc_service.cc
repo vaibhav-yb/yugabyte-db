@@ -521,16 +521,11 @@ class CDCServiceImpl::Impl {
 
   Status AddEntriesForChildrenTabletsOnSplitOp(
       const ProducerTabletInfo& info,
-      std::array<TabletId, 2>& tablets,
+      const std::array<TabletId, 2>& tablets,
       const OpId& split_op_id) {
-    LOG(INFO) << "Taking a lock after entering the method AddEntriesForChildrenTabletsOnSplitOp";
     std::lock_guard l(mutex_);
 
-    LOG(INFO) << "Split OpId for parent " << info.tablet_id << " is "
-              << split_op_id.term << ":" << split_op_id.index;
-
     for (const auto& tablet : tablets) {
-      LOG(INFO) << "VKVK tablet being added as children " << tablet;
       ProducerTabletInfo producer_info{
           info.replication_group_id, info.stream_id, tablet};
       tablet_checkpoints_.emplace(TabletCheckpointInfo{
@@ -1451,11 +1446,6 @@ Result<google::protobuf::RepeatedPtrField<master::TabletLocationsPB>> CDCService
     all_tablets.MergeFrom(tablets);
   }
 
-  LOG(INFO) << "VKVK tablets while returning GetTablets for stream ID " << stream_id;
-  for (auto tablet : all_tablets) {
-    LOG(INFO) << "VKVK table " << tablet.table_id() << " and " << tablet.tablet_id();
-  }
-
   return all_tablets;
 }
 
@@ -1726,8 +1716,8 @@ void CDCServiceImpl::GetChanges(
     }
     // This specific error indicates that a tablet split occured on the tablet.
     if (status.IsTabletSplit()) {
-      LOG(INFO) << "VKVK updating children tablets on detected split from cdcsdk_producer "
-                << "on tablet " << producer_tablet.tablet_id;
+      LOG(INFO) << "Updating children tablets on detected split on tablet "
+                << producer_tablet.tablet_id;
       status = UpdateChildrenTabletsOnSplitOpForCDCSDK(producer_tablet);
       RPC_STATUS_RETURN_ERROR(status, resp->mutable_error(), CDCErrorPB::INTERNAL_ERROR, context);
 
@@ -3891,40 +3881,19 @@ Status CDCServiceImpl::UpdateChildrenTabletsOnSplitOpForCDCSDK(const ProducerTab
   auto tablets = VERIFY_RESULT(GetTablets(info.stream_id));
   const OpId& children_op_id = OpId();
 
-  // std::array<const master::TabletLocationsPB*, 2> children_tablets;
   auto tablet_peer = context_->LookupTablet(info.tablet_id);
   auto children = tablet_peer->tablet_metadata()->split_child_tablet_ids();
-  // uint found_children = 0;
-  // for (auto const& tablet : tablets) {
-  //   if (tablet.has_split_parent_tablet_id() && tablet.split_parent_tablet_id() == info.tablet_id) {
-  //     children_tablets[found_children] = &tablet;
-  //     found_children += 1;
-  //     LOG(INFO) << " VKVK found a children tablet " << tablet.tablet_id()
-  //               << " for parent " << info.tablet_id;
-
-  //     if (found_children == 2) {
-  //       break;
-  //     }
-  //   }
-  // }
-
-  // if (found_children != 2) {
-  //   LOG(INFO) << "VKVK could not find 2 children for the parent " << info.tablet_id;
-  // }
 
   LOG_IF(DFATAL, children.size() != 2)
       << "Could not find the two split children for the tablet: " << info.tablet_id;
 
   LOG(INFO) << "VKVK got children from tablet peer: " << children[0] << " and " << children[1];
-  // Add the entries for the children tablets in 'cdc_state_metadata_' and 'tablet_checkpoints_'.
-  // LOG(INFO) << "Added entries for children tablets to cdc_state_metadata_ for chilren "
-  //           << children_tablets[0]->tablet_id() << " and " << children_tablets[1]->tablet_id();
   RETURN_NOT_OK_SET_CODE(
       impl_->AddEntriesForChildrenTabletsOnSplitOp(info, children, children_op_id),
       CDCError(CDCErrorPB::INTERNAL_ERROR));
-  // VLOG(1) << "Added entries for children tablets: " << children_tablets[0]->tablet_id() << " and "
-  //         << children_tablets[1]->tablet_id() << ", of parent tablet: " << info.tablet_id
-  //         << ", to 'cdc_state_metadata_' and 'tablet_checkpoints_'";
+  VLOG(1) << "Added entries for children tablets: " << children[0] << " and "
+          << children[1] << ", of parent tablet: " << info.tablet_id
+          << ", to 'cdc_state_metadata_' and 'tablet_checkpoints_'";
 
   return Status::OK();
 }

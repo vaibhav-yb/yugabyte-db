@@ -2173,7 +2173,7 @@ Status GetChangesForCDCSDK(
     const TableId& colocated_table_id,
     const CoarseTimePoint deadline) {
   OpId op_id{from_op_id.term(), from_op_id.index()};
-  LOG(INFO) << "GetChanges request has from_op_id: " << from_op_id.DebugString()
+  VLOG(1) << "GetChanges request has from_op_id: " << from_op_id.DebugString()
           << ", safe_hybrid_time: " << safe_hybrid_time_req
           << ", wal_segment_index: " << wal_segment_index_req << " for tablet_id: " << tablet_id;
   ScopedTrackedConsumption consumption;

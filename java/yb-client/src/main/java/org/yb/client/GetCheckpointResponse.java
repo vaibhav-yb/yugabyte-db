@@ -21,7 +21,7 @@ public class GetCheckpointResponse extends YRpcResponse {
   private byte[] snapshot_key;
 
   public GetCheckpointResponse(long elapsedMillis, String uuid, long index, long term,
-                               long snapshot_time, byte[] snapshot_key, boolean hasSnapshotKey) {
+                               long snapshot_time, byte[] snapshot_key) {
     super(elapsedMillis, uuid);
     this.index = index;
     this.term = term;

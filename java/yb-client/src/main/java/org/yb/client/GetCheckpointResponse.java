@@ -19,7 +19,6 @@ public class GetCheckpointResponse extends YRpcResponse {
   private long term;
   private long snapshot_time;
   private byte[] snapshot_key;
-  private boolean hasSnapshotKey;
 
   public GetCheckpointResponse(long elapsedMillis, String uuid, long index, long term,
                                long snapshot_time, byte[] snapshot_key, boolean hasSnapshotKey) {
@@ -28,7 +27,6 @@ public class GetCheckpointResponse extends YRpcResponse {
     this.term = term;
     this.snapshot_time = snapshot_time;
     this.snapshot_key = snapshot_key;
-    this.hasSnapshotKey = hasSnapshotKey;
   }
 
   public long getIndex() {
@@ -45,9 +43,5 @@ public class GetCheckpointResponse extends YRpcResponse {
 
   public byte[] getSnapshotKey() {
     return snapshot_key;
-  }
-
-  public boolean hasSnapshotKey() {
-    return hasSnapshotKey;
   }
 }

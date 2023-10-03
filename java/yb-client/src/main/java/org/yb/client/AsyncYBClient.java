@@ -2346,7 +2346,14 @@ public class AsyncYBClient implements AutoCloseable {
       sb.append(". ");
       sb.append(cause.getMessage());
     }
-    final Exception e = new NonRecoverableException(sb.toString(), cause);
+    final Exception e;
+    if (request.getTablet() == null) {
+      sb.append(". ");
+      sb.append("Retry with a new YBClient");
+      e = new RecoverableException(sb.toString(), cause);
+    } else {
+      e = new NonRecoverableException(sb.toString(), cause);
+    }
     request.errback(e);
     return Deferred.fromError(e);
   }

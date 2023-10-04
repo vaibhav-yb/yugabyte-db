@@ -508,7 +508,7 @@ public class AsyncYBClient implements AutoCloseable {
       boolean needSchemaInfo, CdcSdkCheckpoint explicitCheckpoint, long safeHybridTime) {
     return getChangesCDCSDK(
         table, streamId, tabletId, term, index, key, write_id, time, needSchemaInfo,
-        explicitCheckpoint, -1, 0);
+        explicitCheckpoint, safeHybridTime, 0);
   }
 
   /**

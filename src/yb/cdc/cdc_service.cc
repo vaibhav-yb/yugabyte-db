@@ -1806,7 +1806,8 @@ void CDCServiceImpl::GetChanges(
         snapshot_op_id =
             OpId(resp->cdc_sdk_checkpoint().term(), resp->cdc_sdk_checkpoint().index());
         snapshot_key = (record.GetCheckpointType() == EXPLICIT) ?
-+                         req->explicit_cdc_sdk_checkpoint().key() : req->from_cdc_sdk_checkpoint().key();
+                          req->explicit_cdc_sdk_checkpoint().key()
+                            : req->from_cdc_sdk_checkpoint().key();
 
         if (snapshot_bootstrap) {
           LOG(INFO) << "Snapshot bootstrapping is initiated for tablet_id: " << req->tablet_id()

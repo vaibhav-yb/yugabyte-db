@@ -1217,7 +1217,7 @@ Result<SetCDCCheckpointResponsePB> CDCServiceImpl::SetCDCCheckpoint(
   // Similarly, if bootstrap (set_latest_entry) is false, we know it is a snapshot call.
   RETURN_NOT_OK_SET_CODE(
       UpdateCheckpointAndActiveTime(
-          producer_tablet, checkpoint, checkpoint, session, GetCurrentTimeMicros(),
+          producer_tablet, checkpoint, checkpoint, GetCurrentTimeMicros(),
           CDCRequestSource::CDCSDK, true, cdc_sdk_safe_time, !set_latest_entry),
       CDCError(CDCErrorPB::INTERNAL_ERROR));
 

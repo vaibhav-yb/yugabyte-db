@@ -11,6 +11,7 @@
 // under the License.
 
 #include "yb/cdc/cdc_service.pb.h"
+#include "yb/cdc/cdc_types.h"
 #include "yb/common/entity_ids_types.h"
 #include "yb/integration-tests/cdcsdk_test_base.h"
 #include "yb/integration-tests/cdcsdk_ysql_test_base.h"
@@ -7057,7 +7058,7 @@ TEST_F(CDCSDKYsqlTest, YB_DISABLE_TEST_IN_TSAN(TestBootstrapFailure)) {
   ASSERT_OK(test_client()->GetTablets(old_table, 0, &tablets, nullptr));
   ASSERT_EQ(tablets.size(), 1);
   LOG(INFO) << "Tablet ID at index 0 is " << tablets.Get(0).tablet_id();
-  CDCStreamId stream_id = ASSERT_RESULT(CreateDBStream());
+  xrepl::StreamId stream_id = ASSERT_RESULT(CreateDBStream());
 
   auto set_resp = ASSERT_RESULT(SetCDCCheckpoint(stream_id, tablets, OpId::Min()));
   ASSERT_FALSE(set_resp.has_error());

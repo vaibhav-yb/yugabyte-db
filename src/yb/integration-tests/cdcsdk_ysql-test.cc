@@ -7050,7 +7050,7 @@ TEST_F(CDCSDKYsqlTest, TestAlterOperationTableRewrite) {
       "cannot change a column type of a table that is a part of CDC or XCluster replication.");
 }
 
-TEST_F(CDCSDKYsqlTest, YB_DISABLE_TEST_IN_TSAN(TestBootstrapFailure)) {
+TEST_F(CDCSDKYsqlTest, YB_DISABLE_TEST_IN_TSAN(TestUnrelatedTableDropUponTserverRestart)) {
   ASSERT_OK(SetUpWithParams(3, 1, false));
   auto old_table = ASSERT_RESULT(CreateTable(&test_cluster_, kNamespaceName, "old_table"));
 

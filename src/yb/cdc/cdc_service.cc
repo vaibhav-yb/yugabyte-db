@@ -1435,7 +1435,7 @@ void CDCServiceImpl::ListTablets(
 }
 
 Result<google::protobuf::RepeatedPtrField<master::TabletLocationsPB>> CDCServiceImpl::GetTablets(
-    const CDCStreamId& stream_id,
+    const xrepl::StreamId& stream_id,
     bool ignore_errors) {
   auto stream_metadata = VERIFY_RESULT(GetStream(stream_id, RefreshStreamMapOption::kAlways));
   client::YBTableName table_name;

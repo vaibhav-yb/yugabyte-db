@@ -3954,7 +3954,7 @@ void CDCServiceImpl::IsBootstrapRequired(
 }
 
 Status CDCServiceImpl::UpdateChildrenTabletsOnSplitOpForCDCSDK(const ProducerTabletInfo& info) {
-  auto tablets = VERIFY_RESULT(GetTablets(info.stream_id));
+  auto tablets = VERIFY_RESULT(GetTablets(info.stream_id, true /* ignore_errors */));
   const OpId& children_op_id = OpId();
 
   std::array<const master::TabletLocationsPB*, 2> children_tablets;

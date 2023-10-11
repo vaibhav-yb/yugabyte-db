@@ -3878,7 +3878,7 @@ Status CDCServiceImpl::CheckTabletValidForStream(const ProducerTabletInfo& info)
   // If we don't recognize the tablet_id, populate our full tablet list for this stream.
   // This can happen if we call "GetChanges" on a split tablet. We will initalise the entries for
   // the split tablets in both: tablet_checkpoints_ and cdc_state_metadata_.
-  auto tablets = VERIFY_RESULT(GetTablets(info.stream_id, true /* ignore_errors */));
+  auto tablets = VERIFY_RESULT(GetTablets(info.stream_id, false /* ignore_errors */));
 
   auto status = impl_->CheckTabletValidForStream(info, tablets);
 

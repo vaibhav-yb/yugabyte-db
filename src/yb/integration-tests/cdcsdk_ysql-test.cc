@@ -8231,7 +8231,7 @@ TEST_F(CDCSDKYsqlTest, YB_DISABLE_TEST_IN_TSAN(TestUnrelatedTableDropUponTserver
   // Call GetChanges again.
   GetChangesResponsePB change_resp_2 =
     ASSERT_RESULT(GetChangesFromCDC(stream_id, tablets, &change_resp_1.cdc_sdk_checkpoint()));
-  
+
   // Create new table.
   auto new_table = ASSERT_RESULT(CreateTable(&test_cluster_, kNamespaceName, "new_table"));
 
@@ -8257,7 +8257,8 @@ TEST_F(CDCSDKYsqlTest, YB_DISABLE_TEST_IN_TSAN(TestUnrelatedTableDropUponTserver
   TabletId old_tablet = tablets.Get(0).tablet_id();
   uint32_t tserver_idx = -1;
   for (uint32_t idx = 0; idx < 3; ++idx) {
-    auto tablet_peer_ptr = test_cluster_.mini_cluster_->GetTabletManager(idx)->LookupTablet(old_tablet);
+    auto tablet_peer_ptr =
+      test_cluster_.mini_cluster_->GetTabletManager(idx)->LookupTablet(old_tablet);
     if (tablet_peer_ptr != nullptr && !tablet_peer_ptr->IsNotLeader()) {
       LOG(INFO) << "Tserver at index " << idx << " hosts the leader for tablet " << old_tablet;
       tserver_idx = idx;

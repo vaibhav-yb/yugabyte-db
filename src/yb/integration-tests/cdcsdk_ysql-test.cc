@@ -8212,7 +8212,8 @@ TEST_F(CDCSDKYsqlTest, YB_DISABLE_TEST_IN_TSAN(TestLargeTxnWithExplicitStream)) 
   }
 }
 
-TEST_F(CDCSDKYsqlTest, YB_DISABLE_TEST_IN_TSAN(TestBootstrapFailure)) {
+TEST_F(CDCSDKYsqlTest, YB_DISABLE_TEST_IN_TSAN(TestUnrelatedTableDropUponTserverRestart)) {
+  FLAGS_catalog_manager_bg_task_wait_ms = 50000;
   ASSERT_OK(SetUpWithParams(3, 1, false));
   auto old_table = ASSERT_RESULT(CreateTable(&test_cluster_, kNamespaceName, "old_table"));
 
@@ -8257,7 +8258,7 @@ TEST_F(CDCSDKYsqlTest, YB_DISABLE_TEST_IN_TSAN(TestBootstrapFailure)) {
   uint32_t tserver_idx = -1;
   for (uint32_t idx = 0; idx < 3; ++idx) {
     auto tablet_peer_ptr = test_cluster_.mini_cluster_->GetTabletManager(idx)->LookupTablet(old_tablet);
-    if (tablet_peer_ptr != nullptr) {
+    if (tablet_peer_ptr != nullptr && !tablet_peer_ptr->IsNotLeader()) {
       LOG(INFO) << "Tserver at index " << idx << " hosts the leader for tablet " << old_tablet;
       tserver_idx = idx;
       break;

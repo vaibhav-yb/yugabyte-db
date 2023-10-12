@@ -68,6 +68,7 @@
 #include "yb/tablet/tablet_peer.h"
 #include "yb/tablet/transaction_participant.h"
 
+#include "yb/util/debug-util.h"
 #include "yb/util/debug/trace_event.h"
 #include "yb/util/flags.h"
 #include "yb/util/format.h"
@@ -1443,13 +1444,16 @@ Result<google::protobuf::RepeatedPtrField<master::TabletLocationsPB>> CDCService
 
   std::vector<TableId> table_ids = stream_metadata->GetTableIds();
 
+  LOG(INFO) << __func__ << ": stack trace: \n" << GetStackTrace();
   for (const auto& table_id : table_ids) {
     google::protobuf::RepeatedPtrField<master::TabletLocationsPB> tablets;
     table_name.set_table_id(table_id);
+    LOG(INFO) << "VKVK calling get tablets for table: " << table_name.table_id();
     Status s = client()->GetTablets(
         table_name, 0, &tablets, /* partition_list_version =*/nullptr,
         RequireTabletsRunning::kFalse, master::IncludeInactive::kTrue);
 
+    LOG(INFO) << "VKVK status is " << s.ok();
     if (!s.ok()) {
       if (ignore_errors) {
         LOG(WARNING) << "Fetching tablets for table " << table_name.table_id()
@@ -1457,6 +1461,7 @@ Result<google::protobuf::RepeatedPtrField<master::TabletLocationsPB>> CDCService
         continue;
       }
 
+      LOG(INFO) << "VKVK returning status since it is not okay";
       return s;
     }
 
@@ -1512,9 +1517,12 @@ void CDCServiceImpl::GetChanges(
   ProducerTabletInfo producer_tablet = {{}, stream_id, req->tablet_id()};
 
   auto status = CheckTabletValidForStream(producer_tablet);
+  LOG(INFO) << "VKVK first status call is " << status.ok();
   if (!status.ok()) {
+    auto status_n = CheckTabletValidForStream(producer_tablet);
+    LOG(INFO) << "VKVK second status call returned " << status_n.ok();
     RPC_STATUS_RETURN_ERROR(
-        CheckTabletValidForStream(producer_tablet), resp->mutable_error(),
+        status_n, resp->mutable_error(),
         status.IsTabletSplit() ? CDCErrorPB::TABLET_SPLIT : CDCErrorPB::INVALID_REQUEST, context);
   }
 
@@ -3878,7 +3886,9 @@ Status CDCServiceImpl::CheckTabletValidForStream(const ProducerTabletInfo& info)
   // If we don't recognize the tablet_id, populate our full tablet list for this stream.
   // This can happen if we call "GetChanges" on a split tablet. We will initalise the entries for
   // the split tablets in both: tablet_checkpoints_ and cdc_state_metadata_.
+  LOG(INFO) << "VKVK inside checktabletvalid before getting tablets";
   auto tablets = VERIFY_RESULT(GetTablets(info.stream_id, false /* ignore_errors */));
+  LOG(INFO) << "VKVK inside checktabletvalid after getting tablets";
 
   auto status = impl_->CheckTabletValidForStream(info, tablets);
 
@@ -3954,7 +3964,7 @@ void CDCServiceImpl::IsBootstrapRequired(
 }
 
 Status CDCServiceImpl::UpdateChildrenTabletsOnSplitOpForCDCSDK(const ProducerTabletInfo& info) {
-  auto tablets = VERIFY_RESULT(GetTablets(info.stream_id, true /* ignore_errors */));
+  auto tablets = VERIFY_RESULT(GetTablets(info.stream_id, false /* ignore_errors */));
   const OpId& children_op_id = OpId();
 
   std::array<const master::TabletLocationsPB*, 2> children_tablets;

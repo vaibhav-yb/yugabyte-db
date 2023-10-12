@@ -7111,6 +7111,7 @@ TEST_F(CDCSDKYsqlTest, YB_DISABLE_TEST_IN_TSAN(TestUnrelatedTableDropUponTserver
   auto conn = ASSERT_RESULT(test_cluster_.ConnectToDB(kNamespaceName));
   ASSERT_OK(conn.Execute("DROP TABLE new_table;"));
 
+  LOG(INFO) << "VKVK calling last getchanges";
   // Call GetChanges on the old table.
   GetChangesResponsePB change_resp_3 =
     ASSERT_RESULT(GetChangesFromCDC(stream_id, tablets, &change_resp_2.cdc_sdk_checkpoint()));

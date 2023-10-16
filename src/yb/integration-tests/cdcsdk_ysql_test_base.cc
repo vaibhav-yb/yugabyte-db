@@ -1301,7 +1301,7 @@ namespace cdc {
           }
 
           if (should_retry && (status.IsLeaderNotReadyToServe() || status.IsNotFound())) {
-            LOG(INFO) << "VKVK going for retry";
+            LOG(INFO) << "Retrying GetChanges in test";
             return false;
           }
 

@@ -7041,7 +7041,7 @@ TEST_F(CDCSDKYsqlTest, YB_DISABLE_TEST_IN_TSAN(TestUnrelatedTableDropUponTserver
 
   // Drop newly created table.
   auto conn = ASSERT_RESULT(test_cluster_.ConnectToDB(kNamespaceName));
-  ASSERT_OK(conn.Execute("DROP TABLE new_table;"));
+  DropTable(&test_cluster_, "new_table");
 
   // Call GetChanges on the old table.
   LOG(INFO) << "Calling last GetChanges";

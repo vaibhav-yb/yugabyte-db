@@ -19,7 +19,7 @@ import { UsersUnderRole } from './UsersUnderRole';
 import { DeleteRoleModal } from './DeleteRoleModal';
 import { ConfirmEditRoleModal } from './ConfirmEditRoleModal';
 
-import { EditView, RoleContextMethods, RoleViewContext } from '../RoleContext';
+import { EditViews, RoleContextMethods, RoleViewContext } from '../RoleContext';
 import { RoleType } from '../IRoles';
 
 import { ReactComponent as ArrowLeft } from '../../../../assets/arrow_left.svg';
@@ -76,25 +76,31 @@ export const EditRole = () => {
     keyPrefix: 'rbac.roles.edit'
   });
 
-  const Menu: { view: EditView, label: string }[] = [
+  const Menu: { view: keyof typeof EditViews; label: string }[] = [
     {
-      view: "CONFIGURATIONS",
+      view: EditViews.CONFIGURATIONS,
       label: t('menu.configurations')
     },
     {
-      view: "USERS",
+      view: EditViews.USERS,
       label: t('menu.users')
     }
   ];
 
   const classes = useStyles();
-  const [{ currentRole, formProps: { editView } }] = (useContext(RoleViewContext) as unknown) as RoleContextMethods;
-  const [currentView, setCurrentView] = useState<typeof Menu[number]['view']>(editView ?? "CONFIGURATIONS");
+  const [
+    {
+      currentRole,
+      formProps: { editView }
+    }
+  ] = (useContext(RoleViewContext) as unknown) as RoleContextMethods;
+  const [currentView, setCurrentView] = useState<keyof typeof EditViews>(
+    editView ?? EditViews.CONFIGURATIONS
+  );
   const createRoleRef = useRef<any>(null);
 
   const [showDeleteModal, toggleDeleteModal] = useToggle(false);
   const [showEditRoleConfirmModal, toggleEditRoleConfirmModal] = useToggle(false);
-
 
   return (
     <Container
@@ -104,7 +110,8 @@ export const EditRole = () => {
       onSave={() => {
         toggleEditRoleConfirmModal(true);
       }}
-      hideSave={currentView === t('menu.users')}
+      hideSave={currentView === EditViews.USERS}
+      disableSave={currentRole?.roleType === RoleType.SYSTEM}
     >
       <Box className={classes.root}>
         <div className={classes.header}>
@@ -133,7 +140,7 @@ export const EditRole = () => {
           <Grid item className={classes.menuContainer}>
             {Menu.map((m) => (
               <div
-                key="m"
+                key={m.label}
                 onClick={() => {
                   setCurrentView(m.view);
                 }}
@@ -144,7 +151,7 @@ export const EditRole = () => {
             ))}
           </Grid>
           <Grid item>
-            {currentView === "CONFIGURATIONS" ? (
+            {currentView === EditViews.CONFIGURATIONS ? (
               <div>
                 <CreateRole ref={createRoleRef} />
               </div>
@@ -165,6 +172,7 @@ export const EditRole = () => {
             toggleEditRoleConfirmModal(false);
           }}
           onSubmit={() => {
+            toggleEditRoleConfirmModal(false);
             createRoleRef.current?.onSave();
           }}
         />

@@ -27,6 +27,8 @@
 #include "yb/client/table_creator.h"
 #include "yb/client/table_info.h"
 #include "yb/client/tablet_server.h"
+#include "yb/client/transaction.h"
+#include "yb/client/transaction_pool.h"
 
 #include "yb/dockv/partition.h"
 #include "yb/common/pg_types.h"
@@ -71,17 +73,26 @@ DEFINE_UNKNOWN_uint64(pg_client_session_expiration_ms, 60000,
 DEFINE_RUNTIME_bool(pg_client_use_shared_memory, false,
                     "Use shared memory for executing read and write pg client queries");
 
+DEFINE_RUNTIME_int32(get_locks_status_max_retry_attempts, 2,
+                     "Maximum number of retries that will be performed for GetLockStatus "
+                     "requests that fail in the validation phase due to unseen responses from "
+                     "some of the involved tablets.");
+
 DEFINE_test_flag(uint64, delay_before_get_old_transactions_heartbeat_intervals, 0,
                  "When non-zero, we sleep for set transaction heartbeat interval periods before "
                  "fetching old transactions. This delay is implemented to ensure that the "
                  "information returned for yb_lock_status is more up-to-date. Currently, the flag "
                  "is used in tests alone.");
 
+DEFINE_test_flag(uint64, delay_before_get_locks_status_ms, 0,
+                 "When non-zero, we sleep for set number of milliseconds after fetching involved "
+                 "tablet locations and before invoking GetLockStatus RPC. Currently the flag is "
+                 "being used to test pg_locks behavior when split happens after fetching involved "
+                 "tablet(s) locations.");
+
 DECLARE_uint64(transaction_heartbeat_usec);
 
-namespace yb {
-namespace tserver {
-
+namespace yb::tserver {
 namespace {
 
 template <class Resp>
@@ -91,6 +102,42 @@ void Respond(const Status& status, Resp* resp, rpc::RpcContext* context) {
   }
   context->RespondSuccess();
 }
+
+class TxnAssignment {
+ public:
+  using Watcher = std::shared_ptr<client::YBTransactionPtr>;
+
+  explicit TxnAssignment(rw_spinlock* mutex) : mutex_(*mutex) {}
+
+  void Assign(const Watcher& watcher, IsDDL is_ddl) {
+    std::lock_guard lock(mutex_);
+    *(is_ddl ? &ddl_ : &plain_) = watcher;
+  }
+
+  client::YBTransactionPtr Get() {
+    SharedLock lock(mutex_);
+    // TODO(kramanathan): Return the DDL txn in preference to the plain txn until GHI #18451 is
+    // resolved.
+    auto ddl = ddl_.lock();
+    if (ddl) {
+      return *ddl;
+    }
+
+    auto plain = plain_.lock();
+    if (plain) {
+      return *plain;
+    }
+
+    return nullptr;
+  }
+
+ private:
+  using WatcherWeak = Watcher::weak_type;
+
+  rw_spinlock& mutex_;
+  WatcherWeak plain_;
+  WatcherWeak ddl_;
+};
 
 class PgClientSessionLocker;
 
@@ -107,7 +154,7 @@ class LockablePgClientSession : public PgClientSession {
       Touch();
       std::shared_ptr<CountDownLatch> latch;
       {
-        std::unique_lock<std::mutex> lock(mutex_);
+        std::unique_lock lock(mutex_);
         latch = ProcessSharedRequest(size, &exchange_->exchange());
       }
       if (latch) {
@@ -144,28 +191,107 @@ class LockablePgClientSession : public PgClientSession {
   std::atomic<CoarseTimePoint> expiration_;
 };
 
-class PgClientSessionLocker {
+template <class T>
+class DeferredConstructible {
  public:
-  using LockablePtr = std::shared_ptr<LockablePgClientSession>;
+  DeferredConstructible() = default;
 
-  explicit PgClientSessionLocker(const LockablePtr& lockable)
-      : lockable_(lockable), lock_(lockable->mutex_) {
+  ~DeferredConstructible() {
+    get().~T();
   }
 
-  PgClientSession& operator*() const {
-    return *lockable_;
+  T& get() const {
+#ifndef NDEBUG
+    DCHECK(initialized_);
+#endif
+    return *pointer_cast<T*>(holder_);
   }
 
-  PgClientSession* operator->() const {
-    return lockable_.get();
+  template <class... Args>
+  void Init(Args&&... args) {
+#ifndef NDEBUG
+    DCHECK(!initialized_);
+    initialized_ = true;
+#endif
+    new (holder_) T(std::forward<Args>(args)...);
   }
 
  private:
-  LockablePtr lockable_;
+  mutable char holder_[sizeof(T)];
+#ifndef NDEBUG
+  bool initialized_{false};
+#endif
+
+  DISALLOW_COPY_AND_ASSIGN(DeferredConstructible);
+};
+
+using TransactionBuilder = std::function<
+    client::YBTransactionPtr(
+        TxnAssignment* dest, IsDDL, client::ForceGlobalTransaction, CoarseTimePoint)>;
+
+class SessionInfo {
+ public:
+  LockablePgClientSession& session() { return session_.get(); }
+
+  uint64_t id() const { return session_.get().id(); }
+
+  TxnAssignment& txn_assignment() { return txn_assignment_; }
+
+  template <class... Args>
+  static auto Make(rw_spinlock* txn_assignment_mutex,
+                   CoarseDuration lifetime,
+                   const TransactionBuilder& builder,
+                   Args&&... args) {
+    struct ConstructorAccessor : public SessionInfo {
+      explicit ConstructorAccessor(rw_spinlock* txn_assignment_mutex)
+          : SessionInfo(txn_assignment_mutex) {}
+    };
+    auto accessor = std::make_shared<ConstructorAccessor>(txn_assignment_mutex);
+    SessionInfo* session_info = accessor.get();
+    session_info->session_.Init(
+        lifetime,
+        [&builder, txn_assignment = &session_info->txn_assignment_](auto&&... builder_args) {
+          return builder(txn_assignment, std::forward<decltype(builder_args)>(builder_args)...);
+        },
+        accessor,
+        std::forward<Args>(args)...);
+    return std::shared_ptr<SessionInfo>(std::move(accessor), session_info);
+  }
+
+ private:
+  explicit SessionInfo(rw_spinlock* txn_assignment_mutex)
+      : txn_assignment_(txn_assignment_mutex) {}
+
+  TxnAssignment txn_assignment_;
+  DeferredConstructible<LockablePgClientSession> session_;
+};
+
+void AddTransactionInfo(
+    PgGetActiveTransactionListResponsePB* out, SessionInfo* src) {
+  auto txn = src->txn_assignment().Get();
+  if (txn) {
+    auto& entry = *out->add_entries();
+    entry.set_session_id(src->id());
+    txn->id().AsSlice().CopyToBuffer(entry.mutable_txn_id());
+  }
+}
+
+using LockablePgClientSessionPtr = std::shared_ptr<LockablePgClientSession>;
+
+class PgClientSessionLocker {
+ public:
+  explicit PgClientSessionLocker(LockablePgClientSessionPtr lockable)
+      : lockable_(std::move(lockable)), lock_(lockable_->mutex_) {
+  }
+
+  PgClientSession* operator->() const { return lockable_.get(); }
+
+ private:
+  LockablePgClientSessionPtr lockable_;
   std::unique_lock<std::mutex> lock_;
 };
 
-using LockablePgClientSessionPtr = std::shared_ptr<LockablePgClientSession>;
+using SessionInfoPtr = std::shared_ptr<SessionInfo>;
 using OldTxnsRespPtr = std::shared_ptr<tserver::GetOldTransactionsResponsePB>;
 using RemoteTabletServerPtr = std::shared_ptr<client::internal::RemoteTabletServer>;
 using OldTransactionMetadataPB = tserver::GetOldTransactionsResponsePB::OldTransactionMetadataPB;
@@ -181,19 +307,6 @@ void GetTablePartitionList(const client::YBTablePtr& table, PgTablePartitionsPB*
     *partition_keys->Add() = key;
   }
   partition_list->set_version(table_partition_list->version);
-}
-
-void AddTransactionInfo(
-    PgGetActiveTransactionListResponsePB* out, const PgClientSessionLocker& locker) {
-  auto& session = *locker;
-  const auto* txn_id = session.GetTransactionId();
-  if (!txn_id) {
-    return;
-  }
-
-  auto& entry = *out->add_entries();
-  entry.set_session_id(session.id());
-  txn_id->AsSlice().CopyToBuffer(entry.mutable_txn_id());
 }
 
 } // namespace
@@ -233,7 +346,10 @@ class PgClientServiceImpl::Impl {
         xcluster_context_(xcluster_context),
         pg_node_level_mutation_counter_(pg_node_level_mutation_counter),
         response_cache_(parent_mem_tracker, metric_entity),
-        instance_id_(Uuid::Generate()) {
+        instance_id_(Uuid::Generate()),
+        transaction_builder_([this](auto&&... args) {
+          return BuildTransaction(std::forward<decltype(args)>(args)...);
+        }) {
     ScheduleCheckExpiredSessions(CoarseMonoClock::now());
   }
 
@@ -252,19 +368,20 @@ class PgClientServiceImpl::Impl {
     }
 
     auto session_id = ++session_serial_no_;
-    auto session = std::make_shared<LockablePgClientSession>(
-        FLAGS_pg_client_session_expiration_ms * 1ms, session_id, &client(), clock_,
-        transaction_pool_provider_, &table_cache_, xcluster_context_,
+    auto session_info = SessionInfo::Make(
+        &txns_assignment_mutexes_[session_id % txns_assignment_mutexes_.size()],
+        FLAGS_pg_client_session_expiration_ms * 1ms,
+        transaction_builder_, session_id, &client(), clock_, &table_cache_, xcluster_context_,
         pg_node_level_mutation_counter_, &response_cache_, &sequence_cache_);
     resp->set_session_id(session_id);
     if (FLAGS_pg_client_use_shared_memory) {
       resp->set_instance_id(instance_id_.data(), instance_id_.size());
-      session->StartExchange(instance_id_);
+      session_info->session().StartExchange(instance_id_);
     }
 
     std::lock_guard lock(mutex_);
-    auto it = sessions_.insert(std::move(session)).first;
-    session_expiration_queue_.push({(**it).expiration(), session_id});
+    auto it = sessions_.insert(std::move(session_info)).first;
+    session_expiration_queue_.push({(**it).session().expiration(), session_id});
     return Status::OK();
   }
 
@@ -384,7 +501,7 @@ class PgClientServiceImpl::Impl {
   // Comparator used for maintaining a max heap of old transactions based on their start times.
   struct OldTransactionComparator {
     bool operator()(
-        const OldTransactionMetadataPBPtr lhs, const OldTransactionMetadataPBPtr rhs) const {
+        const OldTransactionMetadataPBPtr& lhs, const OldTransactionMetadataPBPtr& rhs) const {
       // Order is reversed so that we pop newer transactions first.
       if (lhs->start_time() != rhs->start_time()) {
         return lhs->start_time() < rhs->start_time();
@@ -392,6 +509,62 @@ class PgClientServiceImpl::Impl {
       return lhs->transaction_id() > rhs->transaction_id();
     }
   };
+
+  // Fetches location info of involved tablets. On seeing tablet split errors in the response,
+  // retries the operation with split child tablet ids. On encountering further tablet split
+  // errors, returns a bad status.
+  Result<std::vector<RemoteTabletServerPtr>> ReplaceSplitTabletsAndGetLocations(
+      GetLockStatusRequestPB* req, bool is_within_retry = false) {
+    std::vector<TabletId> tablet_ids;
+    tablet_ids.reserve(req->transactions_by_tablet().size());
+    for (const auto& [tablet_id, _] : req->transactions_by_tablet()) {
+      tablet_ids.push_back(tablet_id);
+    }
+
+    auto resp = VERIFY_RESULT(client().GetTabletLocations(tablet_ids));
+    auto& txns_by_tablet = *req->mutable_transactions_by_tablet();
+    Status combined_status;
+    for (const auto& error : resp.errors()) {
+      const auto& tablet_id = error.tablet_id();
+      auto status = StatusFromPB(error.status());
+      auto split_child_ids = SplitChildTabletIdsData(status).value();
+      // Return bad status on observing any error types other than tablet split.
+      if (split_child_ids.empty()) {
+        return status.CloneAndPrepend(Format("GetLocations for tablet $0 failed: ", tablet_id));
+      }
+      // Replace the split parent tablet entry in GetLockStatusRequestPB with the child tablets ids.
+      auto& split_parent_entry = txns_by_tablet[tablet_id];
+      const auto& first_child_id = split_child_ids[0];
+      txns_by_tablet[first_child_id].mutable_transactions()->
+                                     Swap(split_parent_entry.mutable_transactions());
+      for (size_t i = 1 ; i < split_child_ids.size() ; i++) {
+        txns_by_tablet[split_child_ids[i]].mutable_transactions()->
+                                           CopyFrom(txns_by_tablet[first_child_id].transactions());
+      }
+      txns_by_tablet.erase(tablet_id);
+      combined_status = status.CloneAndAppend(combined_status.message());
+    }
+    if (!resp.errors().empty()) {
+      // Re-request location info of updated tablet set if not already in the retry context.
+      return is_within_retry ? combined_status : ReplaceSplitTabletsAndGetLocations(req, true);
+    }
+
+    std::set<std::string> tserver_uuids;
+    for (const auto& tablet_location_pb : resp.tablet_locations()) {
+      for (const auto& replica : tablet_location_pb.replicas()) {
+        if (replica.role() == PeerRole::LEADER) {
+          tserver_uuids.insert(replica.ts_info().permanent_uuid());
+        }
+      }
+    }
+
+    std::vector<RemoteTabletServerPtr> remote_tservers;
+    remote_tservers.reserve(tserver_uuids.size());
+    for(const auto& ts_uuid : tserver_uuids) {
+      remote_tservers.push_back(VERIFY_RESULT(client().GetRemoteTabletServer(ts_uuid)));
+    }
+    return remote_tservers;
+  }
 
   Status GetLockStatus(
       const PgGetLockStatusRequestPB& req, PgGetLockStatusResponsePB* resp,
@@ -409,7 +582,13 @@ class PgClientServiceImpl::Impl {
       // TODO(pglocks): Once we call GetTransactionStatus for involved tablets, ensure we populate
       // aborted_subtxn_set in the GetLockStatusRequests that we send to involved tablets as well.
       lock_status_req.add_transaction_ids(req.transaction_id());
-      return DoGetLockStatus(lock_status_req, resp, context, live_tservers);
+      std::vector<RemoteTabletServerPtr> remote_tservers;
+      remote_tservers.reserve(live_tservers.size());
+      for (const auto& live_ts : live_tservers) {
+        const auto& permanent_uuid = live_ts.tserver_instance().permanent_uuid();
+        remote_tservers.push_back(VERIFY_RESULT(client().GetRemoteTabletServer(permanent_uuid)));
+      }
+      return DoGetLockStatus(&lock_status_req, resp, context, remote_tservers);
     }
     const auto& min_txn_age_ms = req.min_txn_age_ms();
     const auto& max_num_txns = req.max_num_txns();
@@ -476,6 +655,8 @@ class PgClientServiceImpl::Impl {
         auto old_txn_ptr = std::make_shared<OldTransactionMetadataPB>(std::move(old_txn));
         old_txns_pq.push(std::move(old_txn_ptr));
         while (old_txns_pq.size() > max_num_txns) {
+          VLOG(4) << "Dropping old transaction with metadata "
+                  << old_txns_pq.top()->ShortDebugString();
           old_txns_pq.pop();
         }
       }
@@ -510,24 +691,42 @@ class PgClientServiceImpl::Impl {
       }
       old_txns_pq.pop();
     }
-    return DoGetLockStatus(lock_status_req, resp, context, live_tservers);
+    auto remote_tservers = VERIFY_RESULT(ReplaceSplitTabletsAndGetLocations(&lock_status_req));
+    return DoGetLockStatus(&lock_status_req, resp, context, remote_tservers);
+  }
+
+  // Merges the src PgGetLockStatusResponsePB into dest, while preserving existing entries in dest.
+  Status MergeLockStatusResponse(PgGetLockStatusResponsePB* dest,
+                                 PgGetLockStatusResponsePB* src) {
+    if (src->status().code() != AppStatusPB::OK) {
+      return StatusFromPB(src->status());
+    }
+    dest->add_node_locks()->Swap(src->mutable_node_locks(0));
+    for (auto i = 0 ; i < src->node_locks_size() ; i++) {
+      dest->add_node_locks()->Swap(src->mutable_node_locks(i));
+    }
+    return Status::OK();
   }
 
   Status DoGetLockStatus(
-      const GetLockStatusRequestPB& req, PgGetLockStatusResponsePB* resp,
-      rpc::RpcContext* context, const std::vector<master::TSInformationPB>& live_tservers) {
-    if (req.transactions_by_tablet().empty() && req.transaction_ids().empty()) {
+      GetLockStatusRequestPB* req, PgGetLockStatusResponsePB* resp,
+      rpc::RpcContext* context, const std::vector<RemoteTabletServerPtr>& remote_tservers,
+      int retry_attempt = 0) {
+    if (PREDICT_FALSE(FLAGS_TEST_delay_before_get_locks_status_ms > 0)) {
+      AtomicFlagSleepMs(&FLAGS_TEST_delay_before_get_locks_status_ms);
+    }
+
+    VLOG(4) << "Request to DoGetLockStatus: " << req->ShortDebugString();
+    if (req->transactions_by_tablet().empty() && req->transaction_ids().empty()) {
       return Status::OK();
     }
     // TODO(pglocks): parallelize RPCs
     rpc::RpcController controller;
-    for (const auto& live_ts : live_tservers) {
-      const auto& permanent_uuid = live_ts.tserver_instance().permanent_uuid();
-      auto remote_tserver = VERIFY_RESULT(client().GetRemoteTabletServer(permanent_uuid));
+    for (const auto& remote_tserver : remote_tservers) {
       auto proxy = remote_tserver->proxy();
       GetLockStatusResponsePB node_resp;
       controller.Reset();
-      auto s = proxy->GetLockStatus(req, &node_resp, &controller);
+      auto s = proxy->GetLockStatus(*req, &node_resp, &controller);
       if (!s.ok()) {
         resp->Clear();
         return s;
@@ -538,13 +737,34 @@ class PgClientServiceImpl::Impl {
         return Status::OK();
       }
       auto* node_locks = resp->add_node_locks();
-      node_locks->set_permanent_uuid(permanent_uuid);
+      node_locks->set_permanent_uuid(remote_tserver->permanent_uuid());
       node_locks->mutable_tablet_lock_infos()->Swap(node_resp.mutable_tablet_lock_infos());
+      VLOG(4) << "Adding node locks to PgGetLockStatusResponsePB: "
+              << node_locks->ShortDebugString();
     }
 
     auto s = RefineAccumulatedLockStatusResp(req, resp);
     if (!s.ok()) {
       s = s.CloneAndPrepend("Error refining accumulated LockStatus responses.");
+    } else if (!req->transactions_by_tablet().empty()) {
+      // We haven't heard back from all involved tablets, retry GetLockStatusRequest on the
+      // tablets missing in the response if we haven't maxed out on the retry attempts.
+      if (retry_attempt > FLAGS_get_locks_status_max_retry_attempts) {
+        s = STATUS_FORMAT(IllegalState,
+                          "Expected to see involved tablet(s) $0 in PgGetLockStatusResponsePB",
+                          req->ShortDebugString());
+      } else {
+        PgGetLockStatusResponsePB sub_resp;
+        for (const auto& node_txn_pair : resp->transactions_by_node()) {
+          sub_resp.mutable_transactions_by_node()->insert(node_txn_pair);
+        }
+        RETURN_NOT_OK(DoGetLockStatus(
+            req, &sub_resp, context, VERIFY_RESULT(ReplaceSplitTabletsAndGetLocations(req)),
+            ++retry_attempt));
+        s = MergeLockStatusResponse(resp, &sub_resp);
+      }
+    }
+    if (!s.ok()) {
       resp->Clear();
     }
     StatusToPB(s, resp->mutable_status());
@@ -552,18 +772,8 @@ class PgClientServiceImpl::Impl {
   }
 
   // Refines PgGetLockStatusResponsePB by dropping duplicate lock responses for a given tablet.
-  // Also ensure that we see a lock status response from all involved tablets of each txn since
-  // returning incomplete/impartial results might be misleading.
-  Status RefineAccumulatedLockStatusResp(
-      const GetLockStatusRequestPB& req, PgGetLockStatusResponsePB* resp) {
-    std::unordered_map<std::string, std::unordered_set<TabletId>> txn_involved_tablets;
-    for (const auto& [tablet_id, involved_txns] : req.transactions_by_tablet()) {
-      for (const auto& txn : involved_txns.transactions()) {
-        auto txn_id = VERIFY_RESULT(FullyDecodeTransactionId(txn.id()));
-        txn_involved_tablets[txn_id.ToString()].insert(tablet_id);
-      }
-    }
-
+  Status RefineAccumulatedLockStatusResp(GetLockStatusRequestPB* req,
+                                         PgGetLockStatusResponsePB* resp) {
     // Track the highest seen term for each tablet id.
     std::map<TabletId, uint64_t> peer_term;
     for (const auto& node_lock : resp->node_locks()) {
@@ -573,7 +783,6 @@ class PgClientServiceImpl::Impl {
       }
     }
 
-    std::unordered_set<TabletId> tablets;
     std::set<TransactionId> seen_transactions;
     for (auto& node_lock : *resp->mutable_node_locks()) {
       auto* tablet_lock_infos = node_lock.mutable_tablet_lock_infos();
@@ -589,9 +798,14 @@ class PgClientServiceImpl::Impl {
           lock_it = node_lock.mutable_tablet_lock_infos()->erase(lock_it);
           continue;
         }
+        // TODO(pglocks): We don't fetch involved tablets when the incoming PgGetLockStatusRequestPB
+        // has transaction_id field set. Once https://github.com/yugabyte/yugabyte-db/issues/16913
+        // is addressed remove !req->transaction_ids().empty() in the below check.
         RSTATUS_DCHECK(
-            tablets.emplace(tablet_id).second, IllegalState,
-            "Found tablet $0 more than once in PgGetLockStatusResponsePB", tablet_id);
+            !req->transaction_ids().empty() || req->transactions_by_tablet().count(tablet_id) == 1,
+            IllegalState, "Found tablet $0 more than once in PgGetLockStatusResponsePB", tablet_id);
+        req->mutable_transactions_by_tablet()->erase(tablet_id);
+
         for (auto& txn : lock_it->transaction_locks()) {
           seen_transactions.insert(VERIFY_RESULT(FullyDecodeTransactionId(txn.id())));
         }
@@ -599,15 +813,6 @@ class PgClientServiceImpl::Impl {
       }
     }
 
-    for (const auto& [txn_id, involved_tablets] : txn_involved_tablets) {
-      for (const auto& tablet : involved_tablets) {
-        auto it = tablets.find(tablet);
-        RSTATUS_DCHECK(
-            it != tablets.end(), IllegalState,
-            "Expected to see transaction's $0 involved tablet $1 in PgGetLockStatusResponsePB",
-            txn_id, tablet);
-      }
-    }
     // Ensure that the response contains host node uuid for all involved transactions.
     for (const auto& [_, txn_list] : resp->transactions_by_node()) {
       for (const auto& txn : txn_list.transaction_ids()) {
@@ -618,7 +823,7 @@ class PgClientServiceImpl::Impl {
     // PgGetLockStatusRequestPB has transaction_id field set. This shouldn't be the case once
     // https://github.com/yugabyte/yugabyte-db/issues/16913 is addressed. As part of the fix,
     // remove !req.transaction_ids().empty() in the below check.
-    RSTATUS_DCHECK(seen_transactions.empty() || !req.transaction_ids().empty(), IllegalState,
+    RSTATUS_DCHECK(seen_transactions.empty() || !req->transaction_ids().empty(), IllegalState,
            "Host node uuid not set for all involved transactions");
     return Status::OK();
   }
@@ -816,7 +1021,7 @@ class PgClientServiceImpl::Impl {
       const PgGetActiveTransactionListRequestPB& req, PgGetActiveTransactionListResponsePB* resp,
       rpc::RpcContext* context) {
     if (req.has_session_id()) {
-      AddTransactionInfo(resp, VERIFY_RESULT(GetSession(req.session_id().value())));
+      AddTransactionInfo(resp, VERIFY_RESULT(GetSessionInfo(req.session_id().value())).get());
       return Status::OK();
     }
 
@@ -827,7 +1032,7 @@ class PgClientServiceImpl::Impl {
     }
 
     for (const auto& session : sessions_snapshot) {
-      AddTransactionInfo(resp, PgClientSessionLocker(session));
+      AddTransactionInfo(resp, session.get());
     }
 
     return Status::OK();
@@ -906,7 +1111,21 @@ class PgClientServiceImpl::Impl {
     return VERIFY_RESULT(GetSession(req))->method(req, resp, context); \
   }
 
+  #define PG_CLIENT_SESSION_ASYNC_METHOD_FORWARD(r, data, method) \
+  void method( \
+      const BOOST_PP_CAT(BOOST_PP_CAT(Pg, method), RequestPB)& req, \
+      BOOST_PP_CAT(BOOST_PP_CAT(Pg, method), ResponsePB)* resp, \
+      rpc::RpcContext context) { \
+    const auto session = GetSession(req); \
+    if (!session.ok()) { \
+      Respond(session.status(), resp, &context); \
+      return; \
+    } \
+    (*session)->method(req, resp, std::move(context)); \
+  }
+
   BOOST_PP_SEQ_FOR_EACH(PG_CLIENT_SESSION_METHOD_FORWARD, ~, PG_CLIENT_SESSION_METHODS);
+  BOOST_PP_SEQ_FOR_EACH(PG_CLIENT_SESSION_ASYNC_METHOD_FORWARD, ~, PG_CLIENT_SESSION_ASYNC_METHODS);
 
   size_t TEST_SessionsCount() {
     SharedLock lock(mutex_);
@@ -921,15 +1140,19 @@ class PgClientServiceImpl::Impl {
     return GetSession(req.session_id());
   }
 
-  Result<LockablePgClientSessionPtr> DoGetSession(uint64_t session_id) {
-    SharedLock<rw_spinlock> lock(mutex_);
+  Result<SessionInfoPtr> GetSessionInfo(uint64_t session_id) {
     DCHECK_NE(session_id, 0);
+    SharedLock lock(mutex_);
     auto it = sessions_.find(session_id);
-    if (it == sessions_.end()) {
-      return STATUS_FORMAT(InvalidArgument, "Unknown session: $0", session_id);
-    }
-    (**it).Touch();
+    SCHECK(it != sessions_.end(), InvalidArgument, "Unknown session: $0", session_id);
     return *it;
+  }
+
+  Result<LockablePgClientSessionPtr> DoGetSession(uint64_t session_id) {
+    auto session_info = VERIFY_RESULT(GetSessionInfo(session_id));
+    LockablePgClientSessionPtr result(session_info, &session_info->session());
+    result->Touch();
+    return result;
   }
 
   Result<PgClientSessionLocker> GetSession(uint64_t session_id) {
@@ -960,7 +1183,7 @@ class PgClientServiceImpl::Impl {
       session_expiration_queue_.pop();
       auto it = sessions_.find(id);
       if (it != sessions_.end()) {
-        auto current_expiration = (**it).expiration();
+        auto current_expiration = (**it).session().expiration();
         if (current_expiration > now) {
           session_expiration_queue_.push({current_expiration, id});
         } else {
@@ -975,6 +1198,16 @@ class PgClientServiceImpl::Impl {
     return VERIFY_RESULT(GetSession(*req))->Perform(req, resp, context);
   }
 
+  [[nodiscard]] client::YBTransactionPtr BuildTransaction(
+      TxnAssignment* dest, IsDDL is_ddl, client::ForceGlobalTransaction force_global,
+      CoarseTimePoint deadline) {
+    auto watcher = std::make_shared<client::YBTransactionPtr>(
+        transaction_pool_provider_().Take(force_global, deadline));
+    dest->Assign(watcher, is_ddl);
+    auto* txn = &**watcher;
+    return {std::move(watcher), txn};
+  }
+
   const TabletServerIf& tablet_server_;
   std::shared_future<client::YBClient*> client_future_;
   scoped_refptr<ClockBase> clock_;
@@ -983,10 +1216,10 @@ class PgClientServiceImpl::Impl {
   rw_spinlock mutex_;
 
   boost::multi_index_container<
-      LockablePgClientSessionPtr,
+      SessionInfoPtr,
       boost::multi_index::indexed_by<
           boost::multi_index::hashed_unique<
-              boost::multi_index::const_mem_fun<PgClientSession, uint64_t, &PgClientSession::id>
+              boost::multi_index::const_mem_fun<SessionInfo, uint64_t, &SessionInfo::id>
           >
       >
   > sessions_ GUARDED_BY(mutex_);
@@ -1018,6 +1251,9 @@ class PgClientServiceImpl::Impl {
   PgSequenceCache sequence_cache_;
 
   const Uuid instance_id_;
+
+  std::array<rw_spinlock, 8> txns_assignment_mutexes_;
+  TransactionBuilder transaction_builder_;
 };
 
 PgClientServiceImpl::PgClientServiceImpl(
@@ -1058,7 +1294,15 @@ void PgClientServiceImpl::method( \
   Respond(impl_->method(*req, resp, &context), resp, &context); \
 }
 
-BOOST_PP_SEQ_FOR_EACH(YB_PG_CLIENT_METHOD_DEFINE, ~, YB_PG_CLIENT_METHODS);
+#define YB_PG_CLIENT_ASYNC_METHOD_DEFINE(r, data, method) \
+void PgClientServiceImpl::method( \
+    const BOOST_PP_CAT(BOOST_PP_CAT(Pg, method), RequestPB)* req, \
+    BOOST_PP_CAT(BOOST_PP_CAT(Pg, method), ResponsePB)* resp, \
+    rpc::RpcContext context) { \
+  impl_->method(*req, resp, std::move(context)); \
+}
 
-}  // namespace tserver
-}  // namespace yb
+BOOST_PP_SEQ_FOR_EACH(YB_PG_CLIENT_METHOD_DEFINE, ~, YB_PG_CLIENT_METHODS);
+BOOST_PP_SEQ_FOR_EACH(YB_PG_CLIENT_ASYNC_METHOD_DEFINE, ~, YB_PG_CLIENT_ASYNC_METHODS);
+
+}  // namespace yb::tserver

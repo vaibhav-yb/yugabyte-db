@@ -93,7 +93,9 @@ public class TaskExecutorTest extends PlatformGuiceApplicationBaseTest {
           TaskType.ResizeNode,
           TaskType.StartNodeInUniverse,
           TaskType.StopNodeInUniverse,
-          TaskType.CloudProviderDelete);
+          TaskType.CloudProviderDelete,
+          TaskType.ReinstallNodeAgent,
+          TaskType.CloudBootstrap);
 
   @Override
   protected Application provideApplication() {

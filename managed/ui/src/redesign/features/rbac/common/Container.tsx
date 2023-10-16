@@ -22,7 +22,7 @@ const useStyles = makeStyles((theme) => ({
     boxShadow: '0px -1px 0px 0px rgba(0, 0, 0, 0.10)',
     gap: '15px',
     padding: `${theme.spacing(2.25)}px ${theme.spacing(3.75)}px`,
-    position: 'absolute',
+    position: 'relative',
     bottom: 0,
     width: '100%',
     '& button': {
@@ -35,9 +35,19 @@ type props = {
   children?: React.ReactElement;
   onSave: () => void;
   onCancel: () => void;
+  saveLabel?: string;
+  hideSave?: boolean;
+  disableSave?: boolean;
 };
 
-const Container: FC<props> = ({ children, onSave, onCancel }) => {
+const Container: FC<props> = ({
+  children,
+  onSave,
+  onCancel,
+  saveLabel,
+  hideSave = false,
+  disableSave = false
+}) => {
   const classes = useStyles();
   const { t } = useTranslation('translation', {
     keyPrefix: 'common'
@@ -52,9 +62,11 @@ const Container: FC<props> = ({ children, onSave, onCancel }) => {
         <YBButton variant="secondary" onClick={onCancel}>
           {t('cancel')}
         </YBButton>
-        <YBButton variant="primary" onClick={onSave}>
-          {t('save')}
-        </YBButton>
+        {!hideSave && (
+          <YBButton variant="primary" onClick={onSave} disabled={disableSave}>
+            {saveLabel ?? t('save')}
+          </YBButton>
+        )}
       </Box>
     </Box>
   );

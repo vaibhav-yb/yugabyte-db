@@ -96,7 +96,7 @@ namespace tablet {
 YB_STRONGLY_TYPED_BOOL(BlockingRocksDbShutdownStart);
 YB_STRONGLY_TYPED_BOOL(FlushOnShutdown);
 YB_STRONGLY_TYPED_BOOL(IncludeIntents);
-
+YB_STRONGLY_TYPED_BOOL(IsForward)
 
 inline FlushFlags operator|(FlushFlags lhs, FlushFlags rhs) {
   return static_cast<FlushFlags>(to_underlying(lhs) | to_underlying(rhs));
@@ -336,9 +336,8 @@ class Tablet : public AbstractTablet,
   // If rocksdb_write_batch is specified it could contain preencoded RocksDB operations.
   Status ApplyKeyValueRowOperations(
       int64_t batch_idx,  // index of this batch in its transaction
-      const docdb::LWKeyValueWriteBatchPB& put_batch,
-      docdb::ConsensusFrontiers* frontiers,
-      HybridTime hybrid_time,
+      const docdb::LWKeyValueWriteBatchPB& put_batch, docdb::ConsensusFrontiers* frontiers,
+      HybridTime write_hybrid_time, HybridTime local_hybrid_time,
       AlreadyAppliedToRegularDB already_applied_to_regular_db = AlreadyAppliedToRegularDB::kFalse);
 
   void WriteToRocksDB(
@@ -601,10 +600,25 @@ class Tablet : public AbstractTablet,
   // disabled. We do so, for example, when StillHasOrphanedPostSplitData() returns true.
   bool ShouldDisableLbMove();
 
-  void TEST_ForceRocksDBCompact(docdb::SkipFlush skip_flush = docdb::SkipFlush::kFalse);
+  Status ForceManualRocksDBCompact(docdb::SkipFlush skip_flush = docdb::SkipFlush::kFalse);
 
-  Status ForceFullRocksDBCompact(rocksdb::CompactionReason compaction_reason,
+  Status ForceRocksDBCompact(
+      rocksdb::CompactionReason compaction_reason,
       docdb::SkipFlush skip_flush = docdb::SkipFlush::kFalse);
+
+  rocksdb::DB* regular_db() const {
+    return regular_db_.get();
+  }
+
+  rocksdb::DB* intents_db() const {
+    return intents_db_.get();
+  }
+
+  // The only way to make any conclusion that a tablet is a product of a split is to check its key
+  // bounds are initialized as it is supposed that these key bounds are setup during tablet split.
+  const docdb::KeyBounds& key_bounds() const {
+    return key_bounds_;
+  }
 
   docdb::DocDB doc_db(TabletMetrics* metrics = nullptr) const {
     return {
@@ -634,6 +648,7 @@ class Tablet : public AbstractTablet,
   Result<size_t> TEST_CountRegularDBRecords();
 
   Status CreateReadIntents(
+      IsolationLevel level,
       const TransactionMetadataPB& transaction_metadata,
       const SubTransactionMetadataPB& subtransaction_metadata,
       const google::protobuf::RepeatedPtrField<QLReadRequestPB>& ql_batch,
@@ -669,14 +684,6 @@ class Tablet : public AbstractTablet,
 
   bool ShouldApplyWrite();
 
-  rocksdb::DB* TEST_db() const {
-    return regular_db_.get();
-  }
-
-  rocksdb::DB* TEST_intents_db() const {
-    return intents_db_.get();
-  }
-
   Status TEST_SwitchMemtable();
 
   // Initialize RocksDB's max persistent op id and hybrid time to that of the operation state.
@@ -696,6 +703,10 @@ class Tablet : public AbstractTablet,
   // Also updates flushed frontier for regular and intents DBs to match split_op_id and
   // split_op_hybrid_time.
   // In case of error sub-tablet could be partially persisted on disk.
+  // NB! As of now the method is supposed to be used only for creation child tablets during
+  // splitting operation. For any other type of usage, the method must be verified and possibly
+  // updated to correctly handle split_op_id, split_op_hybrid_time, parent_data_compacted
+  // and post_split_compaction_file_number_upper_bound.
   Result<RaftGroupMetadataPtr> CreateSubtablet(
       const TabletId& tablet_id, const dockv::Partition& partition,
       const docdb::KeyBounds& key_bounds, const OpId& split_op_id,
@@ -758,10 +769,10 @@ class Tablet : public AbstractTablet,
   // previously by this tablet.
   void TriggerPostSplitCompactionIfNeeded();
 
-  // Triggers a full compaction on this tablet (e.g. post tablet split, scheduled).
+  // Triggers a manual compaction on this tablet (e.g. post tablet split, scheduled).
   // It is an error to call this function if it was called previously
   // and that compaction has not yet finished.
-  Status TriggerFullCompactionIfNeeded(rocksdb::CompactionReason reason);
+  Status TriggerManualCompactionIfNeeded(rocksdb::CompactionReason reason);
 
   // Triggers an admin full compaction on this tablet.
   Status TriggerAdminFullCompactionIfNeeded();
@@ -855,10 +866,6 @@ class Tablet : public AbstractTablet,
       const std::map<TransactionId, SubtxnSet>& transactions,
       TabletLockInfoPB* tablet_lock_info) const;
 
-  docdb::ExternalTxnIntentsState* GetExternalTxnIntentsState() const {
-    return external_txn_intents_state_.get();
-  }
-
   // The returned SchemaPackingProvider lives only as long as this.
   docdb::SchemaPackingProvider& GetSchemaPackingProvider();
 
@@ -883,6 +890,47 @@ class Tablet : public AbstractTablet,
   // Returns a pointer to the TableInfo corresponding to the colocated table. When called with
   // 'kColocationIdNotSet', returns the TableInfo of the parent/primary table.
   Result<TableInfoPtr> GetTableInfo(ColocationId colocation_id) const override;
+
+  // Breaks tablet data into ranges of approximately range_size_bytes each, at most into
+  // `max_num_ranges` and adds to `keys_buffer` a list of these ranges end keys.
+  //
+  // It is guaranteed that returned keys are at most max_key_length bytes.
+  // lower_bound_key is inclusive, upper_bound_key is exclusive. They are adjusted by this function
+  // to be within tablet boundaries (key_bounds_ if set or based on metadata()->partition() if
+  // key_bounds_ is not set) and to be no longer than max_key_length. Due to truncation the last
+  // returned key can be outside tablet partition boundaries.
+  //
+  // If `is_forward` is set, list will consist of:
+  // - 1st_range_end_key \in (adjusted_lower_bound_key, adjusted_upper_bound_key)
+  // - 2nd_range_end_key \in (1st_range_end_key, adjusted_upper_bound_key)
+  // ...
+  // - nth_range_end_key \in ((n-1)th_range_end_key, adjusted_upper_bound_key]
+  //   or empty key iff next tablet can't have more keys (meaning we've already reached
+  //   specified upper_bound_key or the end of the last tablet).
+  //
+  // If `is_forward` is not set, list will consist of:
+  // - 1st_range_end_key \in (adjusted_lower_bound_key, adjusted_upper_bound_key)
+  // - 2nd_range_end_key \in (adjusted_lower_bound_key, 1st_range_end_key)
+  // ...
+  // - nth_range_end_key \in [adjusted_lower_bound_key, (n-1)_th_range_key)
+  //   or empty key iff next tablet can't have more keys (meaning we've already reached
+  //   specified lower_bound_key or the beginning of the first tablet).
+  //
+  // where n <= max_num_ranges.
+  // If max_num_ranges is 0, nothing will be written to the `keys_buffer`.
+  Status GetTabletKeyRanges(
+      Slice lower_bound_key, Slice upper_bound_key, uint64_t max_num_ranges,
+      uint64_t range_size_bytes, IsForward is_forward, uint32_t max_key_length,
+      WriteBuffer* keys_buffer, const TableId& colocated_table_id = "") const;
+
+  Status TEST_GetTabletKeyRanges(
+      Slice lower_bound_key, Slice upper_bound_key, uint64_t max_num_ranges,
+      uint64_t range_size_bytes, IsForward is_forward, uint32_t max_key_length,
+      std::function<void(Slice key)> callback, const TableId& colocated_table_id = "") const {
+    return GetTabletKeyRanges(
+        lower_bound_key, upper_bound_key, max_num_ranges, range_size_bytes, is_forward,
+        max_key_length, std::move(callback), colocated_table_id);
+  }
 
   // Lock used to serialize the creation of RocksDB checkpoints.
   mutable std::mutex create_checkpoint_lock_;
@@ -940,7 +988,11 @@ class Tablet : public AbstractTablet,
       const std::string& partition_key,
       size_t row_count) const;
 
-  void TriggerFullCompactionSync(rocksdb::CompactionReason reason);
+  void TriggerManualCompactionSync(rocksdb::CompactionReason reason);
+
+  Status ForceRocksDBCompact(
+      const rocksdb::CompactRangeOptions& regular_options,
+      const rocksdb::CompactRangeOptions& intents_options);
 
   // Opens read-only rocksdb at the specified directory and checks for any file corruption.
   Status OpenDbAndCheckIntegrity(const std::string& db_dir);
@@ -962,6 +1014,25 @@ class Tablet : public AbstractTablet,
 
   Status TriggerAdminFullCompactionIfNeededHelper(
       std::function<void()> on_compaction_completion = []() {});
+
+  Status GetTabletKeyRanges(
+      Slice lower_bound_key, Slice upper_bound_key, uint64_t max_num_ranges,
+      uint64_t range_size_bytes, IsForward is_forward, uint32_t max_key_length,
+      std::function<void(Slice key)> callback, const TableId& colocated_table_id) const;
+
+  Status GetTabletKeyRangesForward(
+      rocksdb::Iterator* index_iter, rocksdb::Iterator* data_iter, Slice lower_bound_key,
+      Slice upper_bound_key, uint64_t max_num_ranges, uint64_t num_blocks_to_skip,
+      uint32_t max_key_length, std::function<void(Slice key)> callback,
+      bool use_empty_as_end_key) const;
+
+  Status GetTabletKeyRangesBackward(
+      rocksdb::Iterator* index_iter, Slice lower_bound_key, Slice upper_bound_key,
+      uint64_t max_num_ranges, uint64_t num_blocks_to_skip, uint32_t max_key_length,
+      std::function<void(Slice key)> callback) const;
+
+  Status ProcessPgsqlGetTableKeyRangesRequest(
+      const PgsqlReadRequestPB& req, PgsqlReadRequestResult* result) const;
 
   std::unique_ptr<const Schema> key_schema_;
 
@@ -1086,8 +1157,6 @@ class Tablet : public AbstractTablet,
   std::atomic<int64_t> last_committed_write_index_{0};
 
   HybridTimeLeaseProvider ht_lease_provider_;
-
-  std::unique_ptr<docdb::ExternalTxnIntentsState> external_txn_intents_state_;
 
   Result<HybridTime> DoGetSafeTime(
       RequireLease require_lease, HybridTime min_allowed, CoarseTimePoint deadline) const override;

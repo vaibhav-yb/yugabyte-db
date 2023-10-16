@@ -53,38 +53,6 @@ const tarTemplateDirGlob = "yba_installer-*linux*/" + ConfigDir
 
 const tarCronDirGlob = "yba_installer-*linux*/" + CronDir
 
-// GetVersion gets the version at execution time so that yba-installer
-// installs the correct version of YugabyteDB Anywhere.
-func GetVersion() string {
-
-	// locate the version metadata json file in the same dir as the yba-ctl
-	// binary
-	var configViper = viper.New()
-	configViper.SetConfigName(VersionMetadataJSON)
-	configViper.SetConfigType("json")
-	configViper.AddConfigPath(GetBinaryDir())
-
-	err := configViper.ReadInConfig()
-	if err != nil {
-		panic(err)
-	}
-
-	versionNumber := fmt.Sprint(configViper.Get("version_number"))
-	buildNumber := fmt.Sprint(configViper.Get("build_number"))
-	if buildNumber == "PRE_RELEASE" && os.Getenv("YBA_MODE") == "dev" {
-		// hack to allow testing dev itest builds
-		buildNumber = fmt.Sprint(configViper.Get("build_id"))
-	}
-
-	version := versionNumber + "-b" + buildNumber
-
-	if !IsValidVersion(version) {
-		log.Fatal(fmt.Sprintf("Invalid version in metadata file '%s'", version))
-	}
-
-	return version
-}
-
 // IndexOf returns the index in arr where val is present, -1 otherwise.
 func IndexOf(arr []string, val string) int {
 
@@ -146,7 +114,7 @@ func HasSudoAccess() bool {
 // inserting the file in that directory.
 func Create(p string) (*os.File, error) {
 	log.Debug("creating file (and parent directories) " + p)
-	if err := MkdirAll(filepath.Dir(p), 0777); err != nil {
+	if err := MkdirAll(filepath.Dir(p), DirMode); err != nil {
 		return nil, err
 	}
 	return os.Create(p)
@@ -176,6 +144,23 @@ func Symlink(src string, dest string) error {
 	out := shell.Run("ln", "-sf", src, dest)
 	out.SucceededOrLog()
 	return out.Error
+}
+
+// ResolveSymlink will read the given symlink and move the original file to the symlinks
+// destination. This requires the given path is a symlink, and will not check if it is a real file
+// or a symlink
+func ResolveSymlink(path string) error {
+	orig, err := os.Readlink(path)
+	if err != nil {
+		return fmt.Errorf("failed to resolve symlink for %s: %w", path, err)
+	}
+	if err := os.Remove(path); err != nil {
+		return fmt.Errorf("failed to remove the symlink %s: %w", path, err)
+	}
+	if err := os.Rename(orig, path); err != nil {
+		return fmt.Errorf("failed to move %s -> %s: %w", orig, path, err)
+	}
+	return nil
 }
 
 // Copy will copy the source to the destination
@@ -433,15 +418,6 @@ func GetJsonRepr[T any](obj T) []byte {
 
 func init() {
 	InitViper()
-	// Init globals that rely on viper
-
-	/*
-		Version = GetVersion()
-		InstallRoot = GetSoftwareRoot()
-		InstallVersionDir = GetInstallerSoftwareDir()
-		yugabundleBinary = "yugabundle-" + Version + "-centos-x86_64.tar.gz"
-		currentUser = GetCurrentUser()
-	*/
 }
 
 // UpdateRootInstall will update the yaml files .installRoot entry with what is currently
@@ -455,7 +431,7 @@ func UpdateRootInstall(newRoot string) {
 // creates a mapping entry for every key in path except for the last key which maps to value
 // value can be of type string/int/bool
 func createYamlValue(root *yaml.Node, path string, value interface{}) error {
-	if (root.Kind == yaml.DocumentNode) {
+	if root.Kind == yaml.DocumentNode {
 		return createYamlValue(root.Content[0], path, value)
 	}
 	var key, val yaml.Node
@@ -509,7 +485,7 @@ func setYamlValue(root *yaml.Node, findPath, setPath string, value interface{}) 
 				return err
 			}
 		}
-	} else {	// recursive case where there may be more levels to create/follow before setting value
+	} else { // recursive case where there may be more levels to create/follow before setting value
 		if len(matchNodes) != 1 {
 			// Path does not exist in yaml, need to create all entries (including findPath)
 			if err = createYamlValue(root, fmt.Sprintf("%s.%s", findPath, setPath), value); err != nil {
@@ -555,7 +531,7 @@ func logNode(node *yaml.Node) {
 	log.Info("end log node")
 }
 
-// SetYamlValue sets the entry yamlPath to value in filePath. yamlPath must already exist
+// SetYamlValue sets the entry yamlPath to value in filePath
 func SetYamlValue(filePath string, yamlPath string, value interface{}) error {
 	origYamlBytes, err := os.ReadFile(filePath)
 	if err != nil {
@@ -702,4 +678,17 @@ func Bool2Int(b bool) int {
 		return 1
 	}
 	return 0
+}
+
+// AbsoluteBundlePath returns the absolute path to the given file, assuming that file is a relative
+// path from the extracted yba_installer_full tgz file. This is used for installs, allowing us to
+// run yba-ctl as `./yba_installer_full-b123/yba-ctl install` and still find the binaries needed
+// for installation or upgrade - basically any execution of yba-ctl from the full bundle.
+func AbsoluteBundlePath(fp string) string {
+	executable, err := os.Executable()
+	if err != nil {
+		log.Fatal(fmt.Sprintf("failed to determine executable path: %s", err.Error()))
+	}
+	rootDir := filepath.Dir(executable)
+	return filepath.Join(rootDir, fp)
 }

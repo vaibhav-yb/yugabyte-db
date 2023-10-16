@@ -92,6 +92,11 @@ public class RegionHandler {
               existingRegion.getCode()));
     }
 
+    if (provider.getCloudCode() == CloudType.onprem) {
+      existingRegion.setLatitude(region.getLatitude());
+      existingRegion.setLongitude(region.getLongitude());
+    }
+
     existingRegion.setDetails(region.getDetails());
     existingRegion.save();
     modifyImageBundlesIfRequired(provider, existingRegion);
@@ -216,7 +221,8 @@ public class RegionHandler {
         destVpcId = gcpCloudInfo.getDestVpcId();
       }
 
-      region = cloudRegionHelper.createRegion(provider, region.getCode(), destVpcId, metadata);
+      region =
+          cloudRegionHelper.createRegion(provider, region.getCode(), destVpcId, metadata, true);
       modifyImageBundlesIfRequired(provider, region);
     } else {
       // Handle k8s region bootstrap.

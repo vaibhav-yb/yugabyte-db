@@ -12,7 +12,10 @@
 
 #include "yb/integration-tests/cdcsdk_ysql_test_base.h"
 
+#include "yb/cdc/cdc_service.pb.h"
 #include "yb/cdc/cdc_state_table.h"
+
+#include "yb/master/catalog_manager.h"
 
 namespace yb {
 namespace cdc {
@@ -790,14 +793,16 @@ namespace cdc {
       const google::protobuf::RepeatedPtrField<master::TabletLocationsPB>& tablets,
       const int tablet_idx, int64 index, int64 term, std::string key, int32_t write_id,
       int64 snapshot_time, const TableId table_id, int64 safe_hybrid_time,
-      int32_t wal_segment_index) {
+      int32_t wal_segment_index, const bool populate_checkpoint) {
     change_req->set_stream_id(stream_id.ToString());
     change_req->set_tablet_id(tablets.Get(tablet_idx).tablet_id());
-    change_req->mutable_from_cdc_sdk_checkpoint()->set_index(index);
-    change_req->mutable_from_cdc_sdk_checkpoint()->set_term(term);
-    change_req->mutable_from_cdc_sdk_checkpoint()->set_key(key);
-    change_req->mutable_from_cdc_sdk_checkpoint()->set_write_id(write_id);
-    change_req->mutable_from_cdc_sdk_checkpoint()->set_snapshot_time(snapshot_time);
+    if (populate_checkpoint) {
+      change_req->mutable_from_cdc_sdk_checkpoint()->set_index(index);
+      change_req->mutable_from_cdc_sdk_checkpoint()->set_term(term);
+      change_req->mutable_from_cdc_sdk_checkpoint()->set_key(key);
+      change_req->mutable_from_cdc_sdk_checkpoint()->set_write_id(write_id);
+      change_req->mutable_from_cdc_sdk_checkpoint()->set_snapshot_time(snapshot_time);
+    }
     change_req->set_wal_segment_index(wal_segment_index);
     if (!table_id.empty()) {
       change_req->set_table_id(table_id);
@@ -1178,7 +1183,8 @@ namespace cdc {
         count[2]++;
       } break;
       case RowMessage::DELETE: {
-        ASSERT_EQ(record.row_message().old_tuple(0).datum_int32(), expected_records.key);
+        ASSERT_EQ(record.row_message().old_tuple(0).datum_int32(),
+          expected_before_image_records.key);
         if (validate_old_tuple) {
           if (validate_third_column) {
             ASSERT_EQ(record.row_message().old_tuple_size(), 3);
@@ -1268,14 +1274,16 @@ namespace cdc {
       const CDCSDKCheckpointPB* cp,
       int tablet_idx,
       int64 safe_hybrid_time,
-      int wal_segment_index) {
+      int wal_segment_index,
+      const bool populate_checkpoint,
+      const bool should_retry) {
     GetChangesRequestPB change_req;
     GetChangesResponsePB change_resp;
 
     if (cp == nullptr) {
       PrepareChangeRequest(
           &change_req, stream_id, tablets, tablet_idx, 0, 0, "", 0, 0, "", safe_hybrid_time,
-          wal_segment_index);
+          wal_segment_index, populate_checkpoint);
     } else {
       PrepareChangeRequest(
           &change_req, stream_id, tablets, *cp, tablet_idx, "", safe_hybrid_time,
@@ -1292,7 +1300,8 @@ namespace cdc {
             status = StatusFromPB(change_resp.error().status());
           }
 
-          if (status.IsLeaderNotReadyToServe() || status.IsNotFound()) {
+          if (should_retry && (status.IsLeaderNotReadyToServe() || status.IsNotFound())) {
+            LOG(INFO) << "Retrying GetChanges in test";
             return false;
           }
 
@@ -1340,6 +1349,15 @@ namespace cdc {
         "GetChanges timed out waiting for Leader to get ready"));
 
     return change_resp;
+  }
+
+  Result<GetChangesResponsePB> CDCSDKYsqlTest::GetChangesFromCDCWithoutRetry(
+      const xrepl::StreamId& stream_id,
+      const google::protobuf::RepeatedPtrField<master::TabletLocationsPB>& tablets,
+      const CDCSDKCheckpointPB* cp) {
+    return GetChangesFromCDC(
+        stream_id, tablets, cp, 0 /* tablet_idx */, -1 /* safe_hybrid_time */,
+        0 /* wal_segment_index */, true /* populate_checkpoint*/, false /* should_retry */);
   }
 
   CDCSDKYsqlTest::GetAllPendingChangesResponse
@@ -1821,7 +1839,7 @@ namespace cdc {
       if (peer->tablet()->metadata()->table_id() != table_id) {
         continue;
       }
-      auto db = peer->tablet()->TEST_db();
+      auto db = peer->tablet()->regular_db();
       rocksdb::ReadOptions read_opts;
       read_opts.query_id = rocksdb::kDefaultQueryId;
       std::unique_ptr<rocksdb::Iterator> iter(db->NewIterator(read_opts));
@@ -2744,7 +2762,7 @@ namespace cdc {
         301 /* start */, 401 /* end */, &test_cluster_,
         {kValue2ColumnName, kValue3ColumnName, kValue4ColumnName}));
 
-    test_cluster()->mini_master(0)->tablet_peer()->tablet()->TEST_ForceRocksDBCompact();
+    CHECK_OK(test_cluster()->mini_master(0)->tablet_peer()->tablet()->ForceManualRocksDBCompact());
 
     xrepl::StreamId stream_id = ASSERT_RESULT(CreateDBStream(IMPLICIT));
     auto resp = ASSERT_RESULT(SetCDCCheckpoint(stream_id, tablets));
@@ -2838,13 +2856,6 @@ namespace cdc {
     ValidateColumnCounts(change_resp, 2);
   }
 
-  void CDCSDKYsqlTest::EnableVerboseLoggingForModule(const std::string& module, int level) {
-    if (!FLAGS_vmodule.empty()) {
-      FLAGS_vmodule += Format(",$0=$1", module, level);
-    } else {
-      ANNOTATE_UNPROTECTED_WRITE(FLAGS_vmodule) = Format("$0=$1", module, level);
-    }
-  }
 
   Result<std::string> CDCSDKYsqlTest::GetValueFromMap(const QLMapValuePB& map_value,
     const std::string& key) {
@@ -3112,6 +3123,12 @@ namespace cdc {
         },
         MonoDelta::FromSeconds(timeout_secs),
         "Waiting for GetChanges to fetch: " + std::to_string(expected_count) + " records");
+  }
+
+  Status CDCSDKYsqlTest::XreplValidateSplitCandidateTable(const TableId& table_id) {
+    auto& cm = test_cluster_.mini_cluster_->mini_master()->catalog_manager_impl();
+    auto table = cm.GetTableInfo(table_id);
+    return cm.XreplValidateSplitCandidateTable(*table);
   }
 
 } // namespace cdc

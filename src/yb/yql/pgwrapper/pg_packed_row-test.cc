@@ -35,6 +35,7 @@
 #include "yb/util/test_thread_holder.h"
 
 #include "yb/yql/pgwrapper/pg_mini_test_base.h"
+#include "yb/yql/pgwrapper/pg_test_utils.h"
 
 using namespace std::literals;
 
@@ -185,7 +186,7 @@ TEST_P(PgPackedRowTest, AlterTable) {
   auto deadline = CoarseMonoClock::now() + 90s;
 
   while (!thread_holder.stop_flag().load() && CoarseMonoClock::now() < deadline) {
-    cluster_->mini_master()->tablet_peer()->tablet()->TEST_ForceRocksDBCompact();
+    ASSERT_OK(cluster_->mini_master()->tablet_peer()->tablet()->ForceManualRocksDBCompact());
   }
 
   thread_holder.Stop();
@@ -268,13 +269,13 @@ TEST_P(PgPackedRowTest, Random) {
     auto result = ASSERT_RESULT(conn.Fetch("SELECT * FROM t"));
     auto state_copy = key_state;
     for (int row = 0, num_rows = PQntuples(result.get()); row != num_rows; ++row) {
-      auto key = ASSERT_RESULT(GetInt32(result.get(), row, 0));
+      auto key = ASSERT_RESULT(GetValue<int32_t>(result.get(), row, 0));
       SCOPED_TRACE(Format("Key: $0", key));
       auto it = state_copy.find(key);
       ASSERT_NE(it, state_copy.end());
-      auto v1 = ASSERT_RESULT(GetInt32(result.get(), row, 1));
+      auto v1 = ASSERT_RESULT(GetValue<int32_t>(result.get(), row, 1));
       ASSERT_EQ(it->second.first, v1);
-      auto v2 = ASSERT_RESULT(GetInt32(result.get(), row, 2));
+      auto v2 = ASSERT_RESULT(GetValue<int32_t>(result.get(), row, 2));
       ASSERT_EQ(it->second.second, v2);
       state_copy.erase(key);
     }
@@ -288,7 +289,7 @@ TEST_P(PgPackedRowTest, Random) {
   }
   auto peers = ListTabletPeers(cluster_.get(), ListPeersFilter::kLeaders);
   for (const auto& peer : peers) {
-    if (!peer->tablet()->TEST_db()) {
+    if (!peer->tablet()->regular_db()) {
       continue;
     }
     std::unordered_set<std::string> values;
@@ -375,7 +376,7 @@ TEST_P(PgPackedRowTest, SchemaGC) {
       auto res = ASSERT_RESULT(conn.FetchMatrix(
           "SELECT * FROM t", i, narrow_cast<int>(columns.size() + 1)));
       for (int row = 0; row != i; ++row) {
-        int key = ASSERT_RESULT(GetValue<int>(res.get(), row, 0));
+        auto key = ASSERT_RESULT(GetValue<int32_t>(res.get(), row, 0));
         int idx = 0;
         for (const auto& p : columns) {
           auto opt_value = ASSERT_RESULT(GetValue<std::optional<int>>(res.get(), row, ++idx));
@@ -395,7 +396,7 @@ TEST_P(PgPackedRowTest, SchemaGC) {
     if (peer->TEST_table_type() == TableType::TRANSACTION_STATUS_TABLE_TYPE) {
       continue;
     }
-    auto files = peer->tablet()->doc_db().regular->GetLiveFilesMetaData();
+    auto files = peer->tablet()->regular_db()->GetLiveFilesMetaData();
     auto table_info = peer->tablet_metadata()->primary_table_info();
     ASSERT_EQ(table_info->doc_read_context->schema_packing_storage.SchemaCount(), 1);
   }
@@ -735,7 +736,7 @@ TEST_P(PgPackedRowTest, CleanupIntentDocHt) {
 
   auto peers = ListTabletPeers(cluster_.get(), ListPeersFilter::kLeaders);
   for (const auto& peer : peers) {
-    if (!peer->tablet()->TEST_db()) {
+    if (!peer->tablet()->regular_db()) {
       continue;
     }
     auto dump = peer->tablet()->TEST_DocDBDumpStr(tablet::IncludeIntents::kTrue);
@@ -871,10 +872,10 @@ void PgPackedRowTest::TestSstDump(bool specify_metadata, std::string* output) {
   std::string metapath;
   for (const auto& peer : ListTabletPeers(cluster_.get(), ListPeersFilter::kLeaders)) {
     auto tablet = peer->shared_tablet();
-    if (!tablet || !tablet->TEST_db()) {
+    if (!tablet || !tablet->regular_db()) {
       continue;
     }
-    for (const auto& file : tablet->TEST_db()->GetLiveFilesMetaData()) {
+    for (const auto& file : tablet->regular_db()->GetLiveFilesMetaData()) {
       fname = file.BaseFilePath();
       metapath = ASSERT_RESULT(tablet->metadata()->FilePath());
       LOG(INFO) << "File: " << fname << ", metapath: " << metapath;

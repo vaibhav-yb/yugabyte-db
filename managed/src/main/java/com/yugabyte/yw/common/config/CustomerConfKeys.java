@@ -26,6 +26,14 @@ public class CustomerConfKeys extends RuntimeConfigKeysModule {
           "We garbage collect stale tasks after this duration",
           ConfDataType.DurationType,
           ImmutableList.of(ConfKeyTags.PUBLIC));
+  public static final ConfKeyInfo<Boolean> cloudEnabled =
+      new ConfKeyInfo<>(
+          "yb.cloud.enabled",
+          ScopeType.CUSTOMER,
+          "Cloud Enabled",
+          "Enables YBM specific features",
+          ConfDataType.BooleanType,
+          ImmutableList.of(ConfKeyTags.INTERNAL));
   public static final ConfKeyInfo<Boolean> isAuthEnforced =
       new ConfKeyInfo<>(
           "yb.universe.auth.is_enforced",
@@ -110,14 +118,31 @@ public class CustomerConfKeys extends RuntimeConfigKeysModule {
               + "view and improves the provider creation form for AWS, AZU, GCP, and K8s",
           ConfDataType.BooleanType,
           ImmutableList.of(ConfKeyTags.PUBLIC));
-  public static final ConfKeyInfo<Boolean> useK8CustomResources =
+
+  public static final ConfKeyInfo<Boolean> showDrUi =
       new ConfKeyInfo<>(
-          "yb.ui.feature_flags.k8s_custom_resources",
+          "yb.ui.feature_flags.disaster_recovery",
           ScopeType.CUSTOMER,
-          "Use K8 custom resources",
-          "Allows user to select custom K8 memory(GB) and cpu cores",
+          "Show disaster recovery UI",
+          "YBA provides an active-active single-master disaster recovery (DR) solution "
+              + "through the API. This runtime config exposes a user interface for managing DR "
+              + "configurations.",
           ConfDataType.BooleanType,
           ImmutableList.of(ConfKeyTags.PUBLIC));
+
+  public static final ConfKeyInfo<Boolean> showDrXClusterConfig =
+      new ConfKeyInfo<>(
+          "yb.ui.xcluster.dr.show_xcluster_config",
+          ScopeType.CUSTOMER,
+          "Show underlying xCluster configs from DR setup",
+          "YBA creates an underlying transactional xCluster config when setting "
+              + "up an active-active single-master disaster recovery (DR) config. During regular "
+              + "operation you should manage the DR config through the DR UI instead of the "
+              + "xCluster UI. This feature flag serves as a way to expose the underlying "
+              + "xCluster config for troubleshooting.",
+          ConfDataType.BooleanType,
+          ImmutableList.of(ConfKeyTags.PUBLIC));
+
   public static final ConfKeyInfo<Boolean> enforceUserTags =
       new ConfKeyInfo<>(
           "yb.universe.user_tags.is_enforced",

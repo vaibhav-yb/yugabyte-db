@@ -8,9 +8,13 @@
  */
 
 import axios from "axios";
+import Cookies from 'js-cookie';
+import { Role } from "./roles";
 import { Permission, ResourceType } from "./permission";
-import { IRole } from "./roles";
+import { RbacUser, RbacUserWithResources } from "./users/interface/Users";
 import { ROOT_URL } from "../../../config";
+import { mapResourceBindingsToApi } from "./rbacUtils";
+import { RbacBindings } from "./users/components/UserUtils";
 
 
 export const getAllAvailablePermissions = (resourceType?: ResourceType) => {
@@ -19,31 +23,82 @@ export const getAllAvailablePermissions = (resourceType?: ResourceType) => {
     return axios.get<Permission[]>(requestUrl);
 };
 
-export const createRole = (role: IRole) => {
+export const createRole = (role: Role) => {
     const cUUID = localStorage.getItem('customerId');
     const requestUrl = `${ROOT_URL}/customers/${cUUID}/rbac/role`;
     return axios.post(requestUrl, {
         name: role.name,
-        permission_list: role.permissionDetails.permissionList
+        description: role.description,
+        permissionList: role.permissionDetails.permissionList
     });
 };
 
-export const editRole = (role: IRole ) => {
+export const editRole = (role: Role) => {
     const cUUID = localStorage.getItem('customerId');
     const requestUrl = `${ROOT_URL}/customers/${cUUID}/rbac/role/${role.roleUUID}`;
     return axios.put(requestUrl, {
-        permission_list: role.permissionDetails.permissionList
+        description: role.description,
+        permissionList: role.permissionDetails.permissionList
     });
 };
 
 export const getAllRoles = () => {
     const cUUID = localStorage.getItem('customerId');
     const requestUrl = `${ROOT_URL}/customers/${cUUID}/rbac/role`;
-    return axios.get<IRole[]>(requestUrl);
+    return axios.get<Role[]>(requestUrl);
 };
 
-export const deleteRole = (role: IRole) => {
+export const deleteRole = (role: Role) => {
     const cUUID = localStorage.getItem('customerId');
     const requestUrl = `${ROOT_URL}/customers/${cUUID}/rbac/role/${role.roleUUID}`;
     return axios.delete(requestUrl);
+};
+
+export const fetchUserPermissions = () => {
+    const cUUID = localStorage.getItem('customerId');
+    const userId = Cookies.get('userId') ?? localStorage.getItem('userId');
+    const requestUrl = `${ROOT_URL}/customers/${cUUID}/rbac/user/${userId}`;
+    return axios.get(requestUrl);
+};
+
+export const getAllUsers = () => {
+    const cUUID = localStorage.getItem('customerId');
+    const requestUrl = `${ROOT_URL}/customers/${cUUID}/users`;
+    return axios.get<RbacUser[]>(requestUrl);
+};
+
+export const editUsersRolesBindings = (userUUID: string, usersWithRole: RbacUserWithResources) => {
+    const cUUID = localStorage.getItem('customerId');
+    const requestUrl = `${ROOT_URL}/customers/${cUUID}/rbac/role_binding/${userUUID}`;
+    const resourceDefinitions = mapResourceBindingsToApi(usersWithRole);
+    return axios.post(requestUrl, {
+        roleResourceDefinitions: resourceDefinitions
+    });
+};
+
+export const getRoleBindingsForUser = (userUUID: string) => {
+    const cUUID = localStorage.getItem('customerId');
+    const requestUrl = `${ROOT_URL}/customers/${cUUID}/rbac/role_binding?userUUID=${userUUID}`;
+    return axios.get<RbacUserWithResources>(requestUrl);
+};
+
+export const getRoleBindingsForAllUsers = () => {
+    const cUUID = localStorage.getItem('customerId');
+    const requestUrl = `${ROOT_URL}/customers/${cUUID}/rbac/role_binding`;
+    return axios.get<RbacBindings[]>(requestUrl);
+};
+
+export const createUser = (user: RbacUserWithResources) => {
+    const cUUID = localStorage.getItem('customerId');
+    const requestUrl = `${ROOT_URL}/customers/${cUUID}/users`;
+    const resourceDefinitions = mapResourceBindingsToApi(user);
+    return axios.post(requestUrl, {
+        ...user,
+        roleResourceDefinitions: resourceDefinitions
+    });
+};
+
+export const deleteUser = (user: RbacUserWithResources) => {
+    const cUUID = localStorage.getItem('customerId');
+    return axios.delete(`${ROOT_URL}/customers/${cUUID}/users/${user.uuid}`);
 };

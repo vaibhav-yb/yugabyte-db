@@ -11,6 +11,8 @@
 // under the License.
 
 #include "yb/util/env_util.h"
+#include "yb/yql/ysql_conn_mgr_wrapper/ysql_conn_mgr_wrapper.h"
+
 #include "yb/yql/process_wrapper/process_wrapper.h"
 
 namespace yb {
@@ -64,7 +66,7 @@ void ProcessSupervisor::RunThread() {
       if (ret_code == 0) {
         LOG(INFO) << process_name << " exited normally";
       } else {
-        util::LogWaitCode(ret_code);
+        util::LogWaitCode(ret_code, process_name);
       }
       process_wrapper_.reset();
     } else {

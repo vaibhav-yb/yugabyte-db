@@ -150,13 +150,13 @@ export const getUniverseDedicatedNodeCount = (nodeDetailsSet, cluster = null) =>
     (node) =>
       (cluster === null || node.placementUuid === cluster.uuid) &&
       _.includes(nodeInClusterStates, node.state) &&
-      node.dedicatedTo === 'TSERVER'
+      node.isTserver
   ).length;
   const numMasterNodes = nodes.filter(
     (node) =>
       (cluster === null || node.placementUuid === cluster.uuid) &&
       _.includes(nodeInClusterStates, node.state) &&
-      node.dedicatedTo === 'MASTER'
+      node.isMaster
   ).length;
   return {
     numTserverNodes,
@@ -311,6 +311,7 @@ export const unformatConf = (GFlagInput) => {
       const JWKSKey = GFlagRowConfSubset.substring(GFlagRowConfSubset.indexOf(CONST_VALUES.JWKS));
       if (isNonEmptyString(JWKSKey)) {
         GFlagRowConfSubset = GFlagRowConfSubset.replace(JWKSKey, '');
+        GFlagRowConfSubset = GFlagRowConfSubset.trimEnd();
       }
       JWKSToken = JWKSKey.substring(JWKSKey.indexOf(CONST_VALUES.EQUALS) + 1);
     }
@@ -397,7 +398,7 @@ export const formatConf = (GFlagInput, searchTerm, JWKSToken) => {
   * @param GFlagInput Input entered in the text field
 
 */
-export const verifyAttributes = (GFlagInput, searchTerm, JWKSKeyset) => {
+export const verifyAttributes = (GFlagInput, searchTerm, JWKSKeyset, isOIDCSupported) => {
   let isAttributeInvalid = false;
   let isWarning = false;
   let errorMessageKey = '';
@@ -419,7 +420,9 @@ export const verifyAttributes = (GFlagInput, searchTerm, JWKSKeyset) => {
   if (searchTerm === CONST_VALUES.JWT && (isEmptyString(JWKSKeyset) || !JWKSKeyset)) {
     isAttributeInvalid = true;
     isWarning = false;
-    errorMessageKey = 'universeForm.gFlags.uploadKeyset';
+    errorMessageKey = isOIDCSupported
+      ? 'universeForm.gFlags.uploadKeyset'
+      : 'universeForm.gFlags.jwksNotSupported';
     return { isAttributeInvalid, errorMessageKey, isWarning };
   }
 

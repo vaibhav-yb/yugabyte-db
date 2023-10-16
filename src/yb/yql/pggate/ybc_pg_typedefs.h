@@ -18,6 +18,8 @@
 #include <stddef.h>
 #include <stdint.h>
 
+#include "yb/yql/pggate/pg_metrics_list.h"
+
 #ifdef __cplusplus
 
 #define YB_DEFINE_HANDLE_TYPE(name) \
@@ -28,8 +30,11 @@
     } \
     typedef class yb::pggate::name *YBC##name;
 
+#define YB_PGGATE_IDENTIFIER(name) yb::pggate::name
+
 #else
 #define YB_DEFINE_HANDLE_TYPE(name) typedef struct name *YBC##name;
+#define YB_PGGATE_IDENTIFIER(name) name
 #endif  // __cplusplus
 
 #ifdef __cplusplus
@@ -295,7 +300,6 @@ typedef struct PgExecParameters {
   //     to Postgres code layer.
   // For now we only support one rowmark.
 
-  // yb_distinct_prefixlen - prefix for distinct index scan
 #ifdef __cplusplus
   uint64_t limit_count = 0;
   uint64_t limit_offset = 0;
@@ -312,7 +316,6 @@ typedef struct PgExecParameters {
   char *partition_key = NULL;
   PgExecOutParam *out_param = NULL;
   bool is_index_backfill = false;
-  int yb_distinct_prefixlen = 0;
   int work_mem = 4096; // Default work_mem in guc.c
   int yb_fetch_row_limit = 1024; // Default yb_fetch_row_limit in guc.c
   int yb_fetch_size_limit = 0; // Default yb_fetch_size_limit in guc.c
@@ -332,7 +335,6 @@ typedef struct PgExecParameters {
   char *partition_key;
   PgExecOutParam *out_param;
   bool is_index_backfill;
-  int yb_distinct_prefixlen;
   int work_mem;
   int yb_fetch_row_limit;
   int yb_fetch_size_limit;
@@ -358,9 +360,8 @@ typedef struct PgCallbacks {
   const char* (*GetDebugQueryString)();
   void (*WriteExecOutParam)(PgExecOutParam *, const YbcPgExecOutParamValue *);
   /* yb_type.c */
-  int64_t (*PostgresEpochToUnixEpoch)(int64_t);
   int64_t (*UnixEpochToPostgresEpoch)(int64_t);
-  void (*ConstructTextArrayDatum)(const char **, const int, char **, size_t *);
+  void (*ConstructArrayDatum)(YBCPgOid oid, const char **, const int, char **, size_t *);
   /* hba.c */
   int (*CheckUserMap)(const char *, const char *, const char *, bool case_insensitive);
 } YBCPgCallbacks;
@@ -446,11 +447,20 @@ typedef struct PgExecStats {
 
   uint64_t num_flushes;
   uint64_t flush_wait;
+
+  uint64_t storage_metrics[YB_PGGATE_IDENTIFIER(YB_ANALYZE_METRIC_COUNT)];
 } YBCPgExecStats;
+
+// Make sure this is in sync with PgsqlMetricsCaptureType in pgsql_protocol.proto.
+typedef enum PgMetricsCaptureType {
+  YB_YQL_METRICS_CAPTURE_NONE = 0,
+  YB_YQL_METRICS_CAPTURE_ALL = 1,
+} YBCPgMetricsCaptureType;
 
 typedef struct PgExecStatsState {
   YBCPgExecStats stats;
   bool is_timing_required;
+  YBCPgMetricsCaptureType metrics_capture;
 } YBCPgExecStatsState;
 
 typedef struct PgUuid {
@@ -496,9 +506,13 @@ static const int32_t kYBCMaxNumDbCatalogVersions = 10000;
 typedef enum PgSysTablePrefetcherCacheMode {
   YB_YQL_PREFETCHER_TRUST_CACHE,
   YB_YQL_PREFETCHER_RENEW_CACHE_SOFT,
-  YB_YQL_PREFETCHER_RENEW_CACHE_HARD,
-  YB_YQL_PREFETCHER_NO_CACHE
+  YB_YQL_PREFETCHER_RENEW_CACHE_HARD
 } YBCPgSysTablePrefetcherCacheMode;
+
+typedef struct PgLastKnownCatalogVersionInfo {
+  uint64_t version;
+  bool is_db_catalog_version_mode;
+} YBCPgLastKnownCatalogVersionInfo;
 
 #ifdef __cplusplus
 }  // extern "C"

@@ -811,6 +811,7 @@ void ReplicaState::SetLastCommittedIndexUnlocked(const yb::OpId& committed_op_id
 }
 
 Status ReplicaState::InitCommittedOpIdUnlocked(const yb::OpId& committed_op_id) {
+  TRACE_FUNC();
   if (!last_committed_op_id_.empty()) {
     return STATUS_FORMAT(
         IllegalState,
@@ -879,6 +880,7 @@ Result<bool> ReplicaState::AdvanceCommittedOpIdUnlocked(
 
 Status ReplicaState::ApplyPendingOperationsUnlocked(
     const yb::OpId& committed_op_id, CouldStop could_stop) {
+  TRACE_BEGIN_END_FUNC();
   DCHECK(IsLocked());
   VLOG_WITH_PREFIX(1) << "Last triggered apply was: " <<  last_committed_op_id_;
 
@@ -1341,6 +1343,25 @@ MonoDelta ReplicaState::RemainingOldLeaderLeaseDuration(CoarseTimePoint* now) co
     }
   }
 
+  return result;
+}
+
+MonoDelta ReplicaState::RemainingMajorityReplicatedLeaderLeaseDuration() const {
+  MonoDelta result;
+  if (majority_replicated_lease_expiration_ == CoarseTimeLease::NoneValue()) {
+    return result;
+  }
+  CoarseTimePoint now_local = CoarseMonoClock::Now();
+  if (now_local > majority_replicated_lease_expiration_) {
+    // Reset the majority replicated leader lease expiration time so that we
+    // don't have to check it anymore.
+    LOG_WITH_PREFIX(INFO)
+        << "Reset our lease: "
+        << MonoDelta(CoarseMonoClock::now() - majority_replicated_lease_expiration_);
+    majority_replicated_lease_expiration_ = CoarseTimeLease::NoneValue();
+  } else {
+    result = majority_replicated_lease_expiration_ - now_local;
+  }
   return result;
 }
 

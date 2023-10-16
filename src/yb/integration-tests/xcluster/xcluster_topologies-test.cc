@@ -40,7 +40,7 @@
 #include "yb/master/mini_master.h"
 #include "yb/master/master_replication.proxy.h"
 
-#include "yb/master/cdc_consumer_registry_service.h"
+#include "yb/master/xcluster_consumer_registry_service.h"
 #include "yb/rpc/rpc_controller.h"
 #include "yb/server/hybrid_clock.h"
 #include "yb/tserver/xcluster_consumer.h"
@@ -62,7 +62,7 @@ DECLARE_bool(enable_log_retention_by_op_idx);
 DECLARE_bool(enable_ysql);
 DECLARE_int32(cdc_max_apply_batch_num_records);
 DECLARE_int32(cdc_state_checkpoint_update_interval_ms);
-DECLARE_int32(cdc_wal_retention_time_secs);
+DECLARE_uint32(cdc_wal_retention_time_secs);
 DECLARE_int32(log_min_seconds_to_retain);
 DECLARE_int32(log_min_segments_to_retain);
 DECLARE_int32(transaction_table_num_tablets);

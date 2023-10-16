@@ -2,6 +2,7 @@
 
 package com.yugabyte.yw.common.gflags;
 
+import static com.yugabyte.yw.common.Util.getDataDirectoryPath;
 import static play.mvc.Http.Status.BAD_REQUEST;
 import static play.mvc.Http.Status.INTERNAL_SERVER_ERROR;
 
@@ -364,7 +365,12 @@ public class GFlagsUtil {
       ybcFlags.putAll(userIntent.ybcFlags);
     }
     // Append the custom_tmp gflag to the YBC gflag.
-    ybcFlags.put(TMP_DIRECTORY, GFlagsUtil.getCustomTmpDirectory(node, universe));
+    String ybcTempDir = GFlagsUtil.getCustomTmpDirectory(node, universe);
+    // PLAT-10007 use ybc-data instead of /tmp
+    if (ybcTempDir.equals("/tmp")) {
+      ybcTempDir = getDataDirectoryPath(universe, node, config) + "/ybc-data";
+    }
+    ybcFlags.put(TMP_DIRECTORY, ybcTempDir);
     if (EncryptionInTransitUtil.isRootCARequired(taskParam)) {
       String ybHomeDir = getYbHomeDir(providerUUID);
       String certsNodeDir = CertificateHelper.getCertsNodeDir(ybHomeDir);
@@ -663,18 +669,23 @@ public class GFlagsUtil {
     List<Map<String, String>> masterAndTserverGFlags =
         Arrays.asList(userIntent.masterGFlags, userIntent.tserverGFlags);
     if (userIntent.specificGFlags != null) {
-      masterAndTserverGFlags =
-          Arrays.asList(
-              userIntent
-                  .specificGFlags
-                  .getPerProcessFlags()
-                  .value
-                  .getOrDefault(UniverseTaskBase.ServerType.MASTER, new HashMap<>()),
-              userIntent
-                  .specificGFlags
-                  .getPerProcessFlags()
-                  .value
-                  .getOrDefault(UniverseTaskBase.ServerType.TSERVER, new HashMap<>()));
+      if (userIntent.specificGFlags.isInheritFromPrimary()) {
+        return;
+      }
+      if (userIntent.specificGFlags.getPerProcessFlags() != null) {
+        masterAndTserverGFlags =
+            Arrays.asList(
+                userIntent
+                    .specificGFlags
+                    .getPerProcessFlags()
+                    .value
+                    .getOrDefault(UniverseTaskBase.ServerType.MASTER, new HashMap<>()),
+                userIntent
+                    .specificGFlags
+                    .getPerProcessFlags()
+                    .value
+                    .getOrDefault(UniverseTaskBase.ServerType.TSERVER, new HashMap<>()));
+      }
     }
     for (Map<String, String> gflags : masterAndTserverGFlags) {
       GFLAG_TO_INTENT_ACCESSOR.forEach(
@@ -744,7 +755,7 @@ public class GFlagsUtil {
        * Refer Design Doc:
        * https://docs.google.com/document/d/1SJzZJrAqc0wkXTCuMS7UKi1-5xEuYQKCOOa3QWYpMeM/edit
        */
-      processHbaConfFlagIfRequired(node, userGFlags, confGetter, taskParams);
+      processHbaConfFlagIfRequired(node, userGFlags, confGetter, taskParams.getUniverseUUID());
     }
     // Merge the `ysql_hba_conf_csv` post pre-processing the hba conf for jwt if required.
     mergeCSVs(userGFlags, platformGFlags, YSQL_HBA_CONF_CSV);
@@ -1014,15 +1025,30 @@ public class GFlagsUtil {
   }
 
   public static void processHbaConfFlagIfRequired(
-      NodeDetails node,
+      @Nullable NodeDetails node,
       Map<String, String> userFlags,
       RuntimeConfGetter confGetter,
-      AnsibleConfigureServers.Params taskParams) {
+      UUID universeUUID) {
+    processHbaConfFlagIfRequired(node, userFlags, confGetter, universeUUID, null);
+  }
+
+  public static void processHbaConfFlagIfRequired(
+      @Nullable NodeDetails node,
+      Map<String, String> userFlags,
+      RuntimeConfGetter confGetter,
+      UUID universeUUID,
+      @Nullable UUID placementUUID) {
     String hbaConfValue = userFlags.get(YSQL_HBA_CONF_CSV);
     Path tmpDirectoryPath =
         FileUtils.getOrCreateTmpDirectory(
             confGetter.getGlobalConf(GlobalConfKeys.ybTmpDirectoryPath));
-    Path localGflagFilePath = tmpDirectoryPath.resolve(node.getNodeUuid().toString());
+    Path localGflagFilePath = tmpDirectoryPath;
+    if (node != null && node.getNodeUuid() != null) {
+      localGflagFilePath = tmpDirectoryPath.resolve(node.getNodeUuid().toString());
+    } else if (placementUUID != null) {
+      // For k8s universes we will copy the JWKS key to `/tmp/<clusterUUID>`
+      localGflagFilePath = tmpDirectoryPath.resolve(placementUUID.toString());
+    }
     if (!Files.isDirectory(localGflagFilePath)) {
       try {
         Files.createDirectory(localGflagFilePath);
@@ -1032,9 +1058,20 @@ public class GFlagsUtil {
             String.format("Failed to create tmp gflag directory, {}", e.getMessage()));
       }
     }
-    Universe universe = Universe.getOrBadRequest(taskParams.getUniverseUUID());
+    Universe universe = Universe.getOrBadRequest(universeUUID);
     UniverseDefinitionTaskParams universeDetails = universe.getUniverseDetails();
-    UserIntent userIntent = universeDetails.getClusterByUuid(node.placementUuid).userIntent;
+    if (placementUUID == null) {
+      if (node == null || (node != null && node.placementUuid == null)) {
+        throw new PlatformServiceException(
+            INTERNAL_SERVER_ERROR,
+            String.format(
+                "Missing placement information for the node in universe {}. Can't Continue",
+                universeUUID.toString()));
+      } else {
+        placementUUID = node.placementUuid;
+      }
+    }
+    UserIntent userIntent = universeDetails.getClusterByUuid(placementUUID).userIntent;
     String providerUUID = userIntent.provider;
 
     String modifiedHbaConfEntries = "";
@@ -1156,5 +1193,16 @@ public class GFlagsUtil {
     return currentGFlags.keySet().stream()
         .filter(flag -> !updatedGFlags.containsKey(flag))
         .collect(Collectors.toSet());
+  }
+
+  public static boolean areGflagsInheritedFromPrimary(
+      UniverseDefinitionTaskParams.Cluster cluster) {
+    if (cluster.clusterType != UniverseDefinitionTaskParams.ClusterType.ASYNC) {
+      return false;
+    }
+    if (cluster.userIntent.specificGFlags == null) {
+      return true;
+    }
+    return cluster.userIntent.specificGFlags.isInheritFromPrimary();
   }
 }

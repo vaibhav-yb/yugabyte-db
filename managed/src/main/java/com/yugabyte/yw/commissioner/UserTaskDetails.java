@@ -27,8 +27,11 @@ public class UserTaskDetails {
     // newly deployed machines, etc.
     Provisioning,
 
-    // Running software upgrade on YugaByte clusters.
+    // Running software upgrade on Yugabyte clusters.
     UpgradingSoftware,
+
+    // Finalizing Yugabyte db software upgrade on Yugabyte clusters.
+    FinalizingUpgrade,
 
     // Download YB software locally but not install it.
     DownloadingSoftware,
@@ -231,7 +234,10 @@ public class UserTaskDetails {
     InstallingThirdPartySoftware,
 
     // Promote Auto Flags
-    PromoteAutoFlags
+    PromoteAutoFlags,
+
+    // Validate configurations.
+    ValidateConfigurations
   }
 
   public List<SubTaskDetails> taskDetails;
@@ -260,6 +266,10 @@ public class UserTaskDetails {
       case UpgradingSoftware:
         title = "Upgrading software";
         description = "Upgrading YugaByte software on existing clusters.";
+        break;
+      case FinalizingUpgrade:
+        title = "Finalizing upgrade";
+        description = "Finalizing Yugabyte DB Software version upgrade on universe";
         break;
       case InstallingSoftware:
         title = "Installing software";
@@ -537,6 +547,10 @@ public class UserTaskDetails {
       case PromoteAutoFlags:
         title = "Promote Auto flags";
         description = "Promote Auto flags for a universe";
+        break;
+      case ValidateConfigurations:
+        title = "Validating configurations";
+        description = "Validating configurations before proceeding";
         break;
       default:
         LOG.warn("UserTaskDetails: Missing SubTaskDetails for : {}", subTaskGroupType);

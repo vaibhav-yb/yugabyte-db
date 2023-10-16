@@ -39,6 +39,7 @@ import java.util.UUID;
 import java.util.function.Consumer;
 import java.util.function.Function;
 import java.util.stream.Collectors;
+import javax.annotation.Nullable;
 import lombok.Builder;
 import lombok.Value;
 import lombok.extern.slf4j.Slf4j;
@@ -81,16 +82,37 @@ public abstract class UpgradeTaskBase extends UniverseDefinitionTaskBase {
   // State set on node while it is being upgraded
   public abstract NodeState getNodeState();
 
-  // Wrapper that takes care of common pre and post upgrade tasks and user has
-  // flexibility to manipulate subTaskGroupQueue through the lambda passed in parameter
+  /** Similar to {@link #runUpgrade(Consumer, Consumer, Runnable)} without the other params. */
   public void runUpgrade(Runnable upgradeLambda) {
+    runUpgrade(null, null, upgradeLambda);
+  }
+
+  /**
+   * Wrapper that takes care of common pre and post upgrade tasks and user has the flexibility to
+   * manipulate subTaskGroupQueue through the lambdas passed as parameters.
+   *
+   * @param validationLambda the callback for validations which can be run as subtasks.
+   * @param freezeCallback the callback to be executed in transaction when the universe is frozen.
+   *     Any DB change can be added here.
+   * @param upgradeLambda the actual upgrade callback.
+   */
+  public void runUpgrade(
+      @Nullable Consumer<Universe> validationLambda,
+      @Nullable Consumer<Universe> freezeLambda,
+      Runnable upgradeLambda) {
     try {
       checkUniverseVersion();
       // Update the universe DB with the update to be performed and set the
       // 'updateInProgress' flag to prevent other updates from happening.
-      lockUniverseForUpdate(taskParams().expectedUniverseVersion);
+      Universe universe = lockUniverseForFreezeAndUpdate(taskParams().expectedUniverseVersion);
 
+      if (validationLambda != null) {
+        validationLambda.accept(universe);
+      }
       Set<NodeDetails> nodeList = fetchAllNodes(taskParams().upgradeOption);
+
+      createFreezeUniverseTask(freezeLambda)
+          .setSubTaskGroupType(SubTaskGroupType.ValidateConfigurations);
 
       // Run the pre-upgrade hooks
       createHookTriggerTasks(nodeList, true, false);
@@ -262,7 +284,7 @@ public abstract class UpgradeTaskBase extends UniverseDefinitionTaskBase {
       List<NodeDetails> singletonNodeList = Collections.singletonList(node);
       createSetNodeStateTask(node, nodeState).setSubTaskGroupType(subGroupType);
 
-      createNodePrecheckTasks(node, processTypes, subGroupType);
+      createNodePrecheckTasks(node, processTypes, subGroupType, context.targetSoftwareVersion);
 
       // Run pre node upgrade hooks
       createHookTriggerTasks(singletonNodeList, true, true);
@@ -289,7 +311,8 @@ public abstract class UpgradeTaskBase extends UniverseDefinitionTaskBase {
           createWaitForServersTasks(singletonNodeList, processType)
               .setSubTaskGroupType(subGroupType);
           if (processType.equals(ServerType.TSERVER) && node.isYsqlServer) {
-            createWaitForServersTasks(singletonNodeList, ServerType.YSQLSERVER)
+            createWaitForServersTasks(
+                    singletonNodeList, ServerType.YSQLSERVER, context.getUserIntent())
                 .setSubTaskGroupType(subGroupType);
           }
 
@@ -312,7 +335,7 @@ public abstract class UpgradeTaskBase extends UniverseDefinitionTaskBase {
         }
         if (isFollowerLagCheckEnabled()) {
           for (ServerType processType : processTypes) {
-            createWaitForFollowerLagTask(node, processType).setSubTaskGroupType(subGroupType);
+            createCheckFollowerLagTask(node, processType).setSubTaskGroupType(subGroupType);
           }
         }
         if (isYbcPresent) {
@@ -731,7 +754,11 @@ public abstract class UpgradeTaskBase extends UniverseDefinitionTaskBase {
     boolean reconfigureMaster;
     boolean runBeforeStopping;
     boolean processInactiveMaster;
+    // Set this field to access client userIntent during runtime as
+    // usually universeDetails are updated only at the end of task.
+    UniverseDefinitionTaskParams.UserIntent userIntent;
     @Builder.Default boolean skipStartingProcesses = false;
+    String targetSoftwareVersion;
     Consumer<NodeDetails> postAction;
   }
 }

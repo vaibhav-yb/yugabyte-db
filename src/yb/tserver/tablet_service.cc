@@ -210,6 +210,7 @@ DEFINE_UNKNOWN_bool(enable_ysql, true,
             "server as a child process.");
 
 DECLARE_int32(ysql_transaction_abort_timeout_ms);
+DECLARE_bool(ysql_yb_disable_wait_for_backends_catalog_version);
 
 DEFINE_test_flag(bool, fail_alter_schema_after_abort_transactions, false,
                  "If true, setup an error status in AlterSchema and respond success to rpc call. "
@@ -519,16 +520,29 @@ void TabletServiceAdminImpl::GetSafeTime(
   HybridTime min_hybrid_time(HybridTime::kMin);
   if (req->has_min_hybrid_time_for_backfill()) {
     min_hybrid_time = HybridTime(req->min_hybrid_time_for_backfill());
-    // For Transactional tables, wait until there are no pending transactions that started
+
+    // For YSQL, it is not possible for transactions to exist that use the old permissions.  This is
+    // especially the case after commit a1729c352896e919f462c614770da443b9982c0a introduces
+    // ysql_yb_disable_wait_for_backends_catalog_version=false, which explicitly waits on all
+    // possible transactions.  Before that commit, the best-effort, unsafe
+    // ysql_yb_index_state_flags_update_delay=1000 setting was used to guarantee that.  Even though
+    // correctness guarantees are generally flawed when solely relying on
+    // ysql_yb_index_state_flags_update_delay=1000, make a best effort to reduce the scope of that
+    // flaw by aborting transactions in case ysql_yb_disable_wait_for_backends_catalog_version=true.
+    //
+    // For YCQL Transactional tables, wait until there are no pending transactions that started
     // prior to min_hybrid_time. These may not have updated the index correctly, if they
     // happen to commit after the backfill scan, it is possible that they may miss updating
     // the index because the some operations may have taken place prior to min_hybrid_time.
     //
-    // For Non-Txn tables, it is impossible to know at the tservers whether or not an "old
+    // For YCQL Non-Txn tables, it is impossible to know at the tservers whether or not an "old
     // transaction" is still active. To avoid having such old transactions, we assume a
     // bound on the length of such transactions (during the backfill process) and wait it
     // out.
-    if (!tablet.tablet->transaction_participant()) {
+    if (tablet.tablet->table_type() == TableType::PGSQL_TABLE_TYPE &&
+        !FLAGS_ysql_yb_disable_wait_for_backends_catalog_version) {
+      // No need to wait-for/abort transactions.
+    } else if (!tablet.tablet->transaction_participant()) {
       min_hybrid_time = min_hybrid_time.AddMilliseconds(
           FLAGS_index_backfill_upperbound_for_user_enforced_txn_duration_ms);
       VLOG(2) << "GetSafeTime called on a user enforced transaction tablet "
@@ -1579,8 +1593,8 @@ void TabletServiceAdminImpl::FlushTablets(const FlushTabletsRequestPB* req,
   TRACE_EVENT1("tserver", "FlushTablets",
                "TS: ", req->dest_uuid());
 
-  LOG(INFO) << "Processing FlushTablets from " << context.requestor_string();
-  VLOG(1) << "Full FlushTablets request: " << req->DebugString();
+  LOG_WITH_PREFIX(INFO) << "Processing FlushTablets from " << context.requestor_string();
+  VLOG_WITH_PREFIX(1) << "Full FlushTablets request: " << req->DebugString();
   TabletPeers tablet_peers;
   TSTabletManager::TabletPtrs tablet_ptrs;
 
@@ -1598,10 +1612,14 @@ void TabletServiceAdminImpl::FlushTablets(const FlushTabletsRequestPB* req,
     }
   }
   switch (req->operation()) {
-    case FlushTabletsRequestPB::FLUSH:
+    case FlushTabletsRequestPB::FLUSH: {
+      auto flush_flags = req->regular_only() ? tablet::FlushFlags::kRegular
+                                             : tablet::FlushFlags::kAllDbs;
+      VLOG_WITH_PREFIX(1) << "flush_flags: " << to_underlying(flush_flags);
       for (const tablet::TabletPtr& tablet : tablet_ptrs) {
         resp->set_failed_tablet_id(tablet->tablet_id());
-        RETURN_UNKNOWN_ERROR_IF_NOT_OK(tablet->Flush(tablet::FlushMode::kAsync), resp, &context);
+        RETURN_UNKNOWN_ERROR_IF_NOT_OK(
+            tablet->Flush(tablet::FlushMode::kAsync, flush_flags), resp, &context);
         if (!FLAGS_TEST_skip_force_superblock_flush) {
           RETURN_UNKNOWN_ERROR_IF_NOT_OK(
               tablet->FlushSuperblock(tablet::OnlyIfDirty::kTrue), resp, &context);
@@ -1616,6 +1634,7 @@ void TabletServiceAdminImpl::FlushTablets(const FlushTabletsRequestPB* req,
         resp->clear_failed_tablet_id();
       }
       break;
+    }
     case FlushTabletsRequestPB::COMPACT:
       RETURN_UNKNOWN_ERROR_IF_NOT_OK(
           server_->tablet_manager()->TriggerAdminCompaction(tablet_ptrs, true /* should_wait */),
@@ -2067,8 +2086,8 @@ void TabletServiceImpl::Read(const ReadRequestPB* req,
         static CountDownLatch row_mark_exclusive_latch(FLAGS_TEST_wait_row_mark_exclusive_count);
         row_mark_exclusive_latch.CountDown();
         row_mark_exclusive_latch.Wait();
-        TEST_SYNC_POINT("TabletServiceImpl::Read::RowMarkExclusive:1");
-        TEST_SYNC_POINT("TabletServiceImpl::Read::RowMarkExclusive:2");
+        DEBUG_ONLY_TEST_SYNC_POINT("TabletServiceImpl::Read::RowMarkExclusive:1");
+        DEBUG_ONLY_TEST_SYNC_POINT("TabletServiceImpl::Read::RowMarkExclusive:2");
         break;
       }
     }
@@ -2192,6 +2211,10 @@ void ConsensusServiceImpl::UpdateConsensus(const consensus::LWConsensusRequestPB
 
   CompleteUpdateConsensusResponse(tablet_peer, resp);
 
+  auto trace = Trace::CurrentTrace();
+  if (trace && req->trace_requested()) {
+    resp->dup_trace_buffer(trace->DumpToString(true));
+  }
   context.RespondSuccess();
 }
 
@@ -2385,8 +2408,12 @@ void ConsensusServiceImpl::LeaderStepDown(const LeaderStepDownRequestPB* req,
     return;
   }
   Status s = scope->StepDown(req, resp);
-  LOG(INFO) << "Leader stepdown request " << req->ShortDebugString() << " success. Resp code="
-            << TabletServerErrorPB::Code_Name(resp->error().code());
+  if (!resp->has_error()) {
+    LOG(INFO) << "Leader stepdown request " << req->ShortDebugString() << " failed. Resp code="
+              << TabletServerErrorPB::Code_Name(resp->error().code());
+  } else {
+    LOG(INFO) << "Leader stepdown request " << req->ShortDebugString() << " succeeded";
+  }
   scope.CheckStatus(s, resp);
 }
 
@@ -2930,6 +2957,21 @@ void TabletServiceImpl::StartRemoteSnapshotTransfer(
 
   RETURN_UNKNOWN_ERROR_IF_NOT_OK(s, resp, &context);
   context.RespondSuccess();
+}
+
+void TabletServiceImpl::GetTabletKeyRanges(
+    const GetTabletKeyRangesRequestPB* req, GetTabletKeyRangesResponsePB* resp,
+    rpc::RpcContext context) {
+  PerformAtLeader(
+      req, resp, &context,
+      [req, &context](const LeaderTabletPeer& leader_tablet_peer) -> Status {
+        const auto& tablet = leader_tablet_peer.tablet;
+        RETURN_NOT_OK(tablet->GetTabletKeyRanges(
+            req->lower_bound_key(), req->upper_bound_key(), req->max_num_ranges(),
+            req->range_size_bytes(), tablet::IsForward(req->is_forward()), req->max_key_length(),
+            &context.sidecars().Start()));
+        return Status::OK();
+      });
 }
 
 void TabletServiceAdminImpl::TestRetry(

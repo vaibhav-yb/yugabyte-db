@@ -323,14 +323,22 @@ class ClusterAdminClient {
   Status PromoteAutoFlags(
       const std::string& max_flag_class, const bool promote_non_runtime_flags, const bool force);
 
+  Status RollbackAutoFlags(uint32_t rollback_version);
+
+  Status PromoteSingleAutoFlag(const std::string& process_name, const std::string& flag_name);
+  Status DemoteSingleAutoFlag(const std::string& process_name, const std::string& flag_name);
+
   Status ListAllNamespaces();
 
   // Snapshot operations.
   Result<master::ListSnapshotsResponsePB> ListSnapshots(const ListSnapshotsFlags& flags);
   Status CreateSnapshot(const std::vector<client::YBTableName>& tables,
+                        std::optional<int32_t> retention_duration_hours,
                         const bool add_indexes = true,
                         const int flush_timeout_secs = 0);
-  Status CreateNamespaceSnapshot(const TypedNamespaceName& ns);
+  Status CreateNamespaceSnapshot(
+      const TypedNamespaceName& ns, std::optional<int32_t> retention_duration_hours,
+      bool add_indexes = true);
   Result<master::ListSnapshotRestorationsResponsePB> ListSnapshotRestorations(
       const TxnSnapshotRestorationId& restoration_id);
   Result<rapidjson::Document> CreateSnapshotSchedule(const client::YBTableName& keyspace,
@@ -392,6 +400,11 @@ class ClusterAdminClient {
 
   Status GetCDCDBStreamInfo(const std::string& db_stream_id);
 
+  Status SetupNamespaceReplicationWithBootstrap(const std::string& replication_id,
+                                  const std::vector<std::string>& producer_addresses,
+                                  const TypedNamespaceName& ns,
+                                  bool transactional);
+
   Status SetupUniverseReplication(const std::string& producer_uuid,
                                   const std::vector<std::string>& producer_addresses,
                                   const std::vector<TableId>& tables,
@@ -412,6 +425,8 @@ class ClusterAdminClient {
 
   Status RenameUniverseReplication(const std::string& old_universe_name,
                                    const std::string& new_universe_name);
+
+  Status WaitForReplicationBootstrapToFinish(const std::string& replication_id);
 
   Status WaitForSetupUniverseReplicationToFinish(const std::string& producer_uuid);
 

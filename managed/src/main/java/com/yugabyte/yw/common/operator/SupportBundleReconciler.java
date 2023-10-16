@@ -19,11 +19,6 @@ import io.fabric8.kubernetes.client.informers.SharedIndexInformer;
 import io.fabric8.kubernetes.client.informers.cache.Lister;
 import io.yugabyte.operator.v1alpha1.SupportBundleStatus;
 import io.yugabyte.operator.v1alpha1.SupportBundleStatus.Status;
-import java.io.BufferedReader;
-import java.io.File;
-import java.io.FileReader;
-import java.nio.file.Path;
-import java.nio.file.Paths;
 import java.text.ParseException;
 import java.text.SimpleDateFormat;
 import java.time.Instant;
@@ -46,14 +41,10 @@ public class SupportBundleReconciler
           Resource<io.yugabyte.operator.v1alpha1.SupportBundle>>
       resourceClient;
   private final String namespace;
-  private final Customer customer;
   private final Commissioner commissioner;
   private final TaskExecutor taskExecutor;
 
   private final SupportBundleUtil supportBundleUtil;
-
-  private final String yugawarePod;
-  private final String yugawareNamespace;
 
   public SupportBundleReconciler(
       SharedIndexInformer<io.yugabyte.operator.v1alpha1.SupportBundle> informer,
@@ -73,24 +64,6 @@ public class SupportBundleReconciler
     this.commissioner = commissioner;
     this.taskExecutor = taskExecutor;
     this.supportBundleUtil = sbu;
-
-    List<Customer> custList = Customer.getAll();
-    if (custList.size() != 1) {
-      throw new RuntimeException("Customer list does not have exactly one customer.");
-    }
-    this.customer = custList.get(0);
-
-    // Get Yugaware pod and namespace
-    this.yugawarePod = System.getProperty("HOSTNAME");
-    File file = new File("/var/run/secrets/kubernetes.io/serviceaccount/namespace");
-    String ns = null;
-    try {
-      BufferedReader br = new BufferedReader(new FileReader(file));
-      ns = br.readLine();
-    } catch (Exception e) {
-      log.warn("Could not find yugaware pod's namespace");
-    }
-    this.yugawareNamespace = ns;
   }
 
   @Override
@@ -101,12 +74,16 @@ public class SupportBundleReconciler
 
   @Override
   public void onAdd(io.yugabyte.operator.v1alpha1.SupportBundle bundle) {
-    if (bundle.getStatus().getBundleUUID() != null) {
+    if (bundle.getStatus() != null && bundle.getStatus().getResourceUUID() != null) {
       // TODO: If we hit this path due to a YBA restart, the bundle won't have its final status
       // update. We need a better way of plugging in the 'status update' function into the tasks.
-      log.info("bundle %s is already getting generated", bundle.getStatus().getBundleUUID());
+      log.info("bundle %s is already getting generated", bundle.getStatus().getResourceUUID());
       return;
     }
+
+    log.trace("getting customer to create the support bundle");
+    List<Customer> custList = Customer.getAll();
+    Customer customer = custList.get(0);
 
     // Format start and end dates.
     SimpleDateFormat sdf = new SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ssZ");
@@ -134,7 +111,7 @@ public class SupportBundleReconciler
 
     // Get the Universe
     Optional<Universe> opUniverse =
-        Universe.maybeGetUniverseByName(this.customer.getId(), bundle.getSpec().getUniverseName());
+        Universe.maybeGetUniverseByName(customer.getId(), bundle.getSpec().getUniverseName());
     if (!opUniverse.isPresent()) {
       throw new RuntimeException(
           "no universe found with name " + bundle.getSpec().getUniverseName());
@@ -144,7 +121,8 @@ public class SupportBundleReconciler
     SupportBundle supportBundle = SupportBundle.create(bundleData, universe);
     markStatusGenerating(bundle, supportBundle.getBundleUUID());
     SupportBundleTaskParams taskParams =
-        new SupportBundleTaskParams(supportBundle, bundleData, this.customer, universe);
+        new SupportBundleTaskParams(supportBundle, bundleData, customer, universe);
+    taskParams.setKubernetesResourceDetails(KubernetesResourceDetails.fromResource(bundle));
     UUID taskUUID = commissioner.submit(TaskType.CreateSupportBundle, taskParams);
 
     CustomerTask.create(
@@ -156,7 +134,6 @@ public class SupportBundleReconciler
         universe.getName());
 
     taskExecutor.waitForTask(taskUUID);
-    updateStatus(bundle, Status.READY, Paths.get(supportBundle.getPath()));
   }
 
   @Override
@@ -169,7 +146,7 @@ public class SupportBundleReconciler
   @Override
   public void onDelete(
       io.yugabyte.operator.v1alpha1.SupportBundle bundle, boolean deletedFinalStateUnknown) {
-    UUID bundleUUID = UUID.fromString(bundle.getStatus().getBundleUUID());
+    UUID bundleUUID = UUID.fromString(bundle.getStatus().getResourceUUID());
     SupportBundle supportBundle = SupportBundle.get(bundleUUID);
     if (supportBundle == null) {
       log.debug("no bundle found");
@@ -188,29 +165,7 @@ public class SupportBundleReconciler
       bundleStatus = new SupportBundleStatus();
     }
     bundleStatus.setStatus(Status.GENERATING);
-    bundleStatus.setBundleUUID(uuid.toString());
-    bundle.setStatus(bundleStatus);
-    resourceClient.inNamespace(namespace).resource(bundle).replaceStatus();
-  }
-
-  private void updateStatus(
-      io.yugabyte.operator.v1alpha1.SupportBundle bundle, Status status, Path localPath) {
-    SupportBundleStatus bundleStatus = bundle.getStatus();
-    if (bundleStatus == null) {
-      bundleStatus = new SupportBundleStatus();
-    }
-    bundleStatus.setStatus(status);
-    String pod = this.yugawarePod;
-    if (this.yugawareNamespace != null) {
-      pod = String.format("%s/%s", this.yugawareNamespace, this.yugawarePod);
-    }
-    if (pod == null) {
-      pod = "<yugaware pod name>";
-    }
-    bundleStatus.setAccess(
-        String.format(
-            "kubectl cp %s:%s ./%s -c yugaware",
-            pod, localPath.toString(), localPath.getFileName().toString()));
+    bundleStatus.setResourceUUID(uuid.toString());
     bundle.setStatus(bundleStatus);
     resourceClient.inNamespace(namespace).resource(bundle).replaceStatus();
   }

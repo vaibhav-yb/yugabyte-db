@@ -171,6 +171,10 @@ DEFINE_UNKNOWN_int32(cql_proxy_webserver_port, 0, "Webserver port for CQL proxy"
 DEFINE_NON_RUNTIME_string(pgsql_proxy_bind_address, "", "Address to bind the PostgreSQL proxy to");
 DECLARE_int32(pgsql_proxy_webserver_port);
 
+DEFINE_NON_RUNTIME_PREVIEW_bool(enable_ysql_conn_mgr, false,
+    "Enable Ysql Connection Manager for the cluster. Tablet Server will start a "
+    "Ysql Connection Manager process as a child process.");
+
 DEFINE_UNKNOWN_int64(inbound_rpc_memory_limit, 0, "Inbound RPC memory limit");
 
 DEFINE_UNKNOWN_bool(tserver_enable_metrics_snapshotter, false,
@@ -225,9 +229,9 @@ DEFINE_UNKNOWN_int32(
 TAG_FLAG(get_universe_key_registry_max_backoff_sec, stable);
 TAG_FLAG(get_universe_key_registry_max_backoff_sec, advanced);
 
-DEFINE_NON_RUNTIME_uint32(ysql_conn_mgr_port, 6433,
+DEFINE_NON_RUNTIME_uint32(ysql_conn_mgr_port, yb::pgwrapper::PgProcessConf::kDefaultPort,
     "Ysql Connection Manager port to which clients will connect. This must be different from the "
-    "postgres port set via pgsql_proxy_bind_address. Default is 6433.");
+    "postgres port set via pgsql_proxy_bind_address. Default is 5433.");
 
 namespace yb {
 namespace tserver {
@@ -242,11 +246,18 @@ uint16_t GetPostgresPort() {
 }
 
 void PostgresAndYsqlConnMgrPortValidator() {
+  if (!FLAGS_enable_ysql_conn_mgr) {
+    return;
+  }
   const auto pg_port = GetPostgresPort();
   if (FLAGS_ysql_conn_mgr_port == pg_port) {
-    LOG(FATAL) << "Postgres port (pgsql_proxy_bind_address: " << pg_port
-               << ") and Ysql Connection Manager port (ysql_conn_mgr_port:"
-               << FLAGS_ysql_conn_mgr_port << ") cannot be the same.";
+    if (pg_port != pgwrapper::PgProcessConf::kDefaultPort) {
+      LOG(FATAL) << "Postgres port (pgsql_proxy_bind_address: " << pg_port
+                 << ") and Ysql Connection Manager port (ysql_conn_mgr_port:"
+                 << FLAGS_ysql_conn_mgr_port << ") cannot be the same.";
+    } else {
+      // Ignore. t-server will resolve the conflict in SetProxyAddresses.
+    }
   }
 }
 
@@ -520,7 +531,13 @@ AutoFlagsConfigPB TabletServer::TEST_GetAutoFlagConfig() const {
 
 Status TabletServer::GetRegistration(ServerRegistrationPB* reg, server::RpcOnly rpc_only) const {
   RETURN_NOT_OK(RpcAndWebServerBase::GetRegistration(reg, rpc_only));
-  reg->set_pg_port(pgsql_proxy_bind_address().port());
+  // This makes the yb_servers() function return the connection manager port instead
+  // of th backend db.
+  if (FLAGS_enable_ysql_conn_mgr) {
+    reg->set_pg_port(FLAGS_ysql_conn_mgr_port);
+  } else {
+    reg->set_pg_port(pgsql_proxy_bind_address().port());
+  }
   return Status::OK();
 }
 
@@ -748,22 +765,6 @@ Status TabletServer::DisplayRpcIcons(std::stringstream* output) {
   RETURN_NOT_OK(GetRegistration(&reg));
   string http_addr_host = reg.http_addresses(0).host();
 
-  // RPCs in Progress.
-  DisplayIconTile(output, "fa-tasks", "TServer Live Ops", "/rpcz");
-  // YCQL RPCs in Progress.
-  string cass_url;
-  RETURN_NOT_OK(GetDynamicUrlTile(
-      "/rpcz", FLAGS_cql_proxy_bind_address, FLAGS_cql_proxy_webserver_port,
-      http_addr_host, &cass_url));
-  DisplayIconTile(output, "fa-tasks", "YCQL Live Ops", cass_url);
-
-  // YEDIS RPCs in Progress.
-  string redis_url;
-  RETURN_NOT_OK(GetDynamicUrlTile(
-      "/rpcz", FLAGS_redis_proxy_bind_address, FLAGS_redis_proxy_webserver_port,
-      http_addr_host,  &redis_url));
-  DisplayIconTile(output, "fa-tasks", "YEDIS Live Ops", redis_url);
-
   // YSQL RPCs in Progress.
   string sql_url;
   RETURN_NOT_OK(GetDynamicUrlTile(
@@ -778,12 +779,29 @@ Status TabletServer::DisplayRpcIcons(std::stringstream* output) {
       http_addr_host, &sql_all_url));
   DisplayIconTile(output, "fa-tasks", "YSQL All Ops", sql_all_url);
 
+  // YCQL RPCs in Progress.
+  string cass_url;
+  RETURN_NOT_OK(GetDynamicUrlTile(
+      "/rpcz", FLAGS_cql_proxy_bind_address, FLAGS_cql_proxy_webserver_port,
+      http_addr_host, &cass_url));
+  DisplayIconTile(output, "fa-tasks", "YCQL Live Ops", cass_url);
+
   // YCQL All Ops
   string cql_all_url;
   RETURN_NOT_OK(GetDynamicUrlTile(
       "/statements", FLAGS_cql_proxy_bind_address, FLAGS_cql_proxy_webserver_port,
       http_addr_host, &cql_all_url));
   DisplayIconTile(output, "fa-tasks", "YCQL All Ops", cql_all_url);
+
+  // RPCs in Progress.
+  DisplayIconTile(output, "fa-tasks", "TServer Live Ops", "/rpcz");
+
+  // YEDIS RPCs in Progress.
+  string redis_url;
+  RETURN_NOT_OK(GetDynamicUrlTile(
+      "/rpcz", FLAGS_redis_proxy_bind_address, FLAGS_redis_proxy_webserver_port,
+      http_addr_host,  &redis_url));
+  DisplayIconTile(output, "fa-tasks", "YEDIS Live Ops", redis_url);
 
   return Status::OK();
 }
@@ -1125,7 +1143,7 @@ Status TabletServer::SetupMessengerBuilder(rpc::MessengerBuilder* builder) {
 }
 
 XClusterConsumer* TabletServer::GetXClusterConsumer() const {
-  std::lock_guard l(cdc_consumer_mutex_);
+  std::lock_guard l(xcluster_consumer_mutex_);
   return xcluster_consumer_.get();
 }
 
@@ -1140,7 +1158,7 @@ Status TabletServer::SetUniverseKeyRegistry(
   return Status::OK();
 }
 
-Status TabletServer::CreateCDCConsumer() {
+Status TabletServer::CreateXClusterConsumer() {
   auto is_leader_clbk = [this](const string& tablet_id) {
     auto tablet_peer = tablet_manager_->LookupTablet(tablet_id);
     if (!tablet_peer) {
@@ -1164,11 +1182,11 @@ Status TabletServer::CreateCDCConsumer() {
 
 Status TabletServer::SetConfigVersionAndConsumerRegistry(
     int32_t cluster_config_version, const cdc::ConsumerRegistryPB* consumer_registry) {
-  std::lock_guard l(cdc_consumer_mutex_);
+  std::lock_guard l(xcluster_consumer_mutex_);
 
   // Only create a cdc consumer if consumer_registry is not null.
   if (!xcluster_consumer_ && consumer_registry) {
-    RETURN_NOT_OK(CreateCDCConsumer());
+    RETURN_NOT_OK(CreateXClusterConsumer());
   }
   if (xcluster_consumer_) {
     xcluster_consumer_->RefreshWithNewRegistryFromMaster(consumer_registry, cluster_config_version);
@@ -1176,8 +1194,22 @@ Status TabletServer::SetConfigVersionAndConsumerRegistry(
   return Status::OK();
 }
 
+Status TabletServer::ValidateAndMaybeSetUniverseUuid(const UniverseUuid& universe_uuid) {
+  auto instance_universe_uuid_str = VERIFY_RESULT(
+      fs_manager_->GetUniverseUuidFromTserverInstanceMetadata());
+  auto instance_universe_uuid = VERIFY_RESULT(UniverseUuid::FromString(instance_universe_uuid_str));
+  if (!instance_universe_uuid.IsNil()) {
+    // If there is a mismatch between the received uuid and instance uuid, return an error.
+    SCHECK_EQ(universe_uuid, instance_universe_uuid, IllegalState,
+        Format("Received mismatched universe_uuid $0 from master when instance metadata "
+               "uuid is $1", universe_uuid.ToString(), instance_universe_uuid.ToString()));
+    return Status::OK();
+  }
+  return fs_manager_->SetUniverseUuidOnTserverInstanceMetadata(universe_uuid);
+}
+
 int32_t TabletServer::cluster_config_version() const {
-  std::lock_guard l(cdc_consumer_mutex_);
+  std::lock_guard l(xcluster_consumer_mutex_);
   // If no CDC consumer, we will return -1, which will force the master to send the consumer
   // registry if one exists. If we receive one, we will create a new CDC consumer in
   // SetConsumerRegistry.
@@ -1214,7 +1246,7 @@ Status TabletServer::ReloadKeysAndCertificates() {
       server::SecureContextType::kInternal,
       options_.HostsString()));
 
-  std::lock_guard l(cdc_consumer_mutex_);
+  std::lock_guard l(xcluster_consumer_mutex_);
   if (xcluster_consumer_) {
     RETURN_NOT_OK(xcluster_consumer_->ReloadCertificates());
   }

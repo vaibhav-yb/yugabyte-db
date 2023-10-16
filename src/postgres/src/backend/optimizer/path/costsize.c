@@ -191,6 +191,7 @@ static bool cost_qual_eval_walker(Node *node, cost_qual_eval_context *context);
 static void get_restriction_qual_cost(PlannerInfo *root, RelOptInfo *baserel,
 						  ParamPathInfo *param_info,
 						  QualCost *qpqual_cost);
+static List* yb_get_bnl_extra_quals(NestPath *joinpath);
 static bool has_indexed_join_quals(NestPath *joinpath);
 static double approx_tuple_count(PlannerInfo *root, JoinPath *path,
 				   List *quals);
@@ -2375,7 +2376,7 @@ initial_cost_nestloop(PlannerInfo *root, JoinCostWorkspace *workspace,
 
 	/* cost of source data */
 	int yb_batch_size = 1;
-	if (IsYugaByteEnabled())
+	if (IsYugaByteEnabled() && yb_enable_base_scans_cost_model)
 	{
 		bool is_batched = yb_is_outer_inner_batched(outer_path, inner_path);
 		if (is_batched)
@@ -2471,10 +2472,10 @@ final_cost_nestloop(PlannerInfo *root, NestPath *path,
 		path->path.rows = path->path.parent->rows;
 
 	int yb_batch_size = 1;
-	if (IsYugaByteEnabled())
+	if (IsYugaByteEnabled() && yb_enable_base_scans_cost_model)
 	{
-		bool is_batched = yb_is_outer_inner_batched(outer_path, inner_path);
-		if (is_batched)
+		bool yb_is_batched = yb_is_outer_inner_batched(outer_path, inner_path);
+		if (yb_is_batched)
 			yb_batch_size = yb_bnl_batch_size;
 	}
 
@@ -2560,7 +2561,10 @@ final_cost_nestloop(PlannerInfo *root, NestPath *path,
 			 * case, use inner_run_cost for the first matched tuple and
 			 * inner_rescan_run_cost for additional ones.
 			 */
-			run_cost += inner_run_cost * inner_scan_frac;
+
+			if (outer_matched_rows > 0)
+				run_cost += inner_run_cost * inner_scan_frac;
+
 			if (outer_matched_rows > yb_batch_size)
 				run_cost +=
 					((outer_matched_rows - yb_batch_size) / yb_batch_size) *
@@ -2573,11 +2577,11 @@ final_cost_nestloop(PlannerInfo *root, NestPath *path,
 			 * since we used inner_run_cost once already.
 			 */
 
-			 /*
-			  * YB: We assume that when we are using batched nested loop joins,
-			  * the chances of us coming up with an non-matching batch are
-			  * negligible.
-			  */
+			/*
+			 * YB: We assume that when we are using batched nested loop joins,
+			 * the chances of us coming up with a non-matching batch are
+			 * negligible.
+			 */
 			if (yb_batch_size == 1)
 				run_cost += outer_unmatched_rows *
 					inner_rescan_run_cost / inner_path_rows;
@@ -2635,6 +2639,24 @@ final_cost_nestloop(PlannerInfo *root, NestPath *path,
 
 	/* CPU costs */
 	cost_qual_eval(&restrict_qual_cost, path->joinrestrictinfo, root);
+
+	/*
+	 * YB: If BNL is enabled, it is possible for the enhanced CBO to be
+	 * disabled. In this case, the batched join filter will inaccurately
+	 * cost the BNL higher than its classic NL counterpart. This is a
+	 * temporary measure to sidestep that until we enable the CBO by default
+	 * and this measure is no longer necessary.
+	 * TODO: Get rid of this after CBO is GA.
+	 */
+	if (IsYugaByteEnabled() &&
+		 yb_is_outer_inner_batched(outer_path, inner_path) &&
+		 !yb_enable_base_scans_cost_model)
+	{
+		restrict_qual_cost.startup = 0.0;
+		restrict_qual_cost.per_tuple = 0.0;
+		cost_qual_eval(&restrict_qual_cost, yb_get_bnl_extra_quals(path), root);
+	}
+
 	startup_cost += restrict_qual_cost.startup;
 	cpu_per_tuple = cpu_tuple_cost + restrict_qual_cost.per_tuple;
 	run_cost += cpu_per_tuple * ntuples;
@@ -4138,7 +4160,7 @@ compute_semi_anti_join_factors(PlannerInfo *root,
 	Selectivity jselec;
 	Selectivity nselec;
 	Selectivity avgmatch;
-	SpecialJoinInfo norm_sjinfo;
+	SpecialJoinInfo temp_sjinfo;
 	List	   *joinquals;
 	ListCell   *l;
 
@@ -4164,36 +4186,54 @@ compute_semi_anti_join_factors(PlannerInfo *root,
 		joinquals = restrictlist;
 
 	/*
+	 * YB: The following code was modified to fix a PG bug detailed in #19021.
+	 * Note to PG15 mergers: temp_sjinfo was previously known as "norm_sjinfo".
+	 */
+	temp_sjinfo.type = T_SpecialJoinInfo;
+	temp_sjinfo.min_lefthand = outerrel->relids;
+	temp_sjinfo.min_righthand = innerrel->relids;
+	temp_sjinfo.syn_lefthand = outerrel->relids;
+	temp_sjinfo.syn_righthand = innerrel->relids;
+	temp_sjinfo.jointype = (jointype == JOIN_ANTI) ? JOIN_ANTI : JOIN_SEMI;
+	/* we don't bother trying to make the remaining fields valid */
+	temp_sjinfo.lhs_strict = false;
+	temp_sjinfo.delay_upper_joins = false;
+	temp_sjinfo.semi_can_btree = false;
+	temp_sjinfo.semi_can_hash = false;
+	temp_sjinfo.semi_operators = NIL;
+	temp_sjinfo.semi_rhs_exprs = NIL;
+
+	/*
 	 * Get the JOIN_SEMI or JOIN_ANTI selectivity of the join clauses.
 	 */
 	jselec = clauselist_selectivity(root,
 									joinquals,
 									0,
 									(jointype == JOIN_ANTI) ? JOIN_ANTI : JOIN_SEMI,
-									sjinfo);
+									&temp_sjinfo);
 
 	/*
 	 * Also get the normal inner-join selectivity of the join clauses.
 	 */
-	norm_sjinfo.type = T_SpecialJoinInfo;
-	norm_sjinfo.min_lefthand = outerrel->relids;
-	norm_sjinfo.min_righthand = innerrel->relids;
-	norm_sjinfo.syn_lefthand = outerrel->relids;
-	norm_sjinfo.syn_righthand = innerrel->relids;
-	norm_sjinfo.jointype = JOIN_INNER;
+	temp_sjinfo.type = T_SpecialJoinInfo;
+	temp_sjinfo.min_lefthand = outerrel->relids;
+	temp_sjinfo.min_righthand = innerrel->relids;
+	temp_sjinfo.syn_lefthand = outerrel->relids;
+	temp_sjinfo.syn_righthand = innerrel->relids;
+	temp_sjinfo.jointype = JOIN_INNER;
 	/* we don't bother trying to make the remaining fields valid */
-	norm_sjinfo.lhs_strict = false;
-	norm_sjinfo.delay_upper_joins = false;
-	norm_sjinfo.semi_can_btree = false;
-	norm_sjinfo.semi_can_hash = false;
-	norm_sjinfo.semi_operators = NIL;
-	norm_sjinfo.semi_rhs_exprs = NIL;
+	temp_sjinfo.lhs_strict = false;
+	temp_sjinfo.delay_upper_joins = false;
+	temp_sjinfo.semi_can_btree = false;
+	temp_sjinfo.semi_can_hash = false;
+	temp_sjinfo.semi_operators = NIL;
+	temp_sjinfo.semi_rhs_exprs = NIL;
 
 	nselec = clauselist_selectivity(root,
 									joinquals,
 									0,
 									JOIN_INNER,
-									&norm_sjinfo);
+									&temp_sjinfo);
 
 	/* Avoid leaking a lot of ListCells */
 	if (IS_OUTER_JOIN(jointype))
@@ -4224,6 +4264,29 @@ compute_semi_anti_join_factors(PlannerInfo *root,
 	semifactors->match_count = avgmatch;
 }
 
+static List*
+yb_get_bnl_extra_quals(NestPath *joinpath)
+{
+	bool yb_is_batched =
+		yb_is_outer_inner_batched(joinpath->outerjoinpath, joinpath->innerjoinpath);
+
+	if (!yb_is_batched)
+		return joinpath->joinrestrictinfo;
+
+	List *bnl_extra_quals = NULL;
+	ListCell *lc;
+	foreach(lc, joinpath->joinrestrictinfo)
+	{
+		RestrictInfo *rinfo = (RestrictInfo *) lfirst(lc);
+		if (!yb_can_batch_rinfo(rinfo, joinpath->outerjoinpath->parent->relids,
+										joinpath->innerjoinpath->parent->relids))
+		{
+			bnl_extra_quals = lappend(bnl_extra_quals, rinfo);
+		}
+	}
+	return bnl_extra_quals;
+}
+
 /*
  * has_indexed_join_quals
  *	  Check whether all the joinquals of a nestloop join are used as
@@ -4243,26 +4306,14 @@ has_indexed_join_quals(NestPath *joinpath)
 	bool		found_one;
 	ListCell   *lc;
 
-	bool yb_is_batched =
-		yb_is_outer_inner_batched(joinpath->outerjoinpath, innerpath);
-	List *unbatched_restrictinfos = NIL;
-
-	if (yb_is_batched)
-	{
-		foreach(lc, joinpath->joinrestrictinfo)
-		{
-			RestrictInfo *rinfo = lfirst_node(RestrictInfo, lc);
-			if (!yb_can_batch_rinfo(rinfo, joinpath->outerjoinpath->parent->relids,
-										   innerpath->parent->relids))
-			{
-				unbatched_restrictinfos = lappend(unbatched_restrictinfos, rinfo);
-			}
-		}
-	}
-
 	/* If join still has quals to evaluate, it's not fast */
+	/*
+	 * YB: Technically, we can remove the first condition as it is redundant
+	 * with the second. However, keeping it around to aid those who are merging
+	 * future PG code.
+	 */
 	if (joinpath->joinrestrictinfo != NIL &&
-		 (!yb_is_batched || unbatched_restrictinfos != NIL))
+		 yb_get_bnl_extra_quals(joinpath))
 		return false;
 	/* Nor if the inner path isn't parameterized at all */
 	if (innerpath->param_info == NULL)
@@ -5619,10 +5670,12 @@ yb_compute_result_transfer_cost(double result_tuples, int result_width)
 			 (yb_fetch_row_limit == 0 ||
 			  result_width * yb_fetch_row_limit > yb_fetch_size_limit))
 	{
-		int 		results_per_page =
-			floor(((double)yb_fetch_size_limit) / result_width);
+		int results_per_page = yb_fetch_size_limit / (result_width * 1.25);
+		// TODO(#19113): tuple size is inflated on DocDB side. Estimate it at
+		// 25% larger.
+
 		num_result_pages = ceil(result_tuples / results_per_page);
-		result_page_size_mb = results_per_page * result_width / MEGA;
+		result_page_size_mb = (double) results_per_page * result_width / MEGA;
 	}
 	else
 	{
@@ -5815,7 +5868,7 @@ yb_cost_seqscan(Path *path, PlannerInfo *root, RelOptInfo *baserel,
  * index it will aggregate the width of the columns used.
  */
 static int32
-yb_get_index_tuple_width(IndexOptInfo *index, Oid baserel_oid, 
+yb_get_index_tuple_width(IndexOptInfo *index, Oid baserel_oid,
 						 bool is_primary_index)
 {
 	int32		index_tuple_width = 0;
@@ -5830,119 +5883,13 @@ yb_get_index_tuple_width(IndexOptInfo *index, Oid baserel_oid,
 	else
 	{
 		/* Aggregate the width of the columns in the secondary index */
-		for (int i = 0; i < index->nkeycolumns; i++)
+		for (int i = 0; i < index->ncolumns; i++)
 		{
 			index_tuple_width += index->rel->attr_widths[index->indexkeys[i]];
 		}
 		index_tuple_width += HIDDEN_COLUMNS_SIZE;
 	}
 	return index_tuple_width;
-}
-
-/*
- * yb_get_index_correlation
- *	  Estimates the ordering correlation between the index and base table
- */
-static double
-yb_get_index_correlation(struct PlannerInfo *root, IndexOptInfo *index)
-{
-	Oid			relid;
-	AttrNumber	colnum;
-	VariableStatData vardata;
-	double		varCorrelation = 0.0;
-
-	/*
-	 * If we can get an estimate of the first column's ordering correlation C
-	 * from pg_statistic, estimate the index correlation as C for a
-	 * single-column index, or C * 0.75 for multiple columns. (The idea here
-	 * is that multiple columns dilute the importance of the first column's
-	 * ordering, but don't negate it entirely.)
-	 */
-	MemSet(&vardata, 0, sizeof(vardata));
-
-	if (index->indexkeys[0] != 0)
-	{
-		/* Simple variable --- look to stats for the underlying table */
-		RangeTblEntry *rte = planner_rt_fetch(index->rel->relid, root);
-
-		Assert(rte->rtekind == RTE_RELATION);
-		relid = rte->relid;
-		Assert(relid != InvalidOid);
-		colnum = index->indexkeys[0];
-
-		if (get_relation_stats_hook &&
-			(*get_relation_stats_hook) (root, rte, colnum, &vardata))
-		{
-			/*
-			 * The hook took control of acquiring a stats tuple.  If it did
-			 * supply a tuple, it'd better have supplied a freefunc.
-			 */
-			if (HeapTupleIsValid(vardata.statsTuple) && !vardata.freefunc)
-				elog(ERROR, "no function provided to release variable stats "
-					 "with");
-		}
-		else
-		{
-			vardata.statsTuple =
-				SearchSysCache3(STATRELATTINH, ObjectIdGetDatum(relid),
-								Int16GetDatum(colnum), BoolGetDatum(rte->inh));
-			vardata.freefunc = ReleaseSysCache;
-		}
-	}
-	else
-	{
-		/* Expression --- maybe there are stats for the index itself */
-		relid = index->indexoid;
-		colnum = 1;
-
-		if (get_index_stats_hook &&
-			(*get_index_stats_hook) (root, relid, colnum, &vardata))
-		{
-			/*
-			 * The hook took control of acquiring a stats tuple.  If it did
-			 * supply a tuple, it'd better have supplied a freefunc.
-			 */
-			if (HeapTupleIsValid(vardata.statsTuple) && !vardata.freefunc)
-				elog(ERROR, "no function provided to release variable stats "
-					 "with");
-		}
-		else
-		{
-			vardata.statsTuple =
-				SearchSysCache3(STATRELATTINH, ObjectIdGetDatum(relid),
-								Int16GetDatum(colnum), BoolGetDatum(false));
-			vardata.freefunc = ReleaseSysCache;
-		}
-	}
-
-	if (HeapTupleIsValid(vardata.statsTuple))
-	{
-		Oid			sortop;
-		AttStatsSlot sslot;
-
-		sortop = get_opfamily_member(index->opfamily[0], index->opcintype[0],
-									 index->opcintype[0], BTLessStrategyNumber);
-		if (OidIsValid(sortop) &&
-			get_attstatsslot(&sslot, vardata.statsTuple,
-							 STATISTIC_KIND_CORRELATION, sortop,
-							 ATTSTATSSLOT_NUMBERS))
-		{
-			Assert(sslot.nnumbers == 1);
-			varCorrelation = sslot.numbers[0];
-
-			if (index->reverse_sort[0])
-				varCorrelation = -varCorrelation;
-
-			if (index->nkeycolumns > 1)
-				varCorrelation = varCorrelation * 0.75;
-
-			free_attstatsslot(&sslot);
-		}
-	}
-
-	ReleaseVariableStats(vardata);
-
-	return varCorrelation;
 }
 
 /*
@@ -6006,7 +5953,6 @@ yb_cost_index(IndexPath *path, PlannerInfo *root, double loop_count,
 	Cost		index_startup_cost = 0;
 	Cost		index_total_cost = 0;
 	Selectivity index_selectivity = 0;
-	double		index_correlation = 0;
 	double		index_tuples_fetched = 0;
 	List	   *qinfos;
 	double		num_index_tuples;
@@ -6138,7 +6084,7 @@ yb_cost_index(IndexPath *path, PlannerInfo *root, double loop_count,
 	found_is_null_op = false;
 	index_col = 0;
 	numIndexColumnsWithPrefixInequalityFilters = 0;
-	numPrefixInequalityFilterOnIndexColumn = (int*) palloc(sizeof(int) * index->nkeycolumns);
+	numPrefixInequalityFilterOnIndexColumn = (int*) palloc0(sizeof(int) * index->nkeycolumns);
 	foreach(lc, qinfos)
 	{
 		IndexQualInfo *qinfo = (IndexQualInfo *) lfirst(lc);
@@ -6158,7 +6104,6 @@ yb_cost_index(IndexPath *path, PlannerInfo *root, double loop_count,
 				skip_scan_needed = true;
 			}
 			filter_found_for_index_col = false;
-			numPrefixInequalityFilterOnIndexColumn[index_col] = 0;
 			index_col++;
 		}
 
@@ -6227,9 +6172,6 @@ yb_cost_index(IndexPath *path, PlannerInfo *root, double loop_count,
 				/* Query planner should not propose index scan if there exists */
 				/* an inequality filter on the hash columns. */
 				all_filters_are_prefix_with_eq_clause = false;
-				if (numPrefixInequalityFilterOnIndexColumn[index_col] == 0)
-					++numIndexColumnsWithPrefixInequalityFilters;
-				++numPrefixInequalityFilterOnIndexColumn[index_col];
 				Assert(index_col >= index->nhashcolumns);
 				if (skip_scan_needed)
 				{
@@ -6237,6 +6179,9 @@ yb_cost_index(IndexPath *path, PlannerInfo *root, double loop_count,
 				}
 				else
 				{
+					if (numPrefixInequalityFilterOnIndexColumn[index_col] == 0)
+						++numIndexColumnsWithPrefixInequalityFilters;
+					++numPrefixInequalityFilterOnIndexColumn[index_col];
 					prefix_inequality_filters =
 						lappend(prefix_inequality_filters, rinfo);
 					prefix_filters =
@@ -6335,11 +6280,9 @@ yb_cost_index(IndexPath *path, PlannerInfo *root, double loop_count,
 						for (int j = 0; j < numPrefixInequalityFilterOnIndexColumn[i]; ++j)
 						{
 							prefix_inequality_filters =
-								list_delete_cell(prefix_inequality_filters,
-												 list_tail(prefix_inequality_filters),
-												 list_nth_cell(prefix_inequality_filters,
-															   list_length(prefix_inequality_filters) - 2));
+								list_delete_first(prefix_inequality_filters);
 						}
+						numPrefixInequalityFilterOnIndexColumn[i] = 0;
 						break;
 					}
 				}
@@ -6408,6 +6351,8 @@ yb_cost_index(IndexPath *path, PlannerInfo *root, double loop_count,
 		}
 	}
 
+	pfree(numPrefixInequalityFilterOnIndexColumn);
+
 	path->estimated_num_nexts = num_nexts;
 	path->estimated_num_seeks = num_seeks;
 
@@ -6437,6 +6382,23 @@ yb_cost_index(IndexPath *path, PlannerInfo *root, double loop_count,
 	index_total_cost +=
 		num_seeks * per_seek_cost + num_nexts * per_next_cost;
 
+	/* Non index filters will be executed as remote and local filters. */
+	foreach(lc, qpquals)
+	{
+		RestrictInfo *ri = lfirst_node(RestrictInfo, lc);
+
+		if (ri->yb_pushable)
+		{
+			pushed_down_clauses = lappend(pushed_down_clauses, ri);
+		}
+		else
+		{
+			local_clauses = lappend(local_clauses, ri);
+		}
+	}
+
+	bool has_pushed_down_clauses = list_length(pushed_down_clauses) > 0;
+
 	/**
 	 * DocDB must execute index filter on each row. An overhead is added due to
 	 * context switching between PG and DocDB.
@@ -6444,7 +6406,8 @@ yb_cost_index(IndexPath *path, PlannerInfo *root, double loop_count,
 	cost_qual_eval(&qual_cost, index_bound_quals, root);
 	Cost		per_tuple_qual_cost =
 		qual_cost.per_tuple +
-		(yb_docdb_remote_filter_overhead_cycles * cpu_operator_cost);
+		(yb_docdb_remote_filter_overhead_cycles *
+		 cpu_operator_cost * has_pushed_down_clauses);
 
 	index_startup_cost += qual_cost.startup;
 	index_total_cost += per_tuple_qual_cost * num_index_tuples;
@@ -6467,7 +6430,7 @@ yb_cost_index(IndexPath *path, PlannerInfo *root, double loop_count,
 												 baserel_oid,
 												 is_primary_index);
 
-	index_total_pages = 
+	index_total_pages =
 		ceil(index->rel->tuples * index_tuple_width / YB_DEFAULT_DOCDB_BLOCK_SIZE);
 	index_pages_fetched = clamp_row_est(index_selectivity * index_total_pages);
 	index_random_pages_fetched =
@@ -6508,54 +6471,13 @@ yb_cost_index(IndexPath *path, PlannerInfo *root, double loop_count,
 				per_merge_cost;
 		}
 
-		index_correlation = yb_get_index_correlation(root, index);
-		/* After seeking to the first key, DocDB tries to find the next key
-		 * by performing `next` operation 3 times. If the key is not found,
-		 * it resorts to `seek` for the next key. Here we try to model this
-		 * optimization.
+		/* DocDB performs a seek for each lookup in the base table. This may
+		 * be optimized in the future.
 		 */
-		int			num_baserel_seeks;
-		int			num_baserel_nexts;
-		if (path->indexscandir == BackwardScanDirection ||
-			skip_scan_needed)
-		{
-			num_baserel_seeks = num_index_tuples;
-			num_baserel_nexts = 0;
-		}
-		else if (index_correlation > 0.5)
-		{
-			/* If correlation is high, lets assume that we would need the same
-			 * number of seeks and nexts as the index.
-			 */
-			num_baserel_seeks = num_seeks;
-			num_baserel_nexts = num_nexts;
-		}
-		else
-		{
-			/* If selectivity is high, we expect to find the next
-		 	 * key with `next` operations. If selectivity is low, we must use
-			 * `seek` often.
-			 */
-			if (index_selectivity > 0.5)
-			{
-				/* We assume only one seek will be needed. */
-				num_baserel_seeks = 1;
-				num_baserel_nexts = num_index_tuples;
-			}
-			else if (index_selectivity > 0.25)
-			{
-				/* We assume that half of the lookups would need a seek */
-				/* operation */
-				num_baserel_seeks = ceil(num_index_tuples / 2);
-				num_baserel_nexts = floor(num_index_tuples / 2);
-			}
-			else
-			{
-				/* Each lookup would require a seek */
-				num_baserel_seeks = num_index_tuples;
-				num_baserel_nexts = 0;
-			}
-		}
+		int			num_baserel_seeks = num_index_tuples;
+		int			num_baserel_nexts = 0;
+		path->estimated_num_seeks += num_baserel_seeks;
+		path->estimated_num_nexts += num_baserel_nexts;
 
 		startup_cost += baserel_per_seek_cost;
 		run_cost += (baserel_per_seek_cost * num_baserel_seeks) +
@@ -6568,28 +6490,9 @@ yb_cost_index(IndexPath *path, PlannerInfo *root, double loop_count,
 		run_cost += num_docdb_blocks_fetched * yb_random_block_cost;
 	}
 
-	/* Non index filters will be executed as remote and local filters. */
-	foreach(lc, qpquals)
-	{
-		RestrictInfo *ri = lfirst_node(RestrictInfo, lc);
-
-		if (ri->yb_pushable)
-		{
-			pushed_down_clauses = lappend(pushed_down_clauses, ri);
-		}
-		else
-		{
-			local_clauses = lappend(local_clauses, ri);
-		}
-	}
-
 	cost_qual_eval(&qual_cost, pushed_down_clauses, root);
 	startup_cost += qual_cost.startup;
-	run_cost +=
-		(qual_cost.per_tuple + list_length(pushed_down_clauses) *
-		 yb_docdb_remote_filter_overhead_cycles *
-		 cpu_operator_cost) *
-		index_tuples_fetched;
+	run_cost += qual_cost.per_tuple * index_tuples_fetched;
 
 	remote_filtered_rows =
 		clamp_row_est(index_tuples_fetched *

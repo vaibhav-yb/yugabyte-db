@@ -99,8 +99,12 @@ $padding: 30px;
   padding-top: 2px;
 }
 
-#rbac-tab-pabel .tab-content {
+#rbac-tab-panel .tab-content {
   padding: 0 !important;
+}
+#rbac-tab-panel .user-auth-container {
+  padding-top: 30px;
+  margin-top: 0 !important;
 }
 .delete-universe-check-container {
   float: left;

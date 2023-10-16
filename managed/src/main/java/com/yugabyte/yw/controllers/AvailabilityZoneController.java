@@ -3,7 +3,10 @@
 package com.yugabyte.yw.controllers;
 
 import com.google.inject.Inject;
+import com.yugabyte.yw.common.Util;
 import com.yugabyte.yw.common.config.RuntimeConfGetter;
+import com.yugabyte.yw.common.rbac.PermissionInfo.Action;
+import com.yugabyte.yw.common.rbac.PermissionInfo.ResourceType;
 import com.yugabyte.yw.controllers.handlers.AvailabilityZoneHandler;
 import com.yugabyte.yw.forms.AvailabilityZoneData;
 import com.yugabyte.yw.forms.AvailabilityZoneEditData;
@@ -13,6 +16,13 @@ import com.yugabyte.yw.forms.PlatformResults.YBPSuccess;
 import com.yugabyte.yw.models.Audit;
 import com.yugabyte.yw.models.AvailabilityZone;
 import com.yugabyte.yw.models.Region;
+import com.yugabyte.yw.models.common.YbaApi;
+import com.yugabyte.yw.models.common.YbaApi.YbaApiVisibility;
+import com.yugabyte.yw.rbac.annotations.AuthzPath;
+import com.yugabyte.yw.rbac.annotations.PermissionAttribute;
+import com.yugabyte.yw.rbac.annotations.RequiredPermissionOnResource;
+import com.yugabyte.yw.rbac.annotations.Resource;
+import com.yugabyte.yw.rbac.enums.SourceType;
 import io.swagger.annotations.Api;
 import io.swagger.annotations.ApiImplicitParam;
 import io.swagger.annotations.ApiImplicitParams;
@@ -49,6 +59,12 @@ public class AvailabilityZoneController extends AuthenticatedController {
       response = AvailabilityZone.class,
       responseContainer = "List",
       nickname = "listOfAZ")
+  @AuthzPath({
+    @RequiredPermissionOnResource(
+        requiredPermission =
+            @PermissionAttribute(resourceType = ResourceType.OTHER, action = Action.READ),
+        resourceLocation = @Resource(path = Util.CUSTOMERS, sourceType = SourceType.ENDPOINT))
+  })
   public Result list(UUID customerUUID, UUID providerUUID, UUID regionUUID) {
     Region region = Region.getOrBadRequest(customerUUID, providerUUID, regionUUID);
 
@@ -62,9 +78,10 @@ public class AvailabilityZoneController extends AuthenticatedController {
    *
    * @return JSON response of newly created zone(s)
    */
+  @YbaApi(visibility = YbaApiVisibility.DEPRECATED, sinceYBAVersion = "2.18.2.0")
   @ApiOperation(
       value =
-          "Deprecated: sinceDate=2023-08-07, sinceYBAVersion=2.18.2.0, Use "
+          "Deprecated since YBA version 2.18.2.0, Use "
               + "/api/v1/customers/{cUUID}/provider/{pUUID}/provider_regions/:rUUID/region_zones"
               + " instead",
       response = AvailabilityZone.class,
@@ -78,6 +95,12 @@ public class AvailabilityZoneController extends AuthenticatedController {
           dataType = "com.yugabyte.yw.forms.AvailabilityZoneFormData",
           required = true))
   @Deprecated
+  @AuthzPath({
+    @RequiredPermissionOnResource(
+        requiredPermission =
+            @PermissionAttribute(resourceType = ResourceType.OTHER, action = Action.CREATE),
+        resourceLocation = @Resource(path = Util.CUSTOMERS, sourceType = SourceType.ENDPOINT))
+  })
   public Result create(
       UUID customerUUID, UUID providerUUID, UUID regionUUID, Http.Request request) {
     Region region = Region.getOrBadRequest(customerUUID, providerUUID, regionUUID);
@@ -117,6 +140,12 @@ public class AvailabilityZoneController extends AuthenticatedController {
           paramType = "body",
           dataType = "com.yugabyte.yw.models.AvailabilityZone",
           required = true))
+  @AuthzPath({
+    @RequiredPermissionOnResource(
+        requiredPermission =
+            @PermissionAttribute(resourceType = ResourceType.OTHER, action = Action.CREATE),
+        resourceLocation = @Resource(path = Util.CUSTOMERS, sourceType = SourceType.ENDPOINT))
+  })
   public Result createZoneNew(
       UUID customerUUID, UUID providerUUID, UUID regionUUID, Http.Request request) {
     Region region = Region.getOrBadRequest(customerUUID, providerUUID, regionUUID);
@@ -149,6 +178,12 @@ public class AvailabilityZoneController extends AuthenticatedController {
           paramType = "body",
           dataType = "com.yugabyte.yw.models.AvailabilityZone",
           required = true))
+  @AuthzPath({
+    @RequiredPermissionOnResource(
+        requiredPermission =
+            @PermissionAttribute(resourceType = ResourceType.OTHER, action = Action.UPDATE),
+        resourceLocation = @Resource(path = Util.CUSTOMERS, sourceType = SourceType.ENDPOINT))
+  })
   public Result editZoneNew(
       UUID customerUUID, UUID providerUUID, UUID regionUUID, UUID zoneUUID, Http.Request request) {
     Region.getOrBadRequest(customerUUID, providerUUID, regionUUID);
@@ -178,9 +213,10 @@ public class AvailabilityZoneController extends AuthenticatedController {
    *
    * @return JSON response of the modified zone
    */
+  @YbaApi(visibility = YbaApiVisibility.DEPRECATED, sinceYBAVersion = "2.18.2.0")
   @ApiOperation(
       value =
-          "Deprecated: sinceDate=2023-08-07, sinceYBAVersion=2.18.2.0, Use "
+          "Deprecated since YBA version 2.18.2.0, Use "
               + "/api/v1/customers/{cUUID}/provider/{pUUID}/provider_regions/:rUUID/region_zones/:zUUID"
               + " instead",
       response = AvailabilityZone.class,
@@ -193,6 +229,12 @@ public class AvailabilityZoneController extends AuthenticatedController {
           dataType = "com.yugabyte.yw.forms.AvailabilityZoneFormData",
           required = true))
   @Deprecated
+  @AuthzPath({
+    @RequiredPermissionOnResource(
+        requiredPermission =
+            @PermissionAttribute(resourceType = ResourceType.OTHER, action = Action.UPDATE),
+        resourceLocation = @Resource(path = Util.CUSTOMERS, sourceType = SourceType.ENDPOINT))
+  })
   public Result edit(
       UUID customerUUID, UUID providerUUID, UUID regionUUID, UUID zoneUUID, Http.Request request) {
     Region.getOrBadRequest(customerUUID, providerUUID, regionUUID);
@@ -228,6 +270,12 @@ public class AvailabilityZoneController extends AuthenticatedController {
       value = "Delete an availability zone",
       response = YBPSuccess.class,
       nickname = "deleteAZ")
+  @AuthzPath({
+    @RequiredPermissionOnResource(
+        requiredPermission =
+            @PermissionAttribute(resourceType = ResourceType.OTHER, action = Action.DELETE),
+        resourceLocation = @Resource(path = Util.CUSTOMERS, sourceType = SourceType.ENDPOINT))
+  })
   public Result delete(
       UUID customerUUID, UUID providerUUID, UUID regionUUID, UUID azUUID, Http.Request request) {
     Region.getOrBadRequest(customerUUID, providerUUID, regionUUID);

@@ -225,6 +225,8 @@ Status TabletPeer::InitTabletPeer(
     std::this_thread::sleep_for(FLAGS_TEST_delay_init_tablet_peer_ms * 1ms);
   }
 
+  // Additional `consensus` variable is required for the out-of-lock-block usage in this method.
+  shared_ptr<consensus::RaftConsensus> consensus;
   {
     std::lock_guard lock(lock_);
     auto state = state_.load(std::memory_order_acquire);
@@ -306,6 +308,7 @@ Status TabletPeer::InitTabletPeer(
         retryable_requests_manager,
         multi_raft_manager);
     has_consensus_.store(true, std::memory_order_release);
+    consensus = consensus_;
 
     auto flush_retryable_requests_pool_token = flush_retryable_requests_pool
         ? flush_retryable_requests_pool->NewToken(ThreadPool::ExecutionMode::SERIAL) : nullptr;
@@ -323,7 +326,7 @@ Status TabletPeer::InitTabletPeer(
   }
   // End of lock scope for lock_.
 
-  auto raft_config = VERIFY_RESULT(GetRaftConsensus())->CommittedConfig();
+  auto raft_config = consensus->CommittedConfig();
   ChangeConfigReplicated(raft_config);  // Set initial flag value.
 
   RETURN_NOT_OK(prepare_thread_->Start());
@@ -333,14 +336,6 @@ Status TabletPeer::InitTabletPeer(
     operation_tracker_.StartInstrumentation(tablet_->GetTabletMetricsEntity());
   }
   operation_tracker_.StartMemoryTracking(tablet_->mem_tracker());
-
-  if (tablet_->transaction_coordinator()) {
-    tablet_->transaction_coordinator()->Start();
-  }
-
-  if (tablet_->transaction_participant()) {
-    tablet_->transaction_participant()->Start();
-  }
 
   RETURN_NOT_OK(set_cdc_min_replicated_index(meta_->cdc_min_replicated_index()));
 
@@ -437,6 +432,7 @@ Status TabletPeer::Start(const ConsensusBootstrapInfo& bootstrap_info) {
     VLOG_WITH_PREFIX(2) << "Peer starting";
 
     auto consensus = GetRaftConsensusUnsafe();
+    CHECK_NOTNULL(consensus.get()); // Sanity check, consensus must be alive at this point.
     VLOG(2) << "RaftConfig before starting: " << consensus->CommittedConfig().DebugString();
 
     // If tablet was previously considered shutdown w.r.t. metrics,
@@ -449,6 +445,14 @@ Status TabletPeer::Start(const ConsensusBootstrapInfo& bootstrap_info) {
     RETURN_NOT_OK(UpdateState(RaftGroupStatePB::BOOTSTRAPPING, RaftGroupStatePB::RUNNING,
                               "Incorrect state to start TabletPeer, "));
   }
+  if (tablet_->transaction_coordinator()) {
+    tablet_->transaction_coordinator()->Start();
+  }
+
+  if (tablet_->transaction_participant()) {
+    tablet_->transaction_participant()->Start();
+  }
+
   // The context tracks that the current caller does not hold the lock for consensus state.
   // So mark dirty callback, e.g., consensus->ConsensusState() for master consensus callback of
   // SysCatalogStateChanged, can get the lock when needed.
@@ -535,7 +539,10 @@ void TabletPeer::CompleteShutdown(
   {
     std::lock_guard lock(lock_);
     strand_.reset();
-    retryable_requests_flusher_.reset();
+    if (retryable_requests_flusher_) {
+      retryable_requests_flusher_->Shutdown();
+      retryable_requests_flusher_.reset();
+    }
     // Release mem tracker resources.
     has_consensus_.store(false, std::memory_order_release);
     // Clear the consensus and destroy it outside the lock.
@@ -784,7 +791,10 @@ void TabletPeer::GetTabletStatusPB(TabletStatusPB* status_pb_out) {
   disk_size_info.ToPB(status_pb_out);
   // Set hide status of the tablet.
   status_pb_out->set_is_hidden(meta_->hidden());
-  status_pb_out->set_has_been_fully_compacted(meta_->has_been_fully_compacted());
+  status_pb_out->set_parent_data_compacted(meta_->parent_data_compacted());
+  for (const auto& table : meta_->GetAllColocatedTables()) {
+    status_pb_out->add_colocated_table_ids(table);
+  }
 }
 
 Status TabletPeer::RunLogGC() {
@@ -1360,9 +1370,12 @@ Result<std::shared_ptr<consensus::Consensus>> TabletPeer::GetConsensus() const {
 
 Result<shared_ptr<consensus::RaftConsensus>> TabletPeer::GetRaftConsensus() const {
   std::lock_guard lock(lock_);
-  SCHECK(!IsShutdownStarted(), NotFound, "Tablet peer $0 is shutting down", LogPrefix());
-  SCHECK(consensus_, IllegalState, "Consensus not yet initialized for tablet peer $0", LogPrefix());
-
+  // Cannot use NotFound status for the shutting down case as later the status may be extended with
+  // TabletServerErrorPB::TABLET_NOT_RUNNING error code, and this combination of the status and
+  // the code is not expected and is not considered as a retryable operation at least by yb-client.
+  // Refer to https://github.com/yugabyte/yugabyte-db/issues/19033 for the details.
+  SCHECK(!IsShutdownStarted(), IllegalState, "Tablet peer $0 is shutting down", LogPrefix());
+  SCHECK(consensus_, IllegalState, "Tablet peer $0 is not started yet", LogPrefix());
   return consensus_;
 }
 
@@ -1500,6 +1513,14 @@ consensus::LeaderStatus TabletPeer::LeaderStatus(bool allow_stale) const {
   return consensus ? consensus->GetLeaderStatus(allow_stale) : consensus::LeaderStatus::NOT_LEADER;
 }
 
+bool TabletPeer::IsLeaderAndReady() const {
+  return LeaderStatus() == consensus::LeaderStatus::LEADER_AND_READY;
+}
+
+bool TabletPeer::IsNotLeader() const {
+  return LeaderStatus() == consensus::LeaderStatus::NOT_LEADER;
+}
+
 Result<HybridTime> TabletPeer::HtLeaseExpiration() const {
   auto consensus = VERIFY_RESULT(GetRaftConsensus());
   HybridTime result(
@@ -1587,8 +1608,8 @@ bool TabletPeer::CanBeDeleted() {
 
   LOG_WITH_PREFIX(INFO) << Format(
       "Marked tablet $0 as requiring cleanup due to all replicas have been split (all applied op "
-      "id: $1, split op id: $2)",
-      tablet_id(), all_applied_op_id, op_id);
+      "id: $1, split op id: $2, data state: $3)",
+      tablet_id(), all_applied_op_id, op_id, TabletDataState_Name(data_state()));
 
   return true;
 }
@@ -1710,6 +1731,18 @@ bool TabletPeer::TEST_HasRetryableRequestsOnDisk() {
       ? retryable_requests_flusher->TEST_HasRetryableRequestsOnDisk()
       : false;
 }
+
+RetryableRequestsFlushState TabletPeer::TEST_RetryableRequestsFlusherState() const {
+  if (!FlushRetryableRequestsEnabled()) {
+    return RetryableRequestsFlushState::kFlushIdle;
+  }
+  auto retryable_requests_flusher = shared_retryable_requests_flusher();
+  return retryable_requests_flusher
+      ? retryable_requests_flusher->flush_state()
+      : RetryableRequestsFlushState::kFlushIdle;
+}
+
+Preparer* TabletPeer::DEBUG_GetPreparer() { return prepare_thread_.get(); }
 
 }  // namespace tablet
 }  // namespace yb

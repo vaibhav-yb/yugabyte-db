@@ -94,7 +94,7 @@ class CDCSDKAdminCliTest : public pgwrapper::PgCommandTestBase {
 TEST_F(CDCSDKAdminCliTest, TestCreateChangeDataStream) {
   string output = ASSERT_RESULT(RunAdminToolCommand(
       "create_change_data_stream", "ysql." + kCdcsdkTableName.namespace_name()));
-  
+
   // Output is of the format: CDC Stream ID: <36 character UUID>
   string parsed_string = ASSERT_RESULT(GetStreamIdFromParsedOutput(output));
   LOG(INFO) << "Created CDC stream using yb-admin: " << parsed_string;

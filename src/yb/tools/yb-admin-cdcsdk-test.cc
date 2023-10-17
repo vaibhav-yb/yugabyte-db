@@ -60,36 +60,35 @@ using std::string;
 const client::YBTableName kCdcsdkTableName(YQL_DATABASE_PGSQL, "my_namespace", "test_table");
 
 class CDCSDKAdminCliTest : public pgwrapper::PgCommandTestBase {
-  protected:
-    std::unique_ptr<cdc::CDCServiceProxy> cdc_proxy_;
+ protected:
+  std::unique_ptr<cdc::CDCServiceProxy> cdc_proxy_;
 
-    CDCSDKAdminCliTest() : pgwrapper::PgCommandTestBase(false, false) {}
+  CDCSDKAdminCliTest() : pgwrapper::PgCommandTestBase(false, false) {}
 
-    void SetUp() override {
-      pgwrapper::PgCommandTestBase::SetUp();
-      ASSERT_OK(CreateClient());
+  void SetUp() override {
+    pgwrapper::PgCommandTestBase::SetUp();
+    ASSERT_OK(CreateClient());
 
-      // Create test namespace.
-      ASSERT_OK(client_->CreateNamespaceIfNotExists(kCdcsdkTableName.namespace_name(),
-                                                    kCdcsdkTableName.namespace_type()));
+    // Create test namespace.
+    ASSERT_OK(client_->CreateNamespaceIfNotExists(
+        kCdcsdkTableName.namespace_name(), kCdcsdkTableName.namespace_type()));
 
-      cdc_proxy_ = std::make_unique<cdc::CDCServiceProxy>(
-          &client_->proxy_cache(), cluster_->tablet_server(0)->bound_rpc_hostport());
-    }
+    cdc_proxy_ = std::make_unique<cdc::CDCServiceProxy>(
+        &client_->proxy_cache(), cluster_->tablet_server(0)->bound_rpc_hostport());
+  }
 
-    Result<string> GetStreamIdFromParsedOutput(string output) {
-      const int kStreamUuidLength = 36;
-      const string find_stream_id = "CDC Stream ID: ";
-      string::size_type stream_id_pos = output.find(find_stream_id);
+  Result<string> GetStreamIdFromParsedOutput(string output) {
+    const int kStreamUuidLength = 36;
+    const string find_stream_id = "CDC Stream ID: ";
+    string::size_type stream_id_pos = output.find(find_stream_id);
 
-      return output.substr(stream_id_pos + find_stream_id.size(), kStreamUuidLength);
-    }
+    return output.substr(stream_id_pos + find_stream_id.size(), kStreamUuidLength);
+  }
 
-    template <class... Args>
-    Result<std::string> RunAdminToolCommand(Args&&... args) {
-      return tools::RunAdminToolCommand(
-          cluster_->GetMasterAddresses(), std::forward<Args>(args)...);
-    }
+  template <class... Args>
+  Result<std::string> RunAdminToolCommand(Args&&... args) {
+    return tools::RunAdminToolCommand(cluster_->GetMasterAddresses(), std::forward<Args>(args)...);
+  }
 };
 
 TEST_F(CDCSDKAdminCliTest, TestCreateChangeDataStream) {
@@ -101,5 +100,5 @@ TEST_F(CDCSDKAdminCliTest, TestCreateChangeDataStream) {
   LOG(INFO) << "Created CDC stream using yb-admin: " << parsed_string;
 }
 
-} // namespace tools
-} // namespace yb
+}  // namespace tools
+}  // namespace yb

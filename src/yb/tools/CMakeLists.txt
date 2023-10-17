@@ -219,6 +219,7 @@ ADD_YB_TEST(yb-backup/yb-backup-cross-feature-test)
 ADD_YB_TEST(yb-admin-snapshot-test)
 ADD_YB_TEST(yb-admin-xcluster-test)
 ADD_YB_TEST(yb-admin_client-test)
+ADD_YB_TEST(yb-admin-cdcsdk-test)
 
 add_executable(run-with-timeout run-with-timeout.cc)
 target_link_libraries(run-with-timeout yb_util)

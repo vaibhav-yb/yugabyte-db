@@ -18,11 +18,14 @@ import com.yugabyte.yw.common.config.RuntimeConfGetter;
 import com.yugabyte.yw.common.config.RuntimeConfigFactory;
 import com.yugabyte.yw.common.config.UniverseConfKeys;
 import com.yugabyte.yw.common.gflags.GFlagsUtil;
+import com.yugabyte.yw.forms.AuditLogConfigParams;
 import com.yugabyte.yw.forms.CertsRotateParams;
+import com.yugabyte.yw.forms.FinalizeUpgradeParams;
 import com.yugabyte.yw.forms.GFlagsUpgradeParams;
 import com.yugabyte.yw.forms.KubernetesOverridesUpgradeParams;
 import com.yugabyte.yw.forms.ResizeNodeParams;
 import com.yugabyte.yw.forms.RestartTaskParams;
+import com.yugabyte.yw.forms.RollbackUpgradeParams;
 import com.yugabyte.yw.forms.SoftwareUpgradeParams;
 import com.yugabyte.yw.forms.SystemdUpgradeParams;
 import com.yugabyte.yw.forms.ThirdpartySoftwareUpgradeParams;
@@ -156,12 +159,24 @@ public class UpgradeUniverseHandler {
   }
 
   public UUID finalizeUpgrade(
-      SoftwareUpgradeParams requestParams, Customer customer, Universe universe) {
+      FinalizeUpgradeParams requestParams, Customer customer, Universe universe) {
     // TODO(vbansal): Add validations for finalize based on universe state.
     // Will add them in subsequent diffs.
     return submitUpgradeTask(
         TaskType.FinalizeUpgrade,
         CustomerTask.TaskType.FinalizeUpgrade,
+        requestParams,
+        customer,
+        universe);
+  }
+
+  public UUID rollbackUpgrade(
+      RollbackUpgradeParams requestParams, Customer customer, Universe universe) {
+    // TODO(vbansal): Add validations for finalize based on universe state.
+    // Will add them in subsequent diffs.
+    return submitUpgradeTask(
+        TaskType.RollbackUpgrade,
+        CustomerTask.TaskType.RollbackUpgrade,
         requestParams,
         customer,
         universe);
@@ -285,6 +300,21 @@ public class UpgradeUniverseHandler {
     return submitUpgradeTask(
         TaskType.ThirdpartySoftwareUpgrade,
         CustomerTask.TaskType.ThirdpartySoftwareUpgrade,
+        requestParams,
+        customer,
+        universe);
+  }
+
+  public UUID modifyAuditLoggingConfig(
+      AuditLogConfigParams requestParams, Customer customer, Universe universe) {
+    UniverseDefinitionTaskParams universeDetails = universe.getUniverseDetails();
+    UserIntent userIntent = universeDetails.getPrimaryCluster().userIntent;
+
+    requestParams.verifyParams(universe);
+    userIntent.auditLogConfig = requestParams.auditLogConfig;
+    return submitUpgradeTask(
+        TaskType.ModifyAuditLoggingConfig,
+        CustomerTask.TaskType.ModifyAuditLoggingConfig,
         requestParams,
         customer,
         universe);

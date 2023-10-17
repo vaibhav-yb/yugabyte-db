@@ -87,7 +87,8 @@ class CDCSDKAdminCliTest : public pgwrapper::PgCommandTestBase {
 
     template <class... Args>
     Result<std::string> RunAdminToolCommand(Args&&... args) {
-      return tools::RunAdminToolCommand(cluster_->GetMasterAddresses(), std::forward<Args>(args)...);
+      return tools::RunAdminToolCommand(
+          cluster_->GetMasterAddresses(), std::forward<Args>(args)...);
     }
 };
 

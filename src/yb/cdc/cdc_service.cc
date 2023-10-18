@@ -2882,6 +2882,15 @@ Status CDCServiceImpl::GetTabletIdsToPoll(
     }
   }
 
+  // If scanning cdc_state table fails, return the error to the client so that it can be retried
+  // accordingly.
+  if (!failer_status.ok()) {
+    RefreshCdcStateTable();
+    return STATUS_FORMAT(
+        IllegalState, "Failed to scan table $0: $1", kCdcStateTableName.table_name(),
+        failer_status);
+  }
+
   return Status::OK();
 }
 

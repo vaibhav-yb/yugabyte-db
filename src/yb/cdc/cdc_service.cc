@@ -1328,7 +1328,8 @@ void CDCServiceImpl::GetTabletListToPollForCDC(
 
     resp->mutable_tablet_checkpoint_pairs()->Reserve(
         static_cast<int>(tablet_checkpoint_pairs.size()));
-    LOG(INFO) << "Processing tablets for table " << table_id << " for GetTabletListToPollForCDCResponse";
+    LOG(INFO) << "Processing tablets for table " << table_id
+              << " for GetTabletListToPollForCDCResponse";
     for (auto tablet_checkpoint_pair : tablet_checkpoint_pairs) {
       auto tablet_checkpoint_pair_pb = resp->add_tablet_checkpoint_pairs();
 

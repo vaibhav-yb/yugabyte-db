@@ -751,6 +751,14 @@ public class UniverseConfKeys extends RuntimeConfigKeysModule {
           "The maximum time that we allow a tserver to be behind its peers",
           ConfDataType.DurationType,
           ImmutableList.of(ConfKeyTags.PUBLIC));
+  public static final ConfKeyInfo<Duration> waitForServerReadyTimeout =
+      new ConfKeyInfo<>(
+          "yb.checks.wait_for_server_ready.timeout",
+          ScopeType.UNIVERSE,
+          "Wait for server ready timeout",
+          "Controls the max time for server to finish locally bootstrapping",
+          ConfDataType.DurationType,
+          ImmutableList.of(ConfKeyTags.PUBLIC));
   public static final ConfKeyInfo<Long> checkMemoryTimeoutSecs =
       new ConfKeyInfo<>(
           "yb.dbmem.checks.timeout",
@@ -935,5 +943,15 @@ public class UniverseConfKeys extends RuntimeConfigKeysModule {
           "Parallelism for Node Agent Reinstallation",
           "Number of parallel node agent reinstallations at a time",
           ConfDataType.IntegerType,
+          ImmutableList.of(ConfKeyTags.PUBLIC));
+  public static final ConfKeyInfo<Boolean> ldapUniverseSync =
+      new ConfKeyInfo<>(
+          "yb.security.ldap.ldap_universe_sync",
+          ScopeType.UNIVERSE,
+          "To perform sync of user-groups between the Universe DB nodes and LDAP Server",
+          "If configured, this feature allows users to synchronise user groups configured"
+              + " on the upstream LDAP Server with user roles in YBDB nodes associated"
+              + " with the universe.",
+          ConfDataType.BooleanType,
           ImmutableList.of(ConfKeyTags.PUBLIC));
 }

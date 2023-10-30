@@ -153,6 +153,14 @@ class MiniCluster : public MiniClusterBase {
   Status AddTServerToLeaderBlacklist(const tserver::MiniTabletServer& ts);
   Status ClearBlacklist();
 
+  Status AddTServerToBlacklist(size_t idx) {
+    return AddTServerToBlacklist(*mini_tablet_server(idx));
+  }
+
+  Status AddTServerToLeaderBlacklist(size_t idx) {
+    return AddTServerToLeaderBlacklist(*mini_tablet_server(idx));
+  }
+
   // If this cluster is configured for a single non-distributed
   // master, return the single master. Exits with a CHECK failure if
   // there are multiple masters.
@@ -214,8 +222,9 @@ class MiniCluster : public MiniClusterBase {
   // count. Returns Status::TimedOut if the desired count is not achieved
   // within kRegistrationWaitTimeSeconds.
   Status WaitForTabletServerCount(size_t count);
-  Status WaitForTabletServerCount(
-      size_t count, std::vector<std::shared_ptr<master::TSDescriptor>>* descs);
+  Status WaitForTabletServerCount(size_t count,
+                                  std::vector<std::shared_ptr<master::TSDescriptor>>* descs,
+                                  bool live_only = false);
 
   // Wait for all tablet servers to be registered. Returns Status::TimedOut if the desired count is
   // not achieved within kRegistrationWaitTimeSeconds.

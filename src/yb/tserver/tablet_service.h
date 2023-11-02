@@ -193,6 +193,10 @@ class TabletServiceImpl : public TabletServerServiceIf, public ReadTabletProvide
       const StartRemoteSnapshotTransferRequestPB* req, StartRemoteSnapshotTransferResponsePB* resp,
       rpc::RpcContext context) override;
 
+  void GetTabletKeyRanges(
+      const GetTabletKeyRangesRequestPB* req, GetTabletKeyRangesResponsePB* resp,
+      rpc::RpcContext context) override;
+
   void Shutdown() override;
 
  private:
@@ -311,7 +315,7 @@ class TabletServiceAdminImpl : public TabletServerAdminServiceIf {
   mutable std::mutex backfill_lock_;
   std::condition_variable backfill_cond_;
   std::atomic<int32_t> num_tablets_backfilling_{0};
-  std::atomic<int32_t> num_test_retry_calls{0};
+  std::atomic<int32_t> TEST_num_test_retry_calls_{0};
   scoped_refptr<yb::AtomicGauge<uint64_t>> ts_split_op_added_;
 };
 

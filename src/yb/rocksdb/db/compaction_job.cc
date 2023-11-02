@@ -81,6 +81,8 @@
 
 using std::unique_ptr;
 
+DECLARE_uint64(rocksdb_check_sst_file_tail_for_zeros);
+
 namespace rocksdb {
 
 // Maintains state for each sub-compaction
@@ -443,7 +445,7 @@ void CompactionJob::GenSubcompactionBoundaries() {
 }
 
 Result<FileNumbersHolder> CompactionJob::Run() {
-  TEST_SYNC_POINT("CompactionJob::Run():Start");
+  DEBUG_ONLY_TEST_SYNC_POINT("CompactionJob::Run():Start");
   log_buffer_->FlushBufferToLog();
   LogCompaction();
 
@@ -504,7 +506,7 @@ Result<FileNumbersHolder> CompactionJob::Run() {
   UpdateCompactionStats();
   RecordCompactionIOStats();
   LogFlush(db_options_.info_log);
-  TEST_SYNC_POINT("CompactionJob::Run():End");
+  DEBUG_ONLY_TEST_SYNC_POINT("CompactionJob::Run():End");
 
   compact_->status = status;
   return file_numbers_holder;
@@ -622,7 +624,7 @@ void CompactionJob::ProcessKeyValueCompaction(
       existing_snapshots_.empty() ? 0 : existing_snapshots_.back(),
       compact_->compaction->level(), db_options_.statistics.get());
 
-  TEST_SYNC_POINT("CompactionJob::Run():Inprogress");
+  DEBUG_ONLY_TEST_SYNC_POINT("CompactionJob::Run():Inprogress");
 
   Slice* start = sub_compact->start;
   Slice* end = sub_compact->end;
@@ -799,7 +801,6 @@ void CompactionJob::CloseFile(Status* status, std::unique_ptr<WritableFileWriter
     *status = (*writer)->Close();
   }
   writer->reset();
-
 }
 
 Status CompactionJob::FinishCompactionOutputFile(
@@ -847,6 +848,16 @@ Status CompactionJob::FinishCompactionOutputFile(
     CloseFile(&s, &sub_compact->data_outfile);
   }
   CloseFile(&s, &sub_compact->base_outfile);
+
+  const auto rocksdb_check_sst_file_tail_for_zeros =
+      FLAGS_rocksdb_check_sst_file_tail_for_zeros;
+  if (s.ok() && PREDICT_FALSE(rocksdb_check_sst_file_tail_for_zeros > 0)) {
+    const auto base_fname = TableFileName(
+        db_options_.db_paths, meta.fd.GetNumber(), sub_compact->compaction->output_path_id());
+    s = CheckSstTailForZeros(
+        db_options_, env_options_, is_split_sst ? TableBaseToDataFileName(base_fname) : base_fname,
+        rocksdb_check_sst_file_tail_for_zeros);
+  }
 
   if (s.ok() && current_entries > 0) {
     // Verify that the table is usable
@@ -904,7 +915,7 @@ Status CompactionJob::FinishCompactionOutputFile(
       if (db_bg_error_->ok()) {
         s = STATUS(IOError, "Max allowed space was reached");
         *db_bg_error_ = s;
-        TEST_SYNC_POINT(
+        DEBUG_ONLY_TEST_SYNC_POINT(
             "CompactionJob::FinishCompactionOutputFile:MaxAllowedSpaceReached");
       }
     }

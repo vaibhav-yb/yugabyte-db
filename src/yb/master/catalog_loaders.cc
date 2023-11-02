@@ -214,7 +214,7 @@ Status TabletLoader::Visit(const TabletId& tablet_id, const SysTabletsEntryPB& m
     auto inserted = tablet_map_checkout->emplace(tablet->tablet_id(), tablet).second;
     if (!inserted) {
       return STATUS_FORMAT(
-          IllegalState, "Loaded tablet that already in map: $0", tablet->tablet_id());
+          IllegalState, "Loaded tablet already in tablet map: $0", tablet->tablet_id());
     }
 
     if (metadata.hosted_tables_mapped_by_parent_id()) {
@@ -574,29 +574,6 @@ Status ClusterConfigLoader::Visit(
 }
 
 ////////////////////////////////////////////////////////////
-// XCluster Config Loader
-////////////////////////////////////////////////////////////
-
-Status XClusterConfigLoader::Visit(
-    const std::string& unused_id, const SysXClusterConfigEntryPB& metadata) {
-  // Debug confirm that there is no xcluster_config_ set.
-  DCHECK(!catalog_manager_->xcluster_config_) << "Already have config data!";
-
-  // Prepare the config object.
-  std::shared_ptr<XClusterConfigInfo> config = std::make_shared<XClusterConfigInfo>();
-  {
-    auto l = config->LockForWrite();
-    l.mutable_data()->pb.CopyFrom(metadata);
-
-    // Update in memory state.
-    catalog_manager_->xcluster_config_ = config;
-    l.Commit();
-  }
-
-  return Status::OK();
-}
-
-////////////////////////////////////////////////////////////
 // Redis Config Loader
 ////////////////////////////////////////////////////////////
 
@@ -661,24 +638,6 @@ Status SysConfigLoader::Visit(const string& config_type, const SysConfigEntryPB&
   }
 
   LOG(INFO) << "Loaded sys config type " << config_type;
-  return Status::OK();
-}
-
-////////////////////////////////////////////////////////////
-// XClusterSafeTime Loader
-////////////////////////////////////////////////////////////
-
-Status XClusterSafeTimeLoader::Visit(
-    const std::string& unused_id, const XClusterSafeTimePB& metadata) {
-  // Debug confirm that there is no xcluster_safe_time_info_ set. This also ensures that this does
-  // not visit multiple rows.
-  auto l = catalog_manager_->xcluster_safe_time_info_.LockForWrite();
-  DCHECK(l->pb.safe_time_map().empty()) << "Already have XCluster Safe Time data!";
-
-  VLOG_WITH_FUNC(2) << "Loading XCluster Safe Time data: " << metadata.DebugString();
-  l.mutable_data()->pb.CopyFrom(metadata);
-  l.Commit();
-
   return Status::OK();
 }
 

@@ -56,13 +56,17 @@ public class CertsRotate extends UpgradeTaskBase {
   }
 
   @Override
+  public void validateParams(boolean isFirstTry) {
+    super.validateParams(isFirstTry);
+    taskParams().verifyParams(getUniverse(), isFirstTry);
+  }
+
+  @Override
   public void run() {
     runUpgrade(
         () -> {
           Pair<List<NodeDetails>, List<NodeDetails>> nodes = fetchNodes(taskParams().upgradeOption);
           Set<NodeDetails> allNodes = toOrderedSet(nodes);
-          // Verify the request params and fail if invalid
-          taskParams().verifyParams(getUniverse());
           // For rootCA root certificate rotation, we would need to do it in three rounds
           // so that node to node communications are not disturbed during the upgrade
           // For other cases we can do it in one round by updating respective certs

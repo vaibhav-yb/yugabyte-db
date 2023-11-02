@@ -57,7 +57,7 @@ DEFINE_NON_RUNTIME_int32(pg_client_extra_timeout_ms, 2000,
    "and report it.");
 
 DECLARE_bool(TEST_index_read_multiple_partitions);
-DECLARE_bool(TEST_enable_db_catalog_version_mode);
+DECLARE_bool(ysql_enable_db_catalog_version_mode);
 
 extern int yb_locks_min_txn_age;
 extern int yb_locks_max_transactions;
@@ -306,7 +306,7 @@ class PgClient::Impl {
     req.set_db_oid(db_oid);
     req.set_seq_oid(seq_oid);
     if (is_db_catalog_version_mode) {
-      DCHECK(FLAGS_TEST_enable_db_catalog_version_mode);
+      DCHECK(FLAGS_ysql_enable_db_catalog_version_mode);
       req.set_ysql_db_catalog_version(ysql_catalog_version);
     } else {
       req.set_ysql_catalog_version(ysql_catalog_version);
@@ -333,7 +333,7 @@ class PgClient::Impl {
     req.set_db_oid(db_oid);
     req.set_seq_oid(seq_oid);
     if (is_db_catalog_version_mode) {
-      DCHECK(FLAGS_TEST_enable_db_catalog_version_mode);
+      DCHECK(FLAGS_ysql_enable_db_catalog_version_mode);
       req.set_ysql_db_catalog_version(ysql_catalog_version);
     } else {
       req.set_ysql_catalog_version(ysql_catalog_version);
@@ -367,7 +367,7 @@ class PgClient::Impl {
     req.set_db_oid(db_oid);
     req.set_seq_oid(seq_oid);
     if (is_db_catalog_version_mode) {
-      DCHECK(FLAGS_TEST_enable_db_catalog_version_mode);
+      DCHECK(FLAGS_ysql_enable_db_catalog_version_mode);
       req.set_ysql_db_catalog_version(ysql_catalog_version);
     } else {
       req.set_ysql_catalog_version(ysql_catalog_version);
@@ -394,7 +394,7 @@ class PgClient::Impl {
     req.set_db_oid(db_oid);
     req.set_seq_oid(seq_oid);
     if (is_db_catalog_version_mode) {
-      DCHECK(FLAGS_TEST_enable_db_catalog_version_mode);
+      DCHECK(FLAGS_ysql_enable_db_catalog_version_mode);
       req.set_ysql_db_catalog_version(ysql_catalog_version);
     } else {
       req.set_ysql_catalog_version(ysql_catalog_version);
@@ -520,6 +520,17 @@ class PgClient::Impl {
     RETURN_NOT_OK(proxy_->ReserveOids(req, &resp, PrepareController()));
     RETURN_NOT_OK(ResponseStatus(resp));
     return std::pair<PgOid, PgOid>(resp.begin_oid(), resp.end_oid());
+  }
+
+  Result<PgOid> GetNewObjectId(PgOid db_oid) {
+    tserver::PgGetNewObjectIdRequestPB req;
+    req.set_db_oid(db_oid);
+
+    tserver::PgGetNewObjectIdResponsePB resp;
+
+    RETURN_NOT_OK(proxy_->GetNewObjectId(req, &resp, PrepareController()));
+    RETURN_NOT_OK(ResponseStatus(resp));
+    return resp.new_oid();
   }
 
   Result<bool> IsInitDbDone() {
@@ -723,6 +734,39 @@ class PgClient::Impl {
     return Status::OK();
   }
 
+  Result<boost::container::small_vector<RefCntSlice, 2>> GetTableKeyRanges(
+      const PgObjectId& table_id, Slice lower_bound_key, Slice upper_bound_key,
+      uint64_t max_num_ranges, uint64_t range_size_bytes, bool is_forward,
+      uint32_t max_key_length) {
+    tserver::PgGetTableKeyRangesRequestPB req;
+    tserver::PgGetTableKeyRangesResponsePB resp;
+    req.set_session_id(session_id_);
+    table_id.ToPB(req.mutable_table_id());
+    if (!lower_bound_key.empty()) {
+      req.mutable_lower_bound_key()->assign(lower_bound_key.cdata(), lower_bound_key.size());
+    }
+    if (!upper_bound_key.empty()) {
+      req.mutable_upper_bound_key()->assign(upper_bound_key.cdata(), upper_bound_key.size());
+    }
+    req.set_max_num_ranges(max_num_ranges);
+    req.set_range_size_bytes(range_size_bytes);
+    req.set_is_forward(is_forward);
+    req.set_max_key_length(max_key_length);
+
+    auto* controller = PrepareController();
+
+    RETURN_NOT_OK(proxy_->GetTableKeyRanges(req, &resp, controller));
+    if (resp.has_status()) {
+      return StatusFromPB(resp.status());
+    }
+
+    boost::container::small_vector<RefCntSlice, 2> result;
+    for (size_t i = 0; i < controller->GetSidecarsCount(); ++i) {
+      result.push_back(VERIFY_RESULT(controller->ExtractSidecar(i)));
+    }
+    return result;
+  }
+
   Result<tserver::PgGetTserverCatalogVersionInfoResponsePB> GetTserverCatalogVersionInfo(
       bool size_only, uint32_t db_oid) {
     tserver::PgGetTserverCatalogVersionInfoRequestPB req;
@@ -760,6 +804,15 @@ class PgClient::Impl {
     tserver::PgCancelTransactionResponsePB resp;
     RETURN_NOT_OK(proxy_->CancelTransaction(req, &resp, PrepareController(CoarseTimePoint())));
     return ResponseStatus(resp);
+  }
+
+  Result<tserver::PgListReplicationSlotsResponsePB> ListReplicationSlots() {
+    tserver::PgListReplicationSlotsRequestPB req;
+    tserver::PgListReplicationSlotsResponsePB resp;
+
+    RETURN_NOT_OK(proxy_->ListReplicationSlots(req, &resp, PrepareController()));
+    RETURN_NOT_OK(ResponseStatus(resp));
+    return resp;
   }
 
  private:
@@ -845,6 +898,10 @@ Result<master::GetNamespaceInfoResponsePB> PgClient::GetDatabaseInfo(uint32_t oi
 Result<std::pair<PgOid, PgOid>> PgClient::ReserveOids(
     PgOid database_oid, PgOid next_oid, uint32_t count) {
   return impl_->ReserveOids(database_oid, next_oid, count);
+}
+
+Result<PgOid> PgClient::GetNewObjectId(PgOid db_oid) {
+  return impl_->GetNewObjectId(db_oid);
 }
 
 Result<bool> PgClient::IsInitDbDone() {
@@ -981,6 +1038,14 @@ Result<bool> PgClient::IsObjectPartOfXRepl(const PgObjectId& table_id) {
   return impl_->IsObjectPartOfXRepl(table_id);
 }
 
+Result<boost::container::small_vector<RefCntSlice, 2>> PgClient::GetTableKeyRanges(
+    const PgObjectId& table_id, Slice lower_bound_key, Slice upper_bound_key,
+    uint64_t max_num_ranges, uint64_t range_size_bytes, bool is_forward, uint32_t max_key_length) {
+  return impl_->GetTableKeyRanges(
+      table_id, lower_bound_key, upper_bound_key, max_num_ranges, range_size_bytes, is_forward,
+      max_key_length);
+}
+
 Result<tserver::PgGetTserverCatalogVersionInfoResponsePB> PgClient::GetTserverCatalogVersionInfo(
     bool size_only, uint32_t db_oid) {
   return impl_->GetTserverCatalogVersionInfo(size_only, db_oid);
@@ -1002,6 +1067,10 @@ BOOST_PP_SEQ_FOR_EACH(YB_PG_CLIENT_SIMPLE_METHOD_DEFINE, ~, YB_PG_CLIENT_SIMPLE_
 
 Status PgClient::CancelTransaction(const unsigned char* transaction_id) {
   return impl_->CancelTransaction(transaction_id);
+}
+
+Result<tserver::PgListReplicationSlotsResponsePB> PgClient::ListReplicationSlots() {
+  return impl_->ListReplicationSlots();
 }
 
 }  // namespace pggate

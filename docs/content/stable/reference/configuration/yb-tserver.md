@@ -399,9 +399,17 @@ Default: `16`
 
 ##### --automatic_compaction_extra_priority
 
-Assigns an extra priority to automatic (minor) compactions when automatic tablet splitting is enabled. This deprioritizes post-split compactions and ensures that smaller compactions are not starved. Suggested values are between 0 and 50.
+Assigns an extra priority to automatic (minor) compactions when automatic tablet splitting is enabled. This de-prioritizes post-split compactions and ensures that smaller compactions are not starved. Suggested values are between 0 and 50.
 
 Default: `50`
+
+##### --ysql_colocate_database_by_default
+
+When enabled, all databases created in the cluster are colocated by default. If you enable the flag after creating a cluster, you need to restart the YB-Master and YB-TServer services.
+
+For more details, see [clusters in colocated tables](../../../architecture/docdb-sharding/colocated-tables/#clusters).
+
+Default: `false`
 
 ## Geo-distribution flags
 
@@ -457,7 +465,7 @@ Default: `true`
 
 ## xCluster flags
 
-Settings related to managing xClusters.
+Settings related to managing xCluster deployments.
 
 ##### --xcluster_svc_queue_size
 
@@ -569,9 +577,15 @@ Default: Uses the YSQL display format.
 
 ##### --ysql_max_connections
 
-Specifies the maximum number of concurrent YSQL connections.
+Specifies the maximum number of concurrent YSQL connections per node.
 
-Default: 300 for superusers. Non-superuser roles see only the connections available for use, while superusers see all connections, including those reserved for superusers.
+This is a maximum per server, so a 3-node cluster will have a default of 900 available connections, globally.
+
+Any active, idle in transaction, or idle in session connection counts toward the connection limit.
+
+Some connections are reserved for superusers. The total number of superuser connections is determined by the `superuser_reserved_connections` [PostgreSQL server parameter](#postgresql-server-options). Connections available to non-superusers is equal to `ysql_max_connections` - `superuser_reserved_connections`.
+
+Default: 300
 
 ##### --ysql_default_transaction_isolation
 
@@ -581,7 +595,7 @@ Valid values: `SERIALIZABLE`, `REPEATABLE READ`, `READ COMMITTED`, and `READ UNC
 
 Default: `READ COMMITTED`<sup>$</sup>
 
-<sup>$</sup> Read Committed support is currently in [Beta](/preview/faq/general/#what-is-the-definition-of-the-beta-feature-tag). Read Committed Isolation is supported only if the YB-TServer flag `yb_enable_read_committed_isolation` is set to `true`. By default this flag is `false` and in this case the Read Committed isolation level of the YugabyteDB transactional layer falls back to the stricter Snapshot Isolation (in which case `READ COMMITTED` and `READ UNCOMMITTED` of YSQL also in turn use Snapshot Isolation).
+<sup>$</sup> Read Committed Isolation is supported only if the YB-TServer flag `yb_enable_read_committed_isolation` is set to `true`. By default this flag is `false` and in this case the Read Committed isolation level of the YugabyteDB transactional layer falls back to the stricter Snapshot Isolation (in which case `READ COMMITTED` and `READ UNCOMMITTED` of YSQL also in turn use Snapshot Isolation).
 
 ##### --ysql_disable_index_backfill
 
@@ -617,7 +631,7 @@ Default: `100`
 
 Specifies the types of YSQL statements that should be logged.
 
-Valid values: `none` (off), `ddl` (only data definition queries, such as create/alter/drop), `mod` (all modifying/write statements, includes DDLs plus insert/update/delete/trunctate, etc), and `all` (all statements).
+Valid values: `none` (off), `ddl` (only data definition queries, such as create/alter/drop), `mod` (all modifying/write statements, includes DDLs plus insert/update/delete/truncate, etc), and `all` (all statements).
 
 Default: `none`
 
@@ -915,15 +929,19 @@ In addition, as this setting does not propagate to PostgreSQL, it is recommended
 --ysql_pg_conf_csv="ssl_min_protocol_version=TLSv1.2"
 ```
 
-## Packed row flags (Beta)
+## Packed row flags
 
-To learn about the packed row feature, see [Packed row format](../../../architecture/docdb/persistence/#packed-row-format-beta) in the architecture section.
+Packed row format support is currently in [Early Access](/preview/releases/versioning/#feature-availability).
+
+To learn about the packed row feature, see [Packed row format](../../../architecture/docdb/persistence/#packed-row-format) in the architecture section.
 
 ##### --ysql_enable_packed_row
 
 Whether packed row is enabled for YSQL.
 
 Default: `false`
+
+Packed Row for YSQL can be used from version 2.16.4 in production environments if the cluster is not used in xCluster settings. For xCluster scenarios, use version 2.18.1 and later. Starting from version 2.19 and later, the flag default is true for new clusters.
 
 ##### --ysql_packed_row_size_limit
 
@@ -932,6 +950,8 @@ Packed row size limit for YSQL. The default value is 0 (use block size as limit)
 Default: `0`
 
 ##### --ycql_enable_packed_row
+
+--ycql_enable_packed_row support is currently in [Tech Preview](/preview/releases/versioning/#feature-availability).
 
 Whether packed row is enabled for YCQL.
 
@@ -977,7 +997,7 @@ Number of records fetched in a single batch of snapshot operation of CDC.
 
 Default: `250`
 
-##### --cdc_min_replicated_index_considered_stale_seconds
+##### --cdc_min_replicated_index_considered_stale_secs
 
 If `cdc_min_replicated_index` hasn't been replicated in this amount of time, we reset its value to max int64 to avoid retaining any logs.
 

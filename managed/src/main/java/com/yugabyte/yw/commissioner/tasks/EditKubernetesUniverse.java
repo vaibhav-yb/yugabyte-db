@@ -14,13 +14,15 @@ import com.yugabyte.yw.commissioner.BaseTaskDependencies;
 import com.yugabyte.yw.commissioner.TaskExecutor.SubTaskGroup;
 import com.yugabyte.yw.commissioner.UserTaskDetails;
 import com.yugabyte.yw.commissioner.UserTaskDetails.SubTaskGroupType;
+import com.yugabyte.yw.commissioner.tasks.subtasks.InstallThirdPartySoftwareK8s;
 import com.yugabyte.yw.commissioner.tasks.subtasks.KubernetesCheckVolumeExpansion;
 import com.yugabyte.yw.commissioner.tasks.subtasks.KubernetesCommandExecutor;
 import com.yugabyte.yw.common.KubernetesUtil;
 import com.yugabyte.yw.common.PlacementInfoUtil;
 import com.yugabyte.yw.common.config.GlobalConfKeys;
 import com.yugabyte.yw.common.config.UniverseConfKeys;
-import com.yugabyte.yw.common.operator.KubernetesOperatorStatusUpdater;
+import com.yugabyte.yw.common.operator.OperatorStatusUpdater;
+import com.yugabyte.yw.common.operator.OperatorStatusUpdaterFactory;
 import com.yugabyte.yw.forms.UniverseDefinitionTaskParams;
 import com.yugabyte.yw.forms.UniverseDefinitionTaskParams.Cluster;
 import com.yugabyte.yw.forms.UniverseDefinitionTaskParams.ClusterType;
@@ -45,13 +47,14 @@ import lombok.extern.slf4j.Slf4j;
 public class EditKubernetesUniverse extends KubernetesTaskBase {
 
   static final int DEFAULT_WAIT_TIME_MS = 10000;
-  private final KubernetesOperatorStatusUpdater kubernetesStatus;
+  private final OperatorStatusUpdater kubernetesStatus;
 
   @Inject
   protected EditKubernetesUniverse(
-      BaseTaskDependencies baseTaskDependencies, KubernetesOperatorStatusUpdater kubernetesStatus) {
+      BaseTaskDependencies baseTaskDependencies,
+      OperatorStatusUpdaterFactory statusUpdaterFactory) {
     super(baseTaskDependencies);
-    this.kubernetesStatus = kubernetesStatus;
+    this.kubernetesStatus = statusUpdaterFactory.create();
   }
 
   @Override
@@ -63,7 +66,8 @@ public class EditKubernetesUniverse extends KubernetesTaskBase {
       verifyParams(UniverseOpType.EDIT);
 
       Universe universe = lockUniverseForUpdate(taskParams().expectedUniverseVersion);
-      kubernetesStatus.createYBUniverseEventStatus(universe, getName(), getUserTaskUUID());
+      kubernetesStatus.createYBUniverseEventStatus(
+          universe, taskParams().getKubernetesResourceDetails(), getName(), getUserTaskUUID());
       UniverseDefinitionTaskParams universeDetails = universe.getUniverseDetails();
 
       // This value is used by subsequent calls to helper methods for
@@ -126,9 +130,8 @@ public class EditKubernetesUniverse extends KubernetesTaskBase {
       }
 
       // Update the user intent.
-      // This writes placement info and user intent of all clusters to DB.
-      writeUserIntentToUniverse();
-
+      // This writes new state of nodes to DB.
+      updateUniverseNodesAndSettings(universe, taskParams(), false);
       // primary cluster edit.
       boolean mastersAddrChanged =
           editCluster(
@@ -137,6 +140,8 @@ public class EditKubernetesUniverse extends KubernetesTaskBase {
               universeDetails.getPrimaryCluster(),
               masterAddresses,
               false /* restartAllPods */);
+      // Updating cluster in DB
+      createUpdateUniverseIntentTask(taskParams().getPrimaryCluster());
 
       // read cluster edit.
       for (Cluster cluster : taskParams().clusters) {
@@ -147,6 +152,8 @@ public class EditKubernetesUniverse extends KubernetesTaskBase {
               universeDetails.getClusterByUuid(cluster.uuid),
               masterAddresses,
               mastersAddrChanged);
+          // Updating cluster in DB
+          createUpdateUniverseIntentTask(cluster);
         }
       }
 
@@ -163,7 +170,12 @@ public class EditKubernetesUniverse extends KubernetesTaskBase {
       th = t;
       throw t;
     } finally {
-      kubernetesStatus.updateYBUniverseStatus(getUniverse(), getName(), getUserTaskUUID(), th);
+      kubernetesStatus.updateYBUniverseStatus(
+          getUniverse(),
+          taskParams().getKubernetesResourceDetails(),
+          getName(),
+          getUserTaskUUID(),
+          th);
       unlockUniverseForUpdate();
     }
     log.info("Finished {} task.", getName());
@@ -341,7 +353,7 @@ public class EditKubernetesUniverse extends KubernetesTaskBase {
     }
 
     // Update the blacklist servers on master leader.
-    createPlacementInfoTask(tserversToRemove)
+    createPlacementInfoTask(tserversToRemove, taskParams().clusters)
         .setSubTaskGroupType(SubTaskGroupType.WaitForDataMigration);
 
     // If the tservers have been removed, move the data.
@@ -428,6 +440,10 @@ public class EditKubernetesUniverse extends KubernetesTaskBase {
         KubernetesCommandExecutor.CommandType.POD_INFO,
         newPI,
         isReadOnlyCluster);
+    if (!tserversToAdd.isEmpty()) {
+      installThirdPartyPackagesTaskK8s(
+          universe, InstallThirdPartySoftwareK8s.SoftwareUpgradeType.JWT_JWKS);
+    }
 
     if (!mastersToAdd.isEmpty()) {
       // Update the master addresses on the target universes whose source universe belongs to

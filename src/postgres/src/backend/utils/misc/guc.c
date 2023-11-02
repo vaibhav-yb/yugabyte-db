@@ -583,6 +583,7 @@ static bool integer_datetimes;
 static bool assert_enabled;
 static char *yb_effective_transaction_isolation_level_string;
 static char *yb_xcluster_consistency_level_string;
+static char *yb_read_time_string;
 
 /* should be static, but commands/variable.c needs to get at this */
 char	   *role_string;
@@ -1056,7 +1057,17 @@ static struct config_bool ConfigureNamesBool[] =
 			NULL
 		},
 		&yb_prefer_bnl,
-		false,
+		true,
+		NULL, NULL, NULL
+	},
+	{
+		{"yb_enable_batchednl", PGC_USERSET, QUERY_TUNING_METHOD,
+			gettext_noop("Enables the planner's use of batched nested-loop "
+							 "join plans."),
+			NULL
+		},
+		&yb_enable_batchednl,
+		true,
 		NULL, NULL, NULL
 	},
 	{
@@ -2072,6 +2083,17 @@ static struct config_bool ConfigureNamesBool[] =
 	},
 
 	{
+		{"yb_enable_replication_commands", PGC_SUSET, REPLICATION,
+			gettext_noop("Enable the replication commands for Publication and Replication Slots."),
+			NULL,
+			GUC_NOT_IN_SAMPLE
+		},
+		&yb_enable_replication_commands,
+		true,
+		NULL, NULL, NULL
+	},
+
+	{
 		{"ysql_upgrade_mode", PGC_SUSET, DEVELOPER_OPTIONS,
 			gettext_noop("Enter a special mode designed specifically for YSQL cluster upgrades. "
 						 "Allows creating new system tables with given relation and type OID. "
@@ -2370,7 +2392,7 @@ static struct config_int ConfigureNamesInt[] =
 			GUC_NOT_IN_SAMPLE
 		},
 		&yb_bnl_batch_size,
-		1, 1, INT_MAX,
+		1024, 1, INT_MAX,
 		NULL, NULL, NULL
 	},
 
@@ -3731,10 +3753,10 @@ static struct config_int ConfigureNamesInt[] =
 	{
 		{"yb_fetch_size_limit", PGC_USERSET, QUERY_TUNING_METHOD,
 			gettext_noop("Maximum size of a fetch response. 0 = No limit"),
-			NULL, GUC_UNIT_KB
+			NULL, GUC_UNIT_BYTE
 		},
 		&yb_fetch_size_limit,
-		0, 0, MAX_KILOBYTES,
+		0, 0, INT_MAX,
 		NULL, NULL, NULL
 	},
 
@@ -4401,6 +4423,24 @@ static struct config_string ConfigureNamesString[] =
 		&yb_xcluster_consistency_level_string,
 		"database",
 		check_yb_xcluster_consistency_level, assign_yb_xcluster_consistency_level, NULL
+	},
+
+	{
+		{"yb_read_time", PGC_SUSET, CLIENT_CONN_STATEMENT,
+			gettext_noop(
+				"Allows querying the database as of a point in time in the past."
+				" Takes a unix timestamp in microseconds."
+				" Zero means reading data as of current time."),
+			gettext_noop(
+				"User should set this variable with caution. Currently, it can"
+				" only read old data without schema changes. In other words, it should not be"
+				" set to a timestamp before a DDL operation has been performed."
+				" Potential corruption can happen in case (1) the variable is set to a timestamp"
+				" before most recent DDL. (2) DDL is performed while it is set to nonzero.")
+		},
+		&yb_read_time_string,
+		"0", 
+		check_yb_read_time, assign_yb_read_time, NULL
 	},
 
 	{

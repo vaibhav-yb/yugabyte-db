@@ -36,22 +36,22 @@ public class GFlagsUpgradeParams extends UpgradeWithGFlags {
   }
 
   @Override
-  public void verifyParams(Universe universe) {
-    super.verifyParams(universe);
+  public void verifyParams(Universe universe, boolean isFirstTry) {
+    super.verifyParams(universe, isFirstTry);
     if (masterGFlags == null) {
       masterGFlags = new HashMap<>();
     }
     if (tserverGFlags == null) {
       tserverGFlags = new HashMap<>();
     }
-    verifyGFlags(universe);
+    verifyGFlags(universe, isFirstTry);
   }
 
   public void checkXClusterAutoFlags(
       Universe universe,
       GFlagsValidation gFlagsValidation,
       XClusterUniverseService xClusterUniverseService) {
-    super.verifyParams(universe);
+    super.verifyParams(universe, true);
     if (isUsingSpecificGFlags(universe)) {
       checkXClusterSpecificAutoFlags(universe, gFlagsValidation, xClusterUniverseService);
     } else {
@@ -165,8 +165,10 @@ public class GFlagsUpgradeParams extends UpgradeWithGFlags {
               + " does not support auto flags");
     }
     Set<String> xClusterUniverseAutoFlags =
-        gFlagsValidation.extractAutoFlags(xClusterUniverseSoftwareVersion, serverType)
-            .autoFlagDetails.stream()
+        gFlagsValidation
+            .extractAutoFlags(xClusterUniverseSoftwareVersion, serverType)
+            .autoFlagDetails
+            .stream()
             .map(autoFlagDetails -> autoFlagDetails.name)
             .collect(Collectors.toSet());
     // Check if all user overridden auto flags are supported on xCluster universe.

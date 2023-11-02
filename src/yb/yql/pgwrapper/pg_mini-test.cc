@@ -74,7 +74,6 @@ DECLARE_bool(enable_pg_savepoints);
 DECLARE_bool(enable_tracing);
 DECLARE_bool(flush_rocksdb_on_shutdown);
 DECLARE_bool(enable_wait_queues);
-DECLARE_bool(enable_deadlock_detection);
 
 DECLARE_double(TEST_respond_write_failed_probability);
 DECLARE_double(TEST_transaction_ignore_applying_probability);
@@ -84,6 +83,7 @@ DECLARE_int32(heartbeat_interval_ms);
 DECLARE_int32(history_cutoff_propagation_interval_ms);
 DECLARE_int32(timestamp_history_retention_interval_sec);
 DECLARE_int32(timestamp_syscatalog_history_retention_interval_sec);
+DECLARE_int32(tracing_level);
 DECLARE_int32(tserver_heartbeat_metrics_interval_ms);
 DECLARE_int32(txn_max_apply_batch_records);
 DECLARE_int32(yb_num_shards_per_tserver);
@@ -115,7 +115,7 @@ namespace yb::pgwrapper {
 namespace {
 
 Result<int64_t> GetCatalogVersion(PGConn* conn) {
-  if (FLAGS_TEST_enable_db_catalog_version_mode) {
+  if (FLAGS_ysql_enable_db_catalog_version_mode) {
     const auto db_oid = VERIFY_RESULT(conn->FetchValue<int32>(Format(
         "SELECT oid FROM pg_database WHERE datname = '$0'", PQdb(conn->get()))));
     return conn->FetchValue<PGUint64>(
@@ -162,6 +162,8 @@ class PgMiniTest : public PgMiniTestBase {
   void RunManyConcurrentReadersTest();
 
   void ValidateAbortedTxnMetric();
+
+  int64_t GetBloomFilterCheckedMetric();
 };
 
 class PgMiniTestSingleNode : public PgMiniTest {
@@ -176,7 +178,6 @@ class PgMiniTestFailOnConflict : public PgMiniTest {
     // This test depends on fail-on-conflict concurrency control to perform its validation.
     // TODO(wait-queues): https://github.com/yugabyte/yugabyte-db/issues/17871
     ANNOTATE_UNPROTECTED_WRITE(FLAGS_enable_wait_queues) = false;
-    ANNOTATE_UNPROTECTED_WRITE(FLAGS_enable_deadlock_detection) = false;
     PgMiniTest::SetUp();
   }
 };
@@ -453,7 +454,26 @@ TEST_F(PgMiniTest, Simple) {
 }
 
 TEST_F(PgMiniTest, Tracing) {
+  class TraceLogSink : public google::LogSink {
+   public:
+    void send(
+        google::LogSeverity severity, const char* full_filename, const char* base_filename,
+        int line, const struct ::tm* tm_time, const char* message, size_t message_len) {
+      if (strcmp(base_filename, "trace.cc") == 0) {
+        last_logged_bytes_ = message_len;
+      }
+    }
+
+    size_t last_logged_bytes() const { return last_logged_bytes_; }
+
+   private:
+    std::atomic<size_t> last_logged_bytes_{0};
+  } trace_log_sink;
+  google::AddLogSink(&trace_log_sink);
+  size_t last_logged_trace_size;
+
   ANNOTATE_UNPROTECTED_WRITE(FLAGS_enable_tracing) = false;
+  ANNOTATE_UNPROTECTED_WRITE(FLAGS_tracing_level) = 1;
   auto conn = ASSERT_RESULT(Connect());
 
   ASSERT_OK(conn.Execute("CREATE TABLE t (key INT PRIMARY KEY, value TEXT, value2 TEXT)"));
@@ -462,10 +482,22 @@ TEST_F(PgMiniTest, Tracing) {
 
   LOG(INFO) << "Doing Insert";
   ASSERT_OK(conn.Execute("INSERT INTO t (key, value, value2) VALUES (1, 'hello', 'world')"));
+  SleepFor(1s);
+  last_logged_trace_size = trace_log_sink.last_logged_bytes();
+  LOG(INFO) << "Logged " << last_logged_trace_size << " bytes";
+  // 2601 is size of the current trace for insert.
+  // being a little conservative for changes in ports/ip addr etc.
+  ASSERT_GE(last_logged_trace_size, 2400);
   LOG(INFO) << "Done Insert";
 
   LOG(INFO) << "Doing Select";
   auto value = ASSERT_RESULT(conn.FetchValue<std::string>("SELECT value FROM t WHERE key = 1"));
+  SleepFor(1s);
+  last_logged_trace_size = trace_log_sink.last_logged_bytes();
+  LOG(INFO) << "Logged " << last_logged_trace_size << " bytes";
+  // 1884 is size of the current trace for select.
+  // being a little conservative for changes in ports/ip addr etc.
+  ASSERT_GE(last_logged_trace_size, 1600);
   ASSERT_EQ(value, "hello");
   LOG(INFO) << "Done Select";
 
@@ -475,7 +507,15 @@ TEST_F(PgMiniTest, Tracing) {
   ASSERT_OK(conn.Execute("INSERT INTO t (key, value, value2) VALUES (3, 'good', 'morning')"));
   value = ASSERT_RESULT(conn.FetchValue<std::string>("SELECT value FROM t WHERE key = 1"));
   ASSERT_OK(conn.Execute("ABORT"));
+  SleepFor(1s);
+  last_logged_trace_size = trace_log_sink.last_logged_bytes();
+  LOG(INFO) << "Logged " << last_logged_trace_size << " bytes";
+  // 5446 is size of the current trace for the transaction block.
+  // being a little conservative for changes in ports/ip addr etc.
+  ASSERT_GE(last_logged_trace_size, 5200);
   LOG(INFO) << "Done block transaction";
+
+  google::RemoveLogSink(&trace_log_sink);
   ValidateAbortedTxnMetric();
 }
 
@@ -1907,6 +1947,36 @@ TEST_F_EX(
   SleepFor(MonoDelta::FromMilliseconds(2 * FLAGS_heartbeat_interval_ms));
   // Check that connection can handle query (i.e. the catalog cache was updated without an issue)
   ASSERT_OK(aux_conn.Fetch("SELECT 1"));
+}
+
+int64_t PgMiniTest::GetBloomFilterCheckedMetric() {
+  auto peers = ListTabletPeers(cluster_.get(), ListPeersFilter::kAll);
+  auto bloom_filter_checked = 0;
+  for (auto &peer : peers) {
+    const auto tablet = peer->shared_tablet();
+    if (tablet) {
+      bloom_filter_checked += tablet->regulardb_statistics()
+        ->getTickerCount(rocksdb::BLOOM_FILTER_CHECKED);
+    }
+  }
+  return bloom_filter_checked;
+}
+
+TEST_F(PgMiniTest, BloomFilterBackwardScanTest) {
+  auto conn = ASSERT_RESULT(Connect());
+  ASSERT_OK(conn.Execute("CREATE TABLE t (h int, r int, primary key(h, r))"));
+  ASSERT_OK(conn.Execute("INSERT INTO t SELECT i / 10, i % 10"
+                         "FROM generate_series(1, 500) i"));
+
+  FlushAndCompactTablets();
+
+  auto before_blooms_checked = GetBloomFilterCheckedMetric();
+
+  ASSERT_OK(
+      conn.Fetch("SELECT * FROM t WHERE h = 2 AND r > 2 ORDER BY r DESC;"));
+
+  auto after_blooms_checked = GetBloomFilterCheckedMetric();
+  ASSERT_EQ(after_blooms_checked, before_blooms_checked + 1);
 }
 
 } // namespace yb::pgwrapper

@@ -8,6 +8,9 @@ import { YBPanelItem } from '../../panels';
 import { ConfigDetails } from './ConfigDetails';
 import { AssociatedUniverse } from '../../common/associatedUniverse/AssociatedUniverse';
 import { DeleteKMSConfig } from './DeleteKMSConfig.tsx';
+import { RbacValidator } from '../../../redesign/features/rbac/common/RbacValidator';
+import { UserPermissionMap } from '../../../redesign/features/rbac/UserPermPathMapping';
+import { isRbacEnabled } from '../../../redesign/features/rbac/common/RbacUtils';
 
 export class ListKeyManagementConfigurations extends Component {
   state = {
@@ -26,27 +29,53 @@ export class ListKeyManagementConfigurations extends Component {
           onClick={() => {
             this.setState({ configDetail: row });
           }}
+          data-testid="EAR-Details"
         >
           <i className="fa fa-info-circle"></i> Details
         </MenuItem>
-        {isAdmin && (
-          <MenuItem onClick={() => onEdit(row)}>
-            <i className="fa fa-pencil"></i> Edit Configuration
-          </MenuItem>
+        {(isAdmin || isRbacEnabled()) && (
+          <RbacValidator
+            accessRequiredOn={{
+              onResource: 'CUSTOMER_ID',
+              ...UserPermissionMap.editEncryptionAtRest
+            }}
+            isControl
+            overrideStyle={{ display: 'block' }}
+          >
+            <MenuItem
+              onClick={() => {
+                onEdit(row);
+              }}
+              data-testid="EAR-EditConfiguration"
+            >
+              <i className="fa fa-pencil"></i> Edit Configuration
+            </MenuItem>
+          </RbacValidator>
         )}
-        <MenuItem
-          title={'Delete provider'}
-          disabled={inUse}
-          onClick={() => {
-            !inUse && this.setState({ deleteConfig: row });
+        <RbacValidator
+          accessRequiredOn={{
+            onResource: 'CUSTOMER_ID',
+            ...UserPermissionMap.deleteEncryptionAtRest
           }}
+          isControl
+          overrideStyle={{ display: 'block' }}
         >
-          <i className="fa fa-trash"></i> Delete Configuration
-        </MenuItem>
+          <MenuItem
+            title={'Delete provider'}
+            disabled={inUse}
+            onClick={() => {
+              !inUse && this.setState({ deleteConfig: row });
+            }}
+            data-testid="EAR-DeleteConfiguration"
+          >
+            <i className="fa fa-trash"></i> Delete Configuration
+          </MenuItem>
+        </RbacValidator>
         <MenuItem
           onClick={() => {
             this.setState({ associatedUniverses: [...universeDetails], isVisibleModal: true });
           }}
+          data-testid="EAR-ShowUniverses"
         >
           <i className="fa fa-eye"></i> Show Universes
         </MenuItem>
@@ -104,9 +133,17 @@ export class ListKeyManagementConfigurations extends Component {
               <h2 className="table-container-title pull-left">List Configurations</h2>
               <FlexContainer className="pull-right">
                 <FlexShrink>
-                  <Button bsClass="btn btn-orange btn-config" onClick={onCreate}>
-                    Create New Config
-                  </Button>
+                  <RbacValidator
+                    accessRequiredOn={{
+                      onResource: 'CUSTOMER_ID',
+                      ...UserPermissionMap.createEncryptionAtRest
+                    }}
+                    isControl
+                  >
+                    <Button bsClass="btn btn-orange btn-config" onClick={onCreate}>
+                      Create New Config
+                    </Button>
+                  </RbacValidator>
                 </FlexShrink>
               </FlexContainer>
             </Fragment>

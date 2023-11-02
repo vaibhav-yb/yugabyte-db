@@ -17,6 +17,7 @@
 #include <utility>
 #include <chrono>
 #include <boost/assign.hpp>
+#include "yb/cdc/xrepl_stream_metadata.h"
 #include "yb/integration-tests/cluster_itest_util.h"
 #include "yb/master/master_cluster.proxy.h"
 #include "yb/util/flags.h"
@@ -96,11 +97,10 @@ DECLARE_double(TEST_respond_write_failed_probability);
 DECLARE_bool(TEST_xcluster_write_hybrid_time);
 DECLARE_uint64(TEST_yb_inbound_big_calls_parse_delay_ms);
 DECLARE_bool(allow_insecure_connections);
-DECLARE_bool(allow_ycql_transactional_xcluster);
 DECLARE_int32(async_replication_idle_delay_ms);
 DECLARE_uint32(async_replication_max_idle_wait);
 DECLARE_int32(async_replication_polling_delay_ms);
-DECLARE_int32(cdc_wal_retention_time_secs);
+DECLARE_uint32(cdc_wal_retention_time_secs);
 DECLARE_string(certs_dir);
 DECLARE_string(certs_for_cdc_dir);
 DECLARE_bool(check_bootstrap_required);
@@ -227,14 +227,7 @@ class XClusterTestNoParam : public XClusterTestBase {
       return Status::OK();
     }));
 
-    if (!producer_tables_.empty()) {
-      producer_table_ = producer_tables_.front();
-    }
-    if (!consumer_tables_.empty()) {
-      consumer_table_ = consumer_tables_.front();
-    }
-
-    return WaitForLoadBalancersToStabilize();
+    return PostSetUp();
   }
 
   virtual XClusterTestParams GetTestParam() {
@@ -1360,25 +1353,11 @@ TEST_P(XClusterTest, BootstrapAndSetupLargeTableCount) {
       {
         auto start_time = CoarseMonoClock::Now();
 
-        auto master_proxy = std::make_shared<master::MasterReplicationProxy>(
-            &producer_client()->proxy_cache(),
-            ASSERT_RESULT(producer_cluster()->GetLeaderMiniMaster())->bound_rpc_addr());
-
-        master::IsBootstrapRequiredRequestPB req;
-        master::IsBootstrapRequiredResponsePB resp;
+        std::vector<TableId> table_ids;
         for (const auto& producer_table : producer_tables) {
-          req.add_table_ids(producer_table->id());
+          table_ids.emplace_back(producer_table->id());
         }
-        rpc::RpcController rpc;
-        rpc.set_timeout(MonoDelta::FromSeconds(kRpcTimeout));
-
-        ASSERT_OK(master_proxy->IsBootstrapRequired(req, &resp, &rpc));
-        SCOPED_TRACE(resp.DebugString());
-        ASSERT_FALSE(resp.has_error());
-        ASSERT_EQ(resp.results_size(), producer_tables.size());
-        for (const auto& result : resp.results()) {
-          ASSERT_TRUE(result.has_bootstrap_required() && !result.bootstrap_required());
-        }
+        ASSERT_FALSE(ASSERT_RESULT(producer_client()->IsBootstrapRequired(table_ids)));
 
         is_bootstrap_required_latency[a] = CoarseMonoClock::Now() - start_time;
         LOG(INFO) << "IsBootstrapRequired [" << a
@@ -3224,16 +3203,12 @@ class XClusterTestWaitForReplicationDrain : public XClusterTest {
     XClusterTest::TearDown();
   }
 
-  std::shared_ptr<std::promise<Status>> WaitForReplicationDrainAsync(
-      const std::shared_ptr<master::MasterReplicationProxy>& master_proxy,
-      const master::WaitForReplicationDrainRequestPB& req, int expected_num_nondrained,
-      int timeout_secs = kRpcTimeout) {
+  std::shared_ptr<std::promise<Status>> WaitForReplicationDrainAsync() {
     // Return a promise that will be set to a status indicating whether the API completes
     // with the expected response.
     auto promise = std::make_shared<std::promise<Status>>();
-    std::thread async_task([this, expected_num_nondrained, timeout_secs, promise, &master_proxy,
-                            &req]() {
-      auto s = WaitForReplicationDrain(master_proxy, req, expected_num_nondrained, timeout_secs);
+    std::thread async_task([this, promise]() {
+      auto s = WaitForReplicationDrain();
       promise->set_value(s);
     });
     async_task.detach();
@@ -3251,22 +3226,16 @@ TEST_P(XClusterTestWaitForReplicationDrain, TestBlockGetChanges) {
   constexpr uint32_t kNumTables = 3;
   constexpr uint32_t kNumTablets = 3;
   constexpr int kRpcTimeoutShort = 30;
-  master::WaitForReplicationDrainRequestPB req;
 
   SetUpTablesAndReplication(kNumTables, kNumTablets);
-  PopulateWaitForReplicationDrainRequest(producer_tables_, &req);
-  auto master_proxy = std::make_shared<master::MasterReplicationProxy>(
-      &producer_client()->proxy_cache(),
-      ASSERT_RESULT(producer_cluster()->GetLeaderMiniMaster())->bound_rpc_addr());
-
   // 1. Replication is caught-up initially.
-  ASSERT_OK(WaitForReplicationDrain(master_proxy, req, 0));
+  ASSERT_OK(WaitForReplicationDrain());
 
   // 2. Replication is caught-up when some data is written.
   for (uint32_t i = 0; i < producer_tables_.size(); i++) {
     ASSERT_OK(InsertRowsAndVerify(0, 50 * (i + 1), producer_tables_[i]));
   }
-  ASSERT_OK(WaitForReplicationDrain(master_proxy, req, 0));
+  ASSERT_OK(WaitForReplicationDrain());
 
   // 3. Replication is not caught-up when GetChanges are blocked while producer
   // keeps taking writes.
@@ -3274,65 +3243,57 @@ TEST_P(XClusterTestWaitForReplicationDrain, TestBlockGetChanges) {
   for (uint32_t i = 0; i < producer_tables_.size(); i++) {
     ASSERT_OK(InsertRowsInProducer(50 * (i + 1), 100 * (i + 1), producer_tables_[i]));
   }
-  ASSERT_OK(WaitForReplicationDrain(master_proxy, req, kNumTables * kNumTablets, kRpcTimeoutShort));
+  ASSERT_OK(WaitForReplicationDrain(
+      /* expected_num_nondrained */ kNumTables * kNumTablets, kRpcTimeoutShort));
 
   // 4. Replication is caught-up when GetChanges are unblocked.
   ANNOTATE_UNPROTECTED_WRITE(FLAGS_TEST_block_get_changes) = false;
-  ASSERT_OK(WaitForReplicationDrain(master_proxy, req, 0));
+  ASSERT_OK(WaitForReplicationDrain());
 }
 
 TEST_P(XClusterTestWaitForReplicationDrain, TestWithTargetTime) {
   constexpr uint32_t kNumTables = 3;
   constexpr uint32_t kNumTablets = 3;
-  master::WaitForReplicationDrainRequestPB req;
 
   SetUpTablesAndReplication(kNumTables, kNumTablets);
-  PopulateWaitForReplicationDrainRequest(producer_tables_, &req);
-  auto master_proxy = std::make_shared<master::MasterReplicationProxy>(
-      &producer_client()->proxy_cache(),
-      ASSERT_RESULT(producer_cluster()->GetLeaderMiniMaster())->bound_rpc_addr());
 
   // 1. Write some data and verify that replication is caught-up.
   auto past_checkpoint = GetCurrentTimeMicros();
   for (uint32_t i = 0; i < producer_tables_.size(); i++) {
     ASSERT_OK(InsertRowsInProducer(0, 50 * (i + 1), producer_tables_[i]));
   }
-  ASSERT_OK(WaitForReplicationDrain(master_proxy, req, 0));
+  ASSERT_OK(WaitForReplicationDrain());
 
   // 2. Verify that replication is caught-up to a checkpoint in the past.
-  req.set_target_time(past_checkpoint);
-  ASSERT_OK(WaitForReplicationDrain(master_proxy, req, 0));
+  ASSERT_OK(WaitForReplicationDrain(
+      /* expected_num_nondrained */ 0, /* timeout_secs */ kRpcTimeout,
+      /* target_time */ past_checkpoint));
 
   // 3. Set a checkpoint in the future. Verify that API waits until passing this
   // checkpoint before responding.
   int timeout_secs = kRpcTimeout;
   auto time_to_wait = MonoDelta::FromSeconds(timeout_secs / 2.0);
   auto future_checkpoint = GetCurrentTimeMicros() + time_to_wait.ToMicroseconds();
-  req.set_target_time(future_checkpoint);
-  ASSERT_OK(WaitForReplicationDrain(master_proxy, req, 0));
+  ASSERT_OK(WaitForReplicationDrain(
+      /* expected_num_nondrained */ 0, /* timeout_secs */ kRpcTimeout,
+      /* target_time */ future_checkpoint));
   ASSERT_GT(GetCurrentTimeMicros(), future_checkpoint);
 }
 
 TEST_P(XClusterTestWaitForReplicationDrain, TestProducerChange) {
   constexpr uint32_t kNumTables = 3;
   constexpr uint32_t kNumTablets = 3;
-  master::WaitForReplicationDrainRequestPB req;
 
   SetUpTablesAndReplication(kNumTables, kNumTablets);
-  PopulateWaitForReplicationDrainRequest(producer_tables_, &req);
-  auto master_proxy = std::make_shared<master::MasterReplicationProxy>(
-      &producer_client()->proxy_cache(),
-      ASSERT_RESULT(producer_cluster()->GetLeaderMiniMaster())->bound_rpc_addr());
-
   // 1. Write some data and verify that replication is caught-up.
   for (uint32_t i = 0; i < producer_tables_.size(); i++) {
     ASSERT_OK(InsertRowsInProducer(0, 50 * (i + 1), producer_tables_[i]));
   }
-  ASSERT_OK(WaitForReplicationDrain(master_proxy, req, 0));
+  ASSERT_OK(WaitForReplicationDrain());
 
   // 2. Verify that producer shutdown does not impact the API.
   ANNOTATE_UNPROTECTED_WRITE(FLAGS_TEST_hang_wait_replication_drain) = true;
-  auto drain_api_promise = WaitForReplicationDrainAsync(master_proxy, req, 0);
+  auto drain_api_promise = WaitForReplicationDrainAsync();
   auto drain_api_future = drain_api_promise->get_future();
   producer_cluster()->mini_tablet_server(0)->Shutdown();
   ANNOTATE_UNPROTECTED_WRITE(FLAGS_TEST_hang_wait_replication_drain) = false;
@@ -3343,7 +3304,7 @@ TEST_P(XClusterTestWaitForReplicationDrain, TestProducerChange) {
   // 3. Verify that producer rebalancing does not impact the API.
   auto num_tservers = narrow_cast<int>(producer_cluster()->num_tablet_servers());
   ANNOTATE_UNPROTECTED_WRITE(FLAGS_TEST_hang_wait_replication_drain) = true;
-  drain_api_promise = WaitForReplicationDrainAsync(master_proxy, req, 0);
+  drain_api_promise = WaitForReplicationDrainAsync();
   drain_api_future = drain_api_promise->get_future();
   ASSERT_OK(producer_cluster()->AddTabletServer());
   ASSERT_OK(producer_cluster()->WaitForTabletServerCount(num_tservers + 1));
@@ -3839,5 +3800,135 @@ TEST_F_EX(XClusterTest, RandomFailuresAfterApply, XClusterTestTransactionalOnly)
   ASSERT_OK(txn->CommitFuture().get());
   ASSERT_OK(VerifyNumRecordsOnProducer(batch_count * kBatchSize));
   ASSERT_OK(VerifyRowsMatch());
+}
+
+TEST_F_EX(XClusterTest, IsBootstrapRequired, XClusterTestNoParam) {
+  // This test makes sure IsBootstrapRequired returns false when tables are empty and true when
+  // table has data. Adding and removing an empty table to replication should also not require us to
+  // bootstrap.
+
+  const uint32_t kReplicationFactor = 3, kTabletCount = 1, kNumMasters = 1, kNumTservers = 3;
+  ASSERT_OK(SetUpWithParams(
+      {kTabletCount}, {kTabletCount}, kReplicationFactor, kNumMasters, kNumTservers));
+  ASSERT_OK(WaitForLoadBalancersToStabilize());
+  ANNOTATE_UNPROTECTED_WRITE(FLAGS_enable_load_balancing) = false;
+
+  // Empty table should not require bootstrap.
+  ASSERT_FALSE(ASSERT_RESULT(producer_client()->IsBootstrapRequired({producer_table_->id()})));
+
+  // Leader failover should not require bootstrap.
+  const auto kTimeout = 10s * kTimeMultiplier;
+  auto tablet_ids = ListTabletIdsForTable(producer_cluster(), producer_table_->id());
+  ASSERT_EQ(tablet_ids.size(), 1);
+  const auto& tablet_id = *tablet_ids.begin();
+
+  auto leader_master = ASSERT_RESULT(producer_cluster()->GetLeaderMiniMaster());
+  master::MasterClusterProxy master_proxy(
+      &producer_client()->proxy_cache(), leader_master->bound_rpc_addr());
+  auto ts_map =
+      ASSERT_RESULT(itest::CreateTabletServerMap(master_proxy, &producer_client()->proxy_cache()));
+
+  itest::TServerDetails* leader_ts = nullptr;
+  ASSERT_OK(FindTabletLeader(ts_map, tablet_id, kTimeout, &leader_ts));
+
+  ANNOTATE_UNPROTECTED_WRITE(FLAGS_TEST_xcluster_disable_poller_term_check) = true;
+  ASSERT_OK(itest::LeaderStepDown(leader_ts, tablet_id, nullptr, kTimeout));
+  itest::TServerDetails* new_leader_ts = nullptr;
+  ASSERT_OK(FindTabletLeader(ts_map, tablet_id, kTimeout, &new_leader_ts));
+
+  ASSERT_FALSE(ASSERT_RESULT(producer_client()->IsBootstrapRequired({producer_table_->id()})));
+
+  // Adding table to replication should not make it require bootstrap.
+  ASSERT_OK(SetupReplication());
+  ASSERT_FALSE(ASSERT_RESULT(producer_client()->IsBootstrapRequired({producer_table_->id()})));
+
+  // Table with data should require a bootstrap.
+  ASSERT_OK(InsertRowsInProducer(0, 100));
+  ASSERT_TRUE(ASSERT_RESULT(producer_client()->IsBootstrapRequired({producer_table_->id()})));
+
+  // After we delete all rows, we should not require a bootstrap.
+  ASSERT_OK(DeleteRows(0, 100));
+  ASSERT_FALSE(ASSERT_RESULT(producer_client()->IsBootstrapRequired({producer_table_->id()})));
+
+  // Delete and recreate replication and make sure bootstrap is not required.
+  ASSERT_OK(DeleteUniverseReplication());
+  ASSERT_FALSE(ASSERT_RESULT(producer_client()->IsBootstrapRequired({producer_table_->id()})));
+  ASSERT_OK(SetupReplication());
+  ASSERT_FALSE(ASSERT_RESULT(producer_client()->IsBootstrapRequired({producer_table_->id()})));
+
+  // Table with data should require a bootstrap.
+  ASSERT_OK(InsertRowsInProducer(0, 1));
+  ASSERT_TRUE(ASSERT_RESULT(producer_client()->IsBootstrapRequired({producer_table_->id()})));
+}
+
+TEST_F_EX(XClusterTest, TestStats, XClusterTestNoParam) {
+  const uint32_t kReplicationFactor = 1, kTabletCount = 1, kNumMasters = 1, kNumTservers = 1;
+  ASSERT_OK(SetUpWithParams(
+      {kTabletCount}, {kTabletCount}, kReplicationFactor, kNumMasters, kNumTservers));
+  ASSERT_OK(SetupReplication());
+  ASSERT_OK(CorrectlyPollingAllTablets(kTabletCount));
+
+  auto source_cdc_service = producer_cluster()->mini_tablet_server(0)->server()->GetCDCService();
+  auto* target_xc_consumer =
+      consumer_cluster()->mini_tablet_server(0)->server()->GetXClusterConsumer();
+
+  ASSERT_OK(LoggedWaitFor(
+      [&source_cdc_service]() {
+        auto stats = source_cdc_service->GetAllStreamTabletStats();
+        return !stats.empty() && stats[0].avg_poll_delay_ms > 0;
+      },
+      MonoDelta::FromSeconds(kRpcTimeout), "Waiting for initial source Stats to populate"));
+  ASSERT_OK(LoggedWaitFor(
+      [&target_xc_consumer]() {
+        auto stats = target_xc_consumer->GetPollerStats();
+        return !stats.empty() && stats[0].avg_poll_delay_ms > 0;
+      },
+      MonoDelta::FromSeconds(kRpcTimeout), "Waiting for initial target Stats to populate"));
+
+  // Make sure stats on source and target match.
+  auto source_stats = source_cdc_service->GetAllStreamTabletStats();
+  ASSERT_EQ(source_stats.size(), 1);
+  auto initial_index = source_stats[0].sent_index;
+  auto initial_records_sent = source_stats[0].records_sent;
+  auto initial_time = source_stats[0].last_poll_time;
+  ASSERT_GT(source_stats[0].avg_poll_delay_ms, 0);
+  ASSERT_TRUE(source_stats[0].last_poll_time);
+  ASSERT_EQ(source_stats[0].sent_index, source_stats[0].latest_index);
+  ASSERT_TRUE(source_stats[0].status.ok());
+
+  auto target_stats = target_xc_consumer->GetPollerStats();
+  ASSERT_EQ(target_stats.size(), 1);
+  ASSERT_GT(target_stats[0].avg_poll_delay_ms, 0);
+  ASSERT_TRUE(target_stats[0].status.ok());
+
+  ASSERT_EQ(source_stats[0].records_sent, target_stats[0].records_received);
+  ASSERT_EQ(source_stats[0].mbs_sent, target_stats[0].mbs_received);
+  ASSERT_EQ(source_stats[0].sent_index, target_stats[0].received_index);
+
+  ASSERT_OK(InsertRowsInProducer(0, 100));
+  ASSERT_OK(VerifyRowsMatch());
+
+  // Make sure stats show data was sent and received.
+  source_stats = source_cdc_service->GetAllStreamTabletStats();
+  ASSERT_EQ(source_stats.size(), 1);
+  ASSERT_GT(source_stats[0].avg_poll_delay_ms, 0);
+  ASSERT_GT(source_stats[0].records_sent, 0);
+  ASSERT_GT(source_stats[0].mbs_sent, 0);
+  ASSERT_GT(source_stats[0].sent_index, initial_index);
+  ASSERT_GT(source_stats[0].records_sent, initial_records_sent);
+  ASSERT_GT(source_stats[0].last_poll_time, initial_time);
+  ASSERT_EQ(source_stats[0].sent_index, source_stats[0].latest_index);
+  ASSERT_TRUE(source_stats[0].status.ok());
+
+  target_stats = target_xc_consumer->GetPollerStats();
+  ASSERT_EQ(target_stats.size(), 1);
+  ASSERT_GT(target_stats[0].records_received, 0);
+  ASSERT_GT(target_stats[0].mbs_received, 0);
+  ASSERT_GT(target_stats[0].avg_poll_delay_ms, 0);
+  ASSERT_TRUE(target_stats[0].status.ok());
+
+  ASSERT_EQ(source_stats[0].records_sent, target_stats[0].records_received);
+  ASSERT_EQ(source_stats[0].mbs_sent, target_stats[0].mbs_received);
+  ASSERT_EQ(source_stats[0].sent_index, target_stats[0].received_index);
 }
 }  // namespace yb

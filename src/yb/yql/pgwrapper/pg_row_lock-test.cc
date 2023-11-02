@@ -15,13 +15,13 @@
 
 #include "yb/util/logging.h"
 #include "yb/util/scope_exit.h"
+#include "yb/util/to_stream.h"
 
 #include "yb/yql/pggate/pggate_flags.h"
 #include "yb/yql/pgwrapper/pg_mini_test_base.h"
 #include "yb/yql/pgwrapper/pg_test_utils.h"
 
 DECLARE_bool(enable_wait_queues);
-DECLARE_bool(enable_deadlock_detection);
 
 using namespace std::literals;
 
@@ -45,7 +45,6 @@ class PgRowLockTest : public PgMiniTestBase {
     // This test depends on fail-on-conflict concurrency control to perform its validation.
     // TODO(wait-queues): https://github.com/yugabyte/yugabyte-db/issues/17871
     ANNOTATE_UNPROTECTED_WRITE(FLAGS_enable_wait_queues) = false;
-    ANNOTATE_UNPROTECTED_WRITE(FLAGS_enable_deadlock_detection) = false;
     PgMiniTestBase::SetUp();
   }
 };
@@ -291,9 +290,10 @@ TEST_F_EX(PgRowLockTest, SystemTableTxnTest, PgMiniTestNoTxnRetry) {
     }
   }
   LOG(INFO) << "Test stats: "
-            << EXPR_VALUE_FOR_LOG(commit1_fail_count) << ", "
-            << EXPR_VALUE_FOR_LOG(insert2_fail_count) << ", "
-            << EXPR_VALUE_FOR_LOG(commit2_fail_count);
+            << YB_EXPR_TO_STREAM_COMMA_SEPARATED(
+                commit1_fail_count,
+                insert2_fail_count,
+                commit2_fail_count);
   ASSERT_GE(commit1_fail_count, iterations / 4);
   ASSERT_GE(insert2_fail_count, iterations / 4);
   ASSERT_EQ(commit2_fail_count, 0);

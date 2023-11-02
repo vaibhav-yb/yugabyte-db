@@ -1,3 +1,9 @@
+<!--
++++
+private = true
++++
+-->
+
 Expect an output similar to the following:
 
 ```output
@@ -26,9 +32,9 @@ Execute the following command to check the cluster status at any time:
 
 ### Connect to the database
 
-Using the YugabyteDB SQL shell, [ysqlsh](../../admin/ysqlsh/), you can connect to your cluster and interact with it using distributed SQL. ysqlsh is installed with YugabyteDB and is located in the bin directory of the YugabyteDB home directory.
+Using the YugabyteDB SQL shell, [ysqlsh](/preview/admin/ysqlsh/), you can connect to your cluster and interact with it using distributed SQL. ysqlsh is installed with YugabyteDB and is located in the bin directory of the YugabyteDB home directory.
 
-(If you have previously installed YugabyteDB version 2.8 or later and created a cluster on the same computer, you may need to [upgrade the YSQL system catalog](../../manage/upgrade-deployment/#upgrade-the-ysql-system-catalog) to run the latest features.)
+(If you have previously installed YugabyteDB version 2.8 or later and created a cluster on the same computer, you may need to [upgrade the YSQL system catalog](/preview/manage/upgrade-deployment/#upgrade-the-ysql-system-catalog) to run the latest features.)
 
 To open the YSQL shell, run `ysqlsh`:
 
@@ -37,13 +43,13 @@ To open the YSQL shell, run `ysqlsh`:
 ```
 
 ```output
-ysqlsh (11.2-YB-2.1.0.0-b0)
+ysqlsh (11.2-YB-2.19.3.0-b0)
 Type "help" for help.
 
 yugabyte=#
 ```
 
-To load sample data and explore an example using ysqlsh, follow the instructions in [Install the Retail Analytics sample database](../sample-data/retail-analytics/#install-the-retail-analytics-sample-database).
+To load sample data and explore an example using ysqlsh, follow the instructions in [Install the Retail Analytics sample database](/preview/sample-data/retail-analytics/#install-the-retail-analytics-sample-database).
 
 ### Monitor your cluster
 

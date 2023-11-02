@@ -29,6 +29,7 @@
 #include <assert.h>
 #include <inttypes.h>
 #include <sys/stat.h>
+#include <sys/time.h>
 #include <sys/types.h>
 #include <unistd.h>
 
@@ -127,17 +128,23 @@ YbGetLastKnownCatalogCacheVersion()
 		shared_catalog_version : yb_last_known_catalog_cache_version;
 }
 
-uint64_t
+YBCPgLastKnownCatalogVersionInfo
 YbGetCatalogCacheVersionForTablePrefetching()
 {
 	// TODO: In future YBGetLastKnownCatalogCacheVersion must be used instead of
 	//       YbGetMasterCatalogVersion to reduce numer of RPCs to a master.
 	//       But this requires some additional changes. This optimization will
 	//       be done separately.
-	if (!*YBCGetGFlags()->ysql_enable_read_request_caching)
-		return YB_CATCACHE_VERSION_UNINITIALIZED;
-	YBCPgResetCatalogReadTime();
-	return YbGetMasterCatalogVersion();
+	uint64_t version = YB_CATCACHE_VERSION_UNINITIALIZED;
+	bool is_db_catalog_version_mode = YBIsDBCatalogVersionMode();
+	if (*YBCGetGFlags()->ysql_enable_read_request_caching)
+	{
+		YBCPgResetCatalogReadTime();
+		version = YbGetMasterCatalogVersion();
+	}
+	return (YBCPgLastKnownCatalogVersionInfo){
+		.version = version,
+		.is_db_catalog_version_mode = is_db_catalog_version_mode};
 }
 
 void
@@ -470,12 +477,12 @@ YBSavepointsEnabled()
 /*
  * Return true if we are in per-database catalog version mode. In order to
  * use per-database catalog version mode, two conditions must be met:
- *   * --FLAGS_TEST_enable_db_catalog_version_mode=true
+ *   * --FLAGS_ysql_enable_db_catalog_version_mode=true
  *   * the table pg_yb_catalog_version has one row per database.
  * This function takes care of the YSQL upgrade from global catalog version
  * mode to per-database catalog version mode when the default value of
- * --FLAGS_TEST_enable_db_catalog_version_mode is changed to true. In this
- * upgrade procedure --FLAGS_TEST_enable_db_catalog_version_mode is set to
+ * --FLAGS_ysql_enable_db_catalog_version_mode is changed to true. In this
+ * upgrade procedure --FLAGS_ysql_enable_db_catalog_version_mode is set to
  * true before the table pg_yb_catalog_version is updated to have one row per
  * database.
  * This function does not consider going from per-database catalog version
@@ -493,7 +500,7 @@ YBIsDBCatalogVersionMode()
 	if (cached_gflag == -1)
 	{
 		cached_gflag = YBCIsEnvVarTrueWithDefault(
-			"FLAGS_TEST_enable_db_catalog_version_mode", false);
+			"FLAGS_ysql_enable_db_catalog_version_mode", false);
 	}
 
 	/*
@@ -515,7 +522,7 @@ YBIsDBCatalogVersionMode()
 	}
 
 	/*
-	 * At this point, we know that FLAGS_TEST_enable_db_catalog_version_mode is
+	 * At this point, we know that FLAGS_ysql_enable_db_catalog_version_mode is
 	 * turned on. However in case of YSQL upgrade we may not be ready to enable
 	 * per-db catalog version mode yet. Note that we only provide support where
 	 * we go from global catalog version mode to per-db catalog version mode,
@@ -525,24 +532,41 @@ YBIsDBCatalogVersionMode()
 	{
 		cached_is_db_catalog_version_mode = true;
 		/*
-		 * Switching to per-db mode and set catalog version to 1, which is the
-		 * initial per-database catalog version value after the table
-		 * pg_yb_catalog_version is upgraded to have one row per database.
-		 * Note that we assume there are no DDL statements running during
-		 * YSQL upgrade and in particular we do not support concurrent DDL
-		 * statements when switching from global catalog version mode to
-		 * per-database catalog version mode. As of 2023-08-07, this is not
-		 * enforced and therefore if a concurrent DDL statement is executed:
-		 * (1) if this DDL statement also increments a table schema, we still
-		 * have the table schema version mismatch check as a safety net to
-		 * reject stale read/write RPCs;
-		 * (2) if this DDL statement only increments the catalog version,
-		 * then stale read/write RPCs are possible which can lead to wrong
-		 * results;
+		 * If MyDatabaseId is not resolved, the caller is going to set up the
+		 * catalog version in per-database catalog version mode. There is
+		 * no need to set it up here.
 		 */
-		yb_last_known_catalog_cache_version = 1;
-		YbUpdateCatalogCacheVersion(1);
-		elog(DEBUG3, "switching to per-db mode");
+		if (OidIsValid(MyDatabaseId))
+		{
+			/*
+			 * MyDatabaseId is already resolved so the caller may have already
+			 * set up the catalog version in global catalog version mode. The
+			 * upgrade of table pg_yb_catalog_version to per-database catalog
+			 * version mode does not change the catalog version of database
+			 * template1 but will set the initial per-database catalog version
+			 * value to 1 for all other databases. Set catalog version to 1
+			 * except for database template1 to avoid unnecessary catalog cache
+			 * refresh.
+			 * Note that we assume there are no DDL statements running during
+			 * YSQL upgrade and in particular we do not support concurrent DDL
+			 * statements when switching from global catalog version mode to
+			 * per-database catalog version mode. As of 2023-08-07, this is not
+			 * enforced and therefore if a concurrent DDL statement is executed:
+			 * (1) if this DDL statement also increments a table schema, we still
+			 * have the table schema version mismatch check as a safety net to
+			 * reject stale read/write RPCs;
+			 * (2) if this DDL statement only increments the catalog version,
+			 * then stale read/write RPCs are possible which can lead to wrong
+			 * results;
+			 */
+			elog(INFO, "change to per-db mode");
+			if (MyDatabaseId != TemplateDbOid)
+			{
+				yb_last_known_catalog_cache_version = 1;
+				YbUpdateCatalogCacheVersion(1);
+			}
+		}
+
 		/*
 		 * YB does write operation buffering to reduce the number of RPCs.
 		 * That is, PG backend can buffer several write operations and send
@@ -566,7 +590,7 @@ static bool
 YBCanEnableDBCatalogVersionMode()
 {
 	/*
-	 * Even when FLAGS_TEST_enable_db_catalog_version_mode is turned on we
+	 * Even when FLAGS_ysql_enable_db_catalog_version_mode is turned on we
 	 * cannot simply enable per-database catalog mode if the table
 	 * pg_yb_catalog_version does not have one row for each database.
 	 * Consider YSQL upgrade, it happens after cluster software upgrade and
@@ -601,6 +625,15 @@ YBCanEnableDBCatalogVersionMode()
 	 * to have one row per database.
 	 */
 	return (YbGetNumberOfDatabases() > 1);
+}
+
+/*
+ * Used to determine whether we should preload certain catalog tables.
+ */
+bool YbNeedAdditionalCatalogTables() 
+{
+	return *YBCGetGFlags()->ysql_catalog_preload_additional_tables ||
+			IS_NON_EMPTY_STR_FLAG(YBCGetGFlags()->ysql_catalog_preload_additional_table_list);
 }
 
 void
@@ -714,6 +747,22 @@ HandleYBStatusIgnoreNotFound(YBCStatus status, bool *not_found)
 		return;
 	}
 	*not_found = false;
+	HandleYBStatus(status);
+}
+
+extern void HandleYBStatusIgnoreAlreadyPresent(YBCStatus status,
+											   bool *already_present)
+{
+	if (!status)
+		return;
+
+	if (YBCStatusIsAlreadyPresent(status))
+	{
+		*already_present = true;
+		YBCFreeStatus(status);
+		return;
+	}
+	*already_present = false;
 	HandleYBStatus(status);
 }
 
@@ -3527,6 +3576,43 @@ void assign_yb_xcluster_consistency_level(const char* newval, void* extra) {
 	yb_xcluster_consistency_level = *((int*)extra);
 }
 
+bool
+check_yb_read_time(char **newval, void **extra, GucSource source)
+{
+	/* Read time should be convertable to unsigned long long */
+	unsigned long long read_time_ull = strtoull(*newval, NULL, 0);
+	char read_time_string[23];
+	sprintf(read_time_string, "%llu", read_time_ull);
+	if (strcmp(*newval, read_time_string))
+	{
+		GUC_check_errdetail("Accepted value is Unix timestamp in microseconds."
+							" i.e. 1694673026673528");
+		return false;
+	}
+	/* Read time should not be set to a timestamp in the future */
+	struct timeval now_tv;
+	gettimeofday(&now_tv, NULL);
+	unsigned long long now_micro_sec = ((unsigned long long)now_tv.tv_sec * USECS_PER_SEC) + now_tv.tv_usec;
+	if(read_time_ull > now_micro_sec)
+	{
+		GUC_check_errdetail("Provided timestamp is in the future.");
+		return false;
+	}
+	return true;
+}
+
+void
+assign_yb_read_time(const char* newval, void *extra) 
+{
+	yb_read_time = strtoull(newval, NULL, 0);
+	ereport(NOTICE,
+			(errmsg("yb_read_time should be set with caution."),
+			 errdetail("No DDL operations should be performed while it is set and "
+			 		   "it should not be set to a timestamp before a DDL "
+					   "operation has been performed. It doesn't have well defined semantics"
+					   " for normal transactions and is only to be used after consultation")));
+}
+
 void YBCheckServerAccessIsAllowed() {
 	if (*YBCGetGFlags()->ysql_disable_server_file_access)
 		ereport(ERROR,
@@ -3558,8 +3644,17 @@ aggregateStats(YbInstrumentation *instr, const YBCPgExecStats *exec_stats)
 	instr->write_flushes.count += exec_stats->num_flushes;
 	instr->write_flushes.wait_time += exec_stats->flush_wait;
 
-	for (int i = 0; i < YB_ANALYZE_METRIC_COUNT; ++i) {
-		instr->storage_metrics[i] += exec_stats->storage_metrics[i];
+	for (int i = 0; i < YB_STORAGE_GAUGE_COUNT; ++i) {
+		instr->storage_gauge_metrics[i] += exec_stats->storage_gauge_metrics[i];
+	}
+	for (int i = 0; i < YB_STORAGE_COUNTER_COUNT; ++i) {
+		instr->storage_counter_metrics[i] += exec_stats->storage_counter_metrics[i];
+	}
+	for (int i = 0; i < YB_STORAGE_EVENT_COUNT; ++i) {
+		YbPgEventMetric* agg = &instr->storage_event_metrics[i];
+		const YBCPgExecEventMetric* val = &exec_stats->storage_event_metrics[i];
+		agg->sum += val->sum;
+		agg->count += val->count;
 	}
 }
 
@@ -3585,8 +3680,20 @@ calculateExecStatsDiff(const YbSessionStats *stats, YBCPgExecStats *result)
 	result->num_flushes = current->num_flushes - old->num_flushes;
 	result->flush_wait = current->flush_wait - old->flush_wait;
 
-	for (int i = 0; i < YB_ANALYZE_METRIC_COUNT; ++i) {
-		result->storage_metrics[i] = current->storage_metrics[i] - old->storage_metrics[i];
+	for (int i = 0; i < YB_STORAGE_GAUGE_COUNT; ++i) {
+		result->storage_gauge_metrics[i] =
+				current->storage_gauge_metrics[i] - old->storage_gauge_metrics[i];
+	}
+	for (int i = 0; i < YB_STORAGE_COUNTER_COUNT; ++i) {
+		result->storage_counter_metrics[i] =
+				current->storage_counter_metrics[i] - old->storage_counter_metrics[i];
+	}
+	for (int i = 0; i < YB_STORAGE_EVENT_COUNT; ++i) {
+		YBCPgExecEventMetric* result_metric = &result->storage_event_metrics[i];
+		const YBCPgExecEventMetric* current_metric = &current->storage_event_metrics[i];
+		const YBCPgExecEventMetric* old_metric = &old->storage_event_metrics[i];
+		result_metric->sum = current_metric->sum - old_metric->sum;
+		result_metric->count = current_metric->count - old_metric->count;
 	}
 }
 
@@ -3606,8 +3713,18 @@ refreshExecStats(YbSessionStats *stats, bool include_catalog_stats)
 		old->catalog = current->catalog;
 
 	if (yb_session_stats.current_state.metrics_capture) {
-		for (int i = 0; i < YB_ANALYZE_METRIC_COUNT; ++i) {
-			old->storage_metrics[i] = current->storage_metrics[i];
+		for (int i = 0; i < YB_STORAGE_GAUGE_COUNT; ++i) {
+			old->storage_gauge_metrics[i] = current->storage_gauge_metrics[i];
+		}
+		for (int i = 0; i < YB_STORAGE_COUNTER_COUNT; ++i) {
+			old->storage_counter_metrics[i] = current->storage_counter_metrics[i];
+		}
+		for (int i = 0; i < YB_STORAGE_EVENT_COUNT; ++i) {
+			YBCPgExecEventMetric* old_metric = &old->storage_event_metrics[i];
+			const YBCPgExecEventMetric* current_metric =
+					&current->storage_event_metrics[i];
+			old_metric->sum = current_metric->sum;
+			old_metric->count = current_metric->count;
 		}
 	}
 }
@@ -3723,8 +3840,10 @@ void YBSetRowLockPolicy(int *docdb_wait_policy, LockWaitPolicy pg_wait_policy)
 		 * "Fail-on-Conflict" and the reason why LockWaitError is not mapped to no-wait
 		 * semantics but to Fail-on-Conflict semantics).
 		 */
+		elog(DEBUG1, "Falling back to LockWaitError since wait-queues are not enabled");
 		*docdb_wait_policy = LockWaitError;
 	}
+	elog(DEBUG2, "docdb_wait_policy=%d pg_wait_policy=%d", *docdb_wait_policy, pg_wait_policy);
 }
 
 uint32_t YbGetNumberOfDatabases()
@@ -3756,19 +3875,24 @@ OptSplit *
 YbGetSplitOptions(Relation rel)
 {
 	OptSplit *split_options = makeNode(OptSplit);
-	split_options->split_type = NUM_TABLETS;
-	split_options->num_tablets = rel->yb_table_properties->num_tablets;
 	/*
-	 * Copy split points if we have a live range key.
-	 * (RelationGetPrimaryKeyIndex returns InvalidOid if pkey is currently
-	 * being dropped).
+	 * The split type is NUM_TABLETS when the relation has hash key columns
+	 * OR if the relation's range key is currently being dropped. Otherwise,
+	 * the split type is SPLIT_POINTS.
 	 */
-	if (rel->yb_table_properties->num_hash_key_columns == 0
-		&& rel->yb_table_properties->num_tablets > 1
-		&& !(rel->rd_rel->relkind == RELKIND_RELATION
-		&& RelationGetPrimaryKeyIndex(rel) == InvalidOid))
+	split_options->split_type =
+		rel->yb_table_properties->num_hash_key_columns > 0 ||
+		(rel->rd_rel->relkind == RELKIND_RELATION &&
+		 RelationGetPrimaryKeyIndex(rel) == InvalidOid) ? NUM_TABLETS :
+		SPLIT_POINTS;
+	split_options->num_tablets = rel->yb_table_properties->num_tablets;
+
+	/*
+	 * Copy split points for range keys with more than one tablet.
+	 */
+	if (split_options->split_type == SPLIT_POINTS
+		&& rel->yb_table_properties->num_tablets > 1)
 	{
-		split_options->split_type = SPLIT_POINTS;
 		YBCPgTableDesc yb_desc = NULL;
 		HandleYBStatus(YBCPgGetTableDesc(MyDatabaseId,
 						RelationGetRelid(rel), &yb_desc));

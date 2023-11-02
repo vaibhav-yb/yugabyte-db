@@ -73,6 +73,7 @@
 #include "yb/master/master_ddl.proxy.h"
 #include "yb/master/master_replication.proxy.h"
 #include "yb/master/master_encryption.proxy.h"
+#include "yb/master/master_test.proxy.h"
 #include "yb/master/master_defaults.h"
 #include "yb/master/master_error.h"
 #include "yb/master/master_rpc.h"
@@ -1099,8 +1100,8 @@ Status YBClient::Data::WaitForAlterTableToFinish(YBClient* client,
 }
 
 Status YBClient::Data::FlushTablesHelper(YBClient* client,
-                                                const CoarseTimePoint deadline,
-                                                const FlushTablesRequestPB& req) {
+                                         const CoarseTimePoint deadline,
+                                         const FlushTablesRequestPB& req) {
   FlushTablesResponsePB resp;
 
   RETURN_NOT_OK(SyncLeaderMasterRpc(
@@ -1376,6 +1377,9 @@ Status CreateTableInfoFromTableSchemaResp(const GetTableSchemaResponsePB& resp, 
   }
   if (resp.has_wal_retention_secs()) {
     info->wal_retention_secs = resp.wal_retention_secs();
+  }
+  if (resp.ysql_ddl_txn_verifier_state_size() > 0) {
+    info->ysql_ddl_txn_verifier_state.emplace(resp.ysql_ddl_txn_verifier_state());
   }
   SCHECK_GT(info->table_id.size(), 0U, IllegalState, "Running against a too-old master");
   info->colocated = resp.colocated();
@@ -2380,7 +2384,9 @@ void YBClient::Data::LeaderMasterDetermined(const Status& status,
           proxy_cache_.get(), host_port);
       master_replication_proxy_ = std::make_shared<master::MasterReplicationProxy>(
           proxy_cache_.get(), host_port);
-       master_encryption_proxy_ = std::make_shared<master::MasterEncryptionProxy>(
+      master_encryption_proxy_ = std::make_shared<master::MasterEncryptionProxy>(
+          proxy_cache_.get(), host_port);
+      master_test_proxy_ = std::make_shared<master::MasterTestProxy>(
           proxy_cache_.get(), host_port);
     }
 
@@ -2758,6 +2764,11 @@ shared_ptr<master::MasterReplicationProxy> YBClient::Data::master_replication_pr
 shared_ptr<master::MasterEncryptionProxy> YBClient::Data::master_encryption_proxy() const {
   std::lock_guard l(leader_master_lock_);
   return master_encryption_proxy_;
+}
+
+shared_ptr<master::MasterTestProxy> YBClient::Data::master_test_proxy() const {
+  std::lock_guard l(leader_master_lock_);
+  return master_test_proxy_;
 }
 
 

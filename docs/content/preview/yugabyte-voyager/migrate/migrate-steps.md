@@ -183,7 +183,7 @@ yb-voyager export schema --export-dir <EXPORT_DIR> \
 
 ```
 
-Refer to [export schema](../../reference/yb-voyager-cli/#export-schema) for details about the arguments.
+Refer to [export schema](../../reference/schema-migration/export-schema/) for details about the arguments.
 
 #### Analyze schema
 
@@ -198,7 +198,7 @@ yb-voyager analyze-schema --export-dir <EXPORT_DIR> --output-format <FORMAT>
 
 The above command generates a report file under the `EXPORT_DIR/reports/` directory.
 
-Refer to [analyze schema](../../reference/yb-voyager-cli/#analyze-schema) for details about the arguments.
+Refer to [analyze schema](../../reference/schema-migration/analyze-schema/) for details about the arguments.
 
 #### Manually edit the schema
 
@@ -232,7 +232,7 @@ yb-voyager export data --export-dir <EXPORT_DIR> \
 ```
 
 Note that the `source-db-schema` argument is required for PostgreSQL and Oracle, and is _not_ applicable for MySQL.
-Refer to [export data](../../reference/yb-voyager-cli/#export-data) for details about the arguments, and [export data status](../../reference/yb-voyager-cli/#export-data-status) to track the status of an export operation.
+Refer to [export data](../../reference/data-migration/export-data) for details about the arguments, and [export data status](../../reference/data-migration/export-data/#export-data-status) to track the status of an export operation.
 
 The options passed to the command are similar to the [`yb-voyager export schema`](#export-schema) command. To export only a subset of the tables, pass a comma-separated list of table names in the `--table-list` argument.
 
@@ -255,7 +255,7 @@ Consider the following caveats before using the feature:
 
 - You need to perform additional steps when you [prepare the source database](#prepare-the-source-database).
 - Some data types are unsupported. For a detailed list, refer to [datatype mappings](../../reference/datatype-mapping-mysql/).
-- [--parallel-jobs](../../reference/yb-voyager-cli/#parallel-jobs) argument will have no effect.
+- `--parallel-jobs` argument (specifies the number of tables to be exported in parallel from the source database at a time) will have no effect.
 - In MySQL RDS, writes are not allowed during the data export process.
 - For Oracle where sequences are not attached to a column, resume value generation is unsupported.
 
@@ -277,12 +277,12 @@ An example invocation of the command is as follows:
 yb-voyager import schema --export-dir <EXPORT_DIR> \
         --target-db-host <TARGET_DB_HOST> \
         --target-db-user <TARGET_DB_USER> \
-        --target-db-password <TARGET_DB_PASSWORD> \ # Enclose the password in single quotes if it contains special characters..
+        --target-db-password <TARGET_DB_PASSWORD> \ # Enclose the password in single quotes if it contains special characters.
         --target-db-name <TARGET_DB_NAME> \
         --target-db-schema <TARGET_DB_SCHEMA> # MySQL and Oracle only
 ```
 
-Refer to [import schema](../../reference/yb-voyager-cli/#import-schema) for details about the arguments.
+Refer to [import schema](../../reference/schema-migration/import-schema/) for details about the arguments.
 
 yb-voyager applies the DDL SQL files located in the `$EXPORT_DIR/schema` directory to the target database. If yb-voyager terminates before it imports the entire schema, you can rerun it by adding the `--ignore-exist` option.
 
@@ -309,7 +309,7 @@ yb-voyager import data --export-dir <EXPORT_DIR> \
 
 By default, yb-voyager creates C/2 connections where C is the total number of cores in the cluster. You can change the default number of connections using the `--parallel-jobs` argument. If yb-voyager fails to determine the number of cores in the cluster, it defaults to 2 connections per node.
 
-Refer to [import data](../../reference/yb-voyager-cli/#import-data) for details about the arguments.
+Refer to [import data](../../reference/data-migration/import-data/) for details about the arguments.
 
 yb-voyager splits the data dump files (from the `$EXPORT_DIR/data` directory) into smaller _batches_. yb-voyager concurrently ingests the batches such that all nodes of the target YugabyteDB database cluster are used. This phase is designed to be _restartable_ if yb-voyager terminates while the data import is in progress. After restarting, the data import resumes from its current state.
 
@@ -324,61 +324,6 @@ If the `yb-voyager import data` command terminates before completing the data in
 #### Import data status
 
 Run the `yb-voyager import data status --export-dir <EXPORT_DIR>` command to get an overall progress of the data import operation.
-
-#### Import data file
-
-If all your data files are in CSV format and you have already created a schema in your target YugabyteDB database, you can use the `yb-voyager import data file` command to load the data into the target table directly from the CSV file(s). This command doesn't require performing other migration steps ([export and analyze schema](#export-and-analyze-schema), [export data](#export-data), or [import schema](#import-schema) prior to import. It only requires a table present in the target database to perform the import.
-
-```sh
-# Replace the argument values with those applicable for your migration.
-yb-voyager import data file --export-dir <EXPORT_DIR> \
-        --target-db-host <TARGET_DB_HOST> \
-        --target-db-user <TARGET_DB_USER> \
-        --target-db-password <TARGET_DB_PASSWORD> \ # Enclose the password in single quotes if it contains special characters.
-        --target-db-name <TARGET_DB_NAME> \
-        --target-db-schema <TARGET_DB_SCHEMA> \ # MySQL and Oracle only
-        –-data-dir </path/to/files/dir/> \
-        --file-table-map <filename1:table1,filename2:table2> \
-        --delimiter <DELIMITER> \
-        –-has-header \
-        --null-string "<NULL_STRING>"
-
-```
-
-Refer to [import data file](../../reference/yb-voyager-cli/#import-data-file) for details about the arguments.
-
-#### Import data file from AWS S3
-
-Import data file also allows you to load directly from your data files stored on AWS S3. The S3 bucket URI can be provided to the `data-dir` flag as follows:
-
-```sh
-yb-voyager import data file .... \
-        --data-dir s3://voyager-data
-```
-
-The authentication mechanism for accessing an S3 bucket using yb-voyager is the same as that used by the AWS CLI. Refer to [Configure the AWS CLI](https://docs.aws.amazon.com/cli/latest/userguide/cli-chap-configure.html) for additional details on setting up your S3 bucket.
-
-#### Import data file from GCS buckets
-
-Import data file also allows you to load directly from your data files stored on GCS buckets. The GCS bucket URI can be provided to the `data-dir` flag as follows:
-
-```sh
-yb-voyager import data file .... \
-        --data-dir gs://voyager-data
-```
-
-The authentication mechanism for accessing a GCS bucket using yb-voyager is the Application Default Credentials (ADC) strategy for GCS. Refer to [Set up Application Default Credentials](https://cloud.google.com/docs/authentication/provide-credentials-adc) for additional details on setting up your GCS buckets.
-
-#### Import data file from Azure blob
-
-Import data file also allows you to load directly from your data files stored on Azure blob storage containers. The Azure container URI can be provided to the `data-dir` flag as follows:
-
-```sh
-yb-voyager import data file .... \
-        --data-dir https://<account_name>.blob.core.windows.net/<container_name>...
-```
-
-The authentication mechanism for accessing blobs using yb-voyager is the same as that used by the Azure CLI. The Azure storage account used for the import should at least have the [Storage Blob Data Reader](https://learn.microsoft.com/en-us/azure/role-based-access-control/built-in-roles#storage-blob-data-reader) role assigned to it. Refer to [Sign in with Azure CLI](https://learn.microsoft.com/en-us/cli/azure/authenticate-azure-cli) for additional details on setting up your GCS buckets.
 
 ### Import indexes and triggers
 
@@ -396,7 +341,7 @@ yb-voyager import schema --export-dir <EXPORT_DIR> \
         --post-import-data
 ```
 
-Refer to [import schema](../../reference/yb-voyager-cli/#import-schema) for details about the arguments.
+Refer to [import schema](../../reference/schema-migration/import-schema/) for details about the arguments.
 
 ### Verify migration
 
@@ -406,7 +351,7 @@ After the schema and data import is complete, the automated part of the database
 
 Suppose you have a scenario where,
 
-- [import data](#import-data) or [import data file](#import-data-file) command fails.
+- [import data](#import-data) or [import data file](../bulk-data-load/#import-data-files-from-the-local-disk) command fails.
 - To resolve this issue, you delete some of the rows from the split files.
 - After retrying, the import data command completes successfully.
 

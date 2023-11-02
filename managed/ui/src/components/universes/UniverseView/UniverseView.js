@@ -52,10 +52,12 @@ import { isEphemeralAwsStorageInstance } from '../UniverseDetail/UniverseDetail'
 import { YBMenuItem } from '../UniverseDetail/compounds/YBMenuItem';
 import ellipsisIcon from '../../common/media/more.svg';
 
-import 'react-bootstrap-table/css/react-bootstrap-table.css';
-import './UniverseView.scss';
 import { YBLoadingCircleIcon } from '../../common/indicators';
 import { UniverseAlertBadge } from '../YBUniverseItem/UniverseAlertBadge';
+import { RbacValidator } from '../../../redesign/features/rbac/common/RbacValidator';
+import { UserPermissionMap } from '../../../redesign/features/rbac/UserPermPathMapping';
+import 'react-bootstrap-table/css/react-bootstrap-table.css';
+import './UniverseView.scss';
 
 /**
  * The tableData key allows us to use a different field from the universe
@@ -285,36 +287,52 @@ export const UniverseView = (props) => {
           {isPausableUniverse(row) &&
             !isEphemeralAwsStorage &&
             (featureFlags.test['pausedUniverse'] || featureFlags.released['pausedUniverse']) && (
-              <YBMenuItem
-                onClick={() => {
-                  setFocusedUniverse(row);
-                  showToggleUniverseStateModal();
+              <RbacValidator
+                isControl
+                accessRequiredOn={{
+                  onResource: row.universeUUID,
+                  ...UserPermissionMap.editUniverse
                 }}
-                availability={getFeatureState(
-                  currentCustomer.data.features,
-                  'universes.details.overview.pausedUniverse'
-                )}
               >
-                <YBLabelWithIcon
-                  icon={universePaused ? 'fa fa-play-circle-o' : 'fa fa-pause-circle-o'}
+                <YBMenuItem
+                  onClick={() => {
+                    setFocusedUniverse(row);
+                    showToggleUniverseStateModal();
+                  }}
+                  availability={getFeatureState(
+                    currentCustomer.data.features,
+                    'universes.details.overview.pausedUniverse'
+                  )}
                 >
-                  {universePaused ? 'Resume Universe' : 'Pause Universe'}
-                </YBLabelWithIcon>
-              </YBMenuItem>
+                  <YBLabelWithIcon
+                    icon={universePaused ? 'fa fa-play-circle-o' : 'fa fa-pause-circle-o'}
+                  >
+                    {universePaused ? 'Resume Universe' : 'Pause Universe'}
+                  </YBLabelWithIcon>
+                </YBMenuItem>
+              </RbacValidator>
             )}
-
-          <YBMenuItem
-            onClick={() => {
-              setFocusedUniverse(row);
-              showDeleteUniverseModal();
+          <RbacValidator
+            isControl
+            accessRequiredOn={{
+              onResource: row.universeUUID,
+              ...UserPermissionMap.deleteUniverse
             }}
-            availability={getFeatureState(
-              currentCustomer.data.features,
-              'universes.details.overview.deleteUniverse'
-            )}
+            overrideStyle={{ display: 'block' }}
           >
-            <YBLabelWithIcon icon="fa fa-trash-o fa-fw">Delete Universe</YBLabelWithIcon>
-          </YBMenuItem>
+            <YBMenuItem
+              onClick={() => {
+                setFocusedUniverse(row);
+                showDeleteUniverseModal();
+              }}
+              availability={getFeatureState(
+                currentCustomer.data.features,
+                'universes.details.overview.deleteUniverse'
+              )}
+            >
+              <YBLabelWithIcon icon="fa fa-trash-o fa-fw">Delete Universe</YBLabelWithIcon>
+            </YBMenuItem>
+          </RbacValidator>
         </Dropdown.Menu>
       </Dropdown>
     );
@@ -588,14 +606,23 @@ export const UniverseView = (props) => {
           onSubmitSearchTerms={handleSearchTokenChange}
         />
         {isNotHidden(currentCustomer.data.features, 'universe.create') && (
-          <Link to="/universes/create">
-            <YBButton
-              btnClass="universe-button btn btn-lg btn-orange"
-              disabled={isDisabled(currentCustomer.data.features, 'universe.create')}
-              btnText="Create Universe"
-              btnIcon="fa fa-plus"
-            />
-          </Link>
+          <RbacValidator
+            accessRequiredOn={{
+              onResource: undefined,
+              ...UserPermissionMap.createUniverse
+            }}
+            isControl
+          >
+            <Link to="/universes/create">
+              <YBButton
+                btnClass="universe-button btn btn-lg btn-orange"
+                disabled={isDisabled(currentCustomer.data.features, 'universe.create')}
+                btnText="Create Universe"
+                btnIcon="fa fa-plus"
+                data-testid="UniverseList-CreateUniverse"
+              />
+            </Link>
+          </RbacValidator>
         )}
       </div>
       <div className="universes-stats-container">

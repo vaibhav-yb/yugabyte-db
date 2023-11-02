@@ -1246,12 +1246,6 @@ std::string DdlLogEntry::id() const {
   return DocHybridTime(HybridTime(pb_.time()), kMaxWriteId).EncodedInDocDbFormat();
 }
 
-void XClusterSafeTimeInfo::Clear() {
-  auto l = LockForWrite();
-  l.mutable_data()->pb.Clear();
-  l.Commit();
-}
-
 // ================================================================================================
 // CDCStreamInfo
 // ================================================================================================
@@ -1262,6 +1256,11 @@ const google::protobuf::RepeatedPtrField<std::string> CDCStreamInfo::table_id() 
 
 const NamespaceId CDCStreamInfo::namespace_id() const {
   return LockForRead()->pb.namespace_id();
+}
+
+const ReplicationSlotName CDCStreamInfo::GetCdcsdkYsqlReplicationSlotName() const {
+  auto l = LockForRead();
+  return ReplicationSlotName(l->pb.cdcsdk_ysql_replication_slot_name());
 }
 
 std::string CDCStreamInfo::ToString() const {

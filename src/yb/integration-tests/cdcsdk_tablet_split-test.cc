@@ -1759,6 +1759,11 @@ TEST_F(CDCSDKYsqlTest, YB_DISABLE_TEST_IN_TSAN(TestSplitAfterSplit)) {
   LOG(INFO) << "Got " << total_records << " records";
   ASSERT_EQ(expected_total_records, total_records);
 
+  std::unordered_set<TabletId> expected_tablet_ids;
+  for (uint32_t i = 0; i < final_tablets.size(); ++i) {
+    expected_tablet_ids.insert(final_tablets.Get(i).tablet_id());
+  }
+
   // Verify that the cdc_state has only current set of children tablets.
   CDCStateTable cdc_state_table(test_client());
   ASSERT_OK(WaitFor(
@@ -1769,7 +1774,7 @@ TEST_F(CDCSDKYsqlTest, YB_DISABLE_TEST_IN_TSAN(TestSplitAfterSplit)) {
                  CDCStateTableEntrySelector().IncludeCheckpoint(), &s))) {
           RETURN_NOT_OK(row_result);
           auto& row = *row_result;
-          if (row.key.stream_id == stream_id && !final_tablets.contains(row.key.tablet_id)) {
+          if (row.key.stream_id == stream_id && !expected_tablet_ids.contains(row.key.tablet_id)) {
             // Still have a tablet left over from a dropped table.
             return false;
           }

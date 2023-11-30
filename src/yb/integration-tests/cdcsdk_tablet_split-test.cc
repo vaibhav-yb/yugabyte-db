@@ -461,9 +461,6 @@ TEST_F(CDCSDKYsqlTest, YB_DISABLE_TEST_IN_TSAN(TestGetChangesAfterSplit)) {
       ASSERT_RESULT(GetChangesFromCDC(stream_id, tablets_after_split,
                                       &change_resp_1.cdc_sdk_checkpoint(), 1));
   LOG(INFO) << "Child response 2 size: " << child_resp_2.cdc_sdk_proto_records_size();
-
-  // Total count of records should be as expected.
-  // TODO: Add assertion here.
 }
 
 TEST_F(
@@ -1656,7 +1653,6 @@ TEST_F(CDCSDKTabletSplitTest, YB_DISABLE_TEST_IN_TSAN(TestRecordCountsAfterMulti
   ASSERT_OK(test_client()->FlushTables({table.table_id()}, false, 100, false));
 
   const int expected_total_records = 3002;
-  // const int expected_total_splits = 4;
   // The array stores counts of DDL, INSERT, UPDATE, DELETE, READ, TRUNCATE, BEGIN, COMMIT in that
   // order.
   const int expected_records_count[] = {5, 999, 0, 0, 0, 0, 999, 999};
@@ -1685,7 +1681,6 @@ TEST_F(CDCSDKTabletSplitTest, YB_DISABLE_TEST_IN_TSAN(TestRecordCountsAfterMulti
 
   LOG(INFO) << "Got " << total_records << " records";
   ASSERT_EQ(expected_total_records, total_records);
-  // ASSERT_EQ(expected_total_splits, total_splits);
 }
 
 TEST_F(CDCSDKYsqlTest, YB_DISABLE_TEST_IN_TSAN(TestSplitAfterSplit)) {
@@ -1723,7 +1718,6 @@ TEST_F(CDCSDKYsqlTest, YB_DISABLE_TEST_IN_TSAN(TestSplitAfterSplit)) {
   WaitUntilSplitIsSuccesful(tablets_after_first_split.Get(1).tablet_id(), table, 4);
 
   // Don't insert anything, just split the tablets further
-  // ASSERT_OK(WriteRows(400, 600, &test_cluster_));
   ASSERT_OK(test_client()->FlushTables({table.table_id()}, false, 100, false));
 
   ASSERT_RESULT(GetChangesFromCDC(stream_id, tablets_after_first_split, nullptr, 0));
@@ -1735,11 +1729,7 @@ TEST_F(CDCSDKYsqlTest, YB_DISABLE_TEST_IN_TSAN(TestSplitAfterSplit)) {
 
   WaitUntilSplitIsSuccesful(tablets_after_third_split.Get(1).tablet_id(), table, 5);
 
-  // ASSERT_OK(WriteRows(600, 1000, &test_cluster_));
-  // ASSERT_OK(test_client()->FlushTables({table.table_id()}, false, 100, false));
-
   const int expected_total_records = 3002;
-  // const int expected_total_splits = 4;
   // The array stores counts of DDL, INSERT, UPDATE, DELETE, READ, TRUNCATE, BEGIN, COMMIT in that
   // order.
   const int expected_records_count[] = {5, 601, 0, 0, 0, 0, 999, 999};
@@ -1768,7 +1758,31 @@ TEST_F(CDCSDKYsqlTest, YB_DISABLE_TEST_IN_TSAN(TestSplitAfterSplit)) {
 
   LOG(INFO) << "Got " << total_records << " records";
   ASSERT_EQ(expected_total_records, total_records);
-  // ASSERT_EQ(expected_total_splits, total_splits);
+
+  // Verify that the cdc_state has only current set of children tablets.
+  CDCStateTable cdc_state_table(test_client());
+  ASSERT_OK(WaitFor(
+      [&]() -> Result<bool> {
+        Status s;
+        std::unordered_set<TabletId> tablets_found;
+        for (auto row_result : VERIFY_RESULT(cdc_state_table.GetTableRange(
+                 CDCStateTableEntrySelector().IncludeCheckpoint(), &s))) {
+          RETURN_NOT_OK(row_result);
+          auto& row = *row_result;
+          if (row.key.stream_id == stream_id && !final_tablets.contains(row.key.tablet_id)) {
+            // Still have a tablet left over from a dropped table.
+            return false;
+          }
+          if (row.key.stream_id == stream_id) {
+            tablets_found.insert(row.key.tablet_id);
+          }
+        }
+        RETURN_NOT_OK(s);
+        LOG(INFO) << "tablets found: " << AsString(tablets_found)
+                  << ", expected tablets: " << AsString(expected_tablet_ids);
+        return expected_tablet_ids == tablets_found;
+      },
+      MonoDelta::FromSeconds(60), "Waiting for stream metadata cleanup."));
 }
 
 TEST_F(

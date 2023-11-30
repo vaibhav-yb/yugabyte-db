@@ -1124,7 +1124,7 @@ Status PopulateCDCSDKWriteRecord(
       Slice sub_doc_key = key;
       dockv::SubDocKey decoded_key;
 
-      auto key_bounds = tablet_ptr->key_bounds();
+      const auto& key_bounds = tablet_ptr->key_bounds();
       if (!key_bounds.IsWithinBounds(key)) {
         VLOG(1) << "Key for the read record is not within tablet bounds, skipping the key: "
                 << primary_key.data();
@@ -2342,6 +2342,7 @@ Status GetChangesForCDCSDK(
       // tell the client immediately about the split.
       LOG(INFO) << "Tablet split detected for tablet " << tablet_id
                 << ", moving to children tablets immediately";
+
       return STATUS_FORMAT(
         TabletSplit, "Tablet split detected on $0", tablet_id);
     }
@@ -2646,6 +2647,7 @@ Status GetChangesForCDCSDK(
                     &next_checkpoint_index, all_checkpoints, &checkpoint, last_streamed_op_id,
                     &safe_hybrid_time_resp, &wal_segment_index);
                 checkpoint_updated = true;
+                report_tablet_split = true;
                 split_op_id = op_id;
               }
             }
@@ -2690,9 +2692,8 @@ Status GetChangesForCDCSDK(
     }
   }
 
-  // If the split_op_id is equal to the checkpoint i.e the OpId of the last actionable message, we
-  // know that after the split there are no more actionable messages, and this confirms that the
-  // SPLIT OP was succesfull.
+  // If the GetChanges call is not for snapshot and then we know that a split has indeed been
+  // successful then we should report the split to the client.
   if (!snapshot_operation && report_tablet_split) {
     LOG(INFO) << "Tablet split detected for tablet " << tablet_id
               << ", moving to children tablets immediately";

@@ -3919,7 +3919,6 @@ Status CDCServiceImpl::UpdateChildrenTabletsOnSplitOpForCDCSDK(const ProducerTab
   LOG_IF(DFATAL, children.size() != 2)
       << "Could not find the two split children for the tablet: " << info.tablet_id;
 
-  LOG(INFO) << "VKVK got children from tablet peer: " << children[0] << " and " << children[1];
   RETURN_NOT_OK_SET_CODE(
       impl_->AddEntriesForChildrenTabletsOnSplitOp(info, children, children_op_id),
       CDCError(CDCErrorPB::INTERNAL_ERROR));

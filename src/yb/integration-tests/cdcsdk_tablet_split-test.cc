@@ -1760,7 +1760,7 @@ TEST_F(CDCSDKYsqlTest, YB_DISABLE_TEST_IN_TSAN(TestSplitAfterSplit)) {
   ASSERT_EQ(expected_total_records, total_records);
 
   std::unordered_set<TabletId> expected_tablet_ids;
-  for (uint32_t i = 0; i < final_tablets.size(); ++i) {
+  for (int i = 0; i < final_tablets.size(); ++i) {
     expected_tablet_ids.insert(final_tablets.Get(i).tablet_id());
   }
 

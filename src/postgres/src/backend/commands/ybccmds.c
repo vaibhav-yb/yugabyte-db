@@ -1774,14 +1774,20 @@ YBCCreateReplicationSlot(const char *slot_name)
 												 MyDatabaseId,
 												 &handle));
 
-	bool already_present = false;
-	HandleYBStatusIgnoreAlreadyPresent(YBCPgExecCreateReplicationSlot(handle),
-									   &already_present);
-	if (already_present)
+	YBCStatus status = YBCPgExecCreateReplicationSlot(handle);
+	if (YBCStatusIsAlreadyPresent(status))
 		ereport(ERROR,
 				(errcode(ERRCODE_DUPLICATE_OBJECT),
 				 errmsg("replication slot \"%s\" already exists",
 						slot_name)));
+
+	if (YBCStatusIsReplicationSlotLimitReached(status))
+		ereport(ERROR,
+				(errcode(ERRCODE_CONFIGURATION_LIMIT_EXCEEDED),
+				 errmsg("all replication slots are in use"),
+				 errhint("Free one or increase max_replication_slots.")));
+
+	HandleYBStatus(status);
 }
 
 void
@@ -1790,6 +1796,20 @@ YBCListReplicationSlots(YBCReplicationSlotDescriptor **replication_slots,
 {
 	HandleYBStatus(
 		YBCPgListReplicationSlots(replication_slots, numreplicationslots));
+}
+
+void
+YBCGetReplicationSlotStatus(const char *slot_name,
+							bool *active)
+{
+	bool not_found = false;
+	HandleYBStatusIgnoreNotFound(
+		YBCPgGetReplicationSlotStatus(slot_name, active),
+		&not_found);
+	if (not_found)
+		ereport(ERROR,
+				(errcode(ERRCODE_UNDEFINED_OBJECT),
+				 errmsg("replication slot \"%s\" does not exist", slot_name)));
 }
 
 void

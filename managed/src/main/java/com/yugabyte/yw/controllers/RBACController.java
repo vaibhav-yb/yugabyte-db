@@ -246,7 +246,7 @@ public class RBACController extends AuthenticatedController {
     if (Role.get(customerUUID, roleFormData.name) != null) {
       String errorMsg = "Role with given name already exists: " + roleFormData.name;
       log.error(errorMsg);
-      throw new PlatformServiceException(BAD_REQUEST, errorMsg);
+      throw new PlatformServiceException(CONFLICT, errorMsg);
     }
 
     // Ensure that the given permission list is not empty.
@@ -329,8 +329,10 @@ public class RBACController extends AuthenticatedController {
       throw new PlatformServiceException(BAD_REQUEST, errorMsg);
     }
 
-    if (roleFormData.name != null) {
-      log.warn("Editing the role name is not supported, skipping this operation.");
+    if (roleFormData.name != null && !roleFormData.name.equals(role.getName())) {
+      String errorMsg =
+          String.format("Editing the role name is not supported. Role UUID: '%s'.", roleUUID);
+      throw new PlatformServiceException(BAD_REQUEST, errorMsg);
     }
 
     if (roleFormData.permissionList == null) {
@@ -439,13 +441,17 @@ public class RBACController extends AuthenticatedController {
     @RequiredPermissionOnResource(
         requiredPermission =
             @PermissionAttribute(resourceType = ResourceType.USER, action = Action.READ),
-        resourceLocation = @Resource(path = "userUUID", sourceType = SourceType.ENDPOINT))
+        resourceLocation = @Resource(path = "userUUID", sourceType = SourceType.ENDPOINT),
+        checkOnlyPermission = true)
   })
   public Result listRoleBinding(
       UUID customerUUID,
       @ApiParam(value = "Optional user UUID to filter role binding map") UUID userUUID) {
     // Check if customer exists.
     Customer.getOrBadRequest(customerUUID);
+    UserWithFeatures u = RequestContext.get(TokenAuthenticator.USER);
+    Set<UUID> resourceUUIDs =
+        roleBindingUtil.getResourceUuids(u.getUser().getUuid(), ResourceType.USER, Action.READ);
 
     Map<UUID, List<RoleBinding>> roleBindingMap = new HashMap<>();
     if (userUUID != null) {
@@ -457,7 +463,9 @@ public class RBACController extends AuthenticatedController {
       // Merge all the role bindings for users of the customer.
       List<Users> usersInCustomer = Users.getAll(customerUUID);
       for (Users user : usersInCustomer) {
-        roleBindingMap.put(user.getUuid(), RoleBinding.getAll(user.getUuid()));
+        if (resourceUUIDs.contains(user.getUuid())) {
+          roleBindingMap.put(user.getUuid(), RoleBinding.getAll(user.getUuid()));
+        }
       }
     }
     return PlatformResults.withData(roleBindingMap);

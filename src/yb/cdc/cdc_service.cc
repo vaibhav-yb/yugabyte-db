@@ -182,7 +182,7 @@ DECLARE_int32(rpc_workers_limit);
 
 DECLARE_int64(cdc_intent_retention_ms);
 
-DECLARE_bool(ysql_yb_enable_replication_commands);
+DECLARE_bool(TEST_ysql_yb_enable_replication_commands);
 
 METRIC_DEFINE_entity(cdc);
 
@@ -658,7 +658,7 @@ class CDCServiceImpl::Impl {
     cdc_state_metadata_.clear();
   }
 
-  std::unique_ptr<client::AsyncClientInitialiser> async_client_init_;
+  std::unique_ptr<client::AsyncClientInitializer> async_client_init_;
 
   // this will be used for the std::call_once call while caching the client
   std::once_flag is_client_cached_;
@@ -973,17 +973,22 @@ Status CDCServiceImpl::CreateCDCStreamForNamespace(
 
   // Forward request to master directly since we support creating CDCSDK stream for a namespace
   // atomically in master now.
-  if (FLAGS_ysql_yb_enable_replication_commands) {
-    xrepl::StreamId db_stream_id = VERIFY_RESULT_OR_SET_CODE(
-        client()->CreateCDCSDKStreamForNamespace(ns_id, options),
-        CDCError(CDCErrorPB::INTERNAL_ERROR));
-    resp->set_db_stream_id(db_stream_id.ToString());
-    return Status::OK();
-  } else {
-    return STATUS(
-        ServiceUnavailable, "Creating a CDC stream is disallowed during an upgrade",
-        CDCError(CDCErrorPB::OPERATION_DISALLOWED));
+  // If FLAGS_TEST_ysql_yb_enable_replication_commands, populate the namespace id in the newly added
+  // namespace_id field, otherwise use the table_id as done before.
+  bool populate_namespace_id_as_table_id = !FLAGS_TEST_ysql_yb_enable_replication_commands;
+
+  // Consistent Snapshot option
+  std::optional<CDCSDKSnapshotOption> snapshot_option = std::nullopt;
+  if (req->has_cdcsdk_consistent_snapshot_option()) {
+     snapshot_option = req->cdcsdk_consistent_snapshot_option();
   }
+
+  xrepl::StreamId db_stream_id = VERIFY_RESULT_OR_SET_CODE(
+      client()->CreateCDCSDKStreamForNamespace(ns_id, options, populate_namespace_id_as_table_id,
+                                               ReplicationSlotName(""), snapshot_option),
+      CDCError(CDCErrorPB::INTERNAL_ERROR));
+  resp->set_db_stream_id(db_stream_id.ToString());
+  return Status::OK();
 }
 
 void CDCServiceImpl::CreateCDCStream(
@@ -2365,7 +2370,8 @@ Result<TabletIdCDCCheckpointMap> CDCServiceImpl::PopulateTabletCheckPointInfo(
     // We will only populate the "cdc_sdk_safe_time" when before image is active or when we are in
     // taking the snapshot of any table.
     if (entry.cdc_sdk_safe_time &&
-        (record.GetRecordType() == CDCRecordType::ALL || entry.snapshot_key.has_value())) {
+       ((record.GetRecordType() == CDCRecordType::ALL ||
+         record.GetRecordType() == CDCRecordType::PG_FULL) || entry.snapshot_key.has_value())) {
       cdc_sdk_safe_time = HybridTime(*entry.cdc_sdk_safe_time);
     }
 
@@ -3651,7 +3657,11 @@ Status CDCServiceImpl::UpdateCheckpointAndActiveTime(
               << ", and stream: " << producer_tablet.stream_id;
     }
 
-    RETURN_NOT_OK(cdc_state_table_->UpdateEntries({entry}));
+    if (!is_snapshot) {
+      RETURN_NOT_OK(cdc_state_table_->UpdateEntries({entry}, false, {"snapshot_key"}));
+    } else {
+      RETURN_NOT_OK(cdc_state_table_->UpdateEntries({entry}));
+    }
   }
 
   // If we update the colocated snapshot row, we still need to do one of two things:
@@ -3669,7 +3679,7 @@ Status CDCServiceImpl::UpdateCheckpointAndActiveTime(
       CDCStateTableEntry entry(producer_tablet.tablet_id, producer_tablet.stream_id);
       entry.active_time = last_active_time;
       entry.cdc_sdk_safe_time = checkpoint.has_snapshot_time() ? checkpoint.snapshot_time() : 0;
-      RETURN_NOT_OK(cdc_state_table_->UpdateEntries({entry}));
+      RETURN_NOT_OK(cdc_state_table_->UpdateEntries({entry}, false, {"snapshot_key"}));
     }
   }
 
@@ -3690,8 +3700,8 @@ Status CDCServiceImpl::UpdateSnapshotDone(
         !cdc_sdk_checkpoint.has_snapshot_time() ? 0 : cdc_sdk_checkpoint.snapshot_time();
     entry.active_time = current_time;
     entry.last_replication_time = 0;
-    // Insert if row not found, Update if row already exists.
-    RETURN_NOT_OK(cdc_state_table_->UpsertEntries({entry}));
+    // Insert if row not found, Update if row already exists. Remove snapshot_key from map
+    RETURN_NOT_OK(cdc_state_table_->UpsertEntries({entry}, false, {"snapshot_key"}));
   }
 
   // Also update the active_time in the streaming row.
@@ -3699,7 +3709,7 @@ Status CDCServiceImpl::UpdateSnapshotDone(
     CDCStateTableEntry entry(tablet_id, stream_id);
     entry.active_time = current_time;
     entry.cdc_sdk_safe_time = VERIFY_RESULT(GetSafeTime(stream_id, tablet_id));
-    RETURN_NOT_OK(cdc_state_table_->UpdateEntries({entry}));
+    RETURN_NOT_OK(cdc_state_table_->UpdateEntries({entry}, false, {"snapshot_key"}));
   }
 
   return Status::OK();

@@ -423,6 +423,8 @@ public class CustomerTaskManager {
       case CreateKubernetesUniverse:
       case CreateUniverse:
       case EditUniverse:
+      case InstallYbcSoftwareOnK8s:
+      case EditKubernetesUniverse:
       case ReadOnlyClusterCreate:
         taskParams = Json.fromJson(oldTaskParams, UniverseDefinitionTaskParams.class);
         break;
@@ -444,6 +446,9 @@ public class CustomerTaskManager {
       case SoftwareUpgradeYB:
         taskParams = Json.fromJson(oldTaskParams, SoftwareUpgradeParams.class);
         break;
+      case UpdateKubernetesDiskSize:
+        taskParams = Json.fromJson(oldTaskParams, ResizeNodeParams.class);
+        break;
       case FinalizeUpgrade:
         taskParams = Json.fromJson(oldTaskParams, FinalizeUpgradeParams.class);
         break;
@@ -455,6 +460,9 @@ public class CustomerTaskManager {
         taskParams = Json.fromJson(oldTaskParams, VMImageUpgradeParams.class);
         break;
       case RestartUniverse:
+        taskParams = Json.fromJson(oldTaskParams, RestartTaskParams.class);
+        break;
+      case RestartUniverseKubernetesUpgrade:
         taskParams = Json.fromJson(oldTaskParams, RestartTaskParams.class);
         break;
       case RebootUniverse:

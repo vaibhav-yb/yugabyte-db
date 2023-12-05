@@ -11,11 +11,18 @@
 // under the License.
 
 #include "yb/integration-tests/cdcsdk_ysql_test_base.h"
+#include <map>
 
+#include "yb/cdc/cdc_fwd.h"
 #include "yb/cdc/cdc_service.pb.h"
 #include "yb/cdc/cdc_state_table.h"
 
+#include "yb/client/yb_table_name.h"
+#include "yb/common/entity_ids_types.h"
 #include "yb/master/catalog_manager.h"
+#include "yb/master/master_client.pb.h"
+#include "yb/rpc/rpc_controller.h"
+#include "yb/util/status.h"
 
 namespace yb {
 namespace cdc {
@@ -1362,6 +1369,82 @@ namespace cdc {
         "GetChanges timed out waiting for Leader to get ready"));
 
     return change_resp;
+  }
+
+  Result<int64> CDCSDKYsqlTest::GetChangeRecordCount(
+      const xrepl::StreamId& stream_id,
+      const YBTableName& table,
+      const google::protobuf::RepeatedPtrField<master::TabletLocationsPB>& tablets,
+      std::map<TabletId, const CDCSDKCheckpointPB*> tablet_to_checkpoint,
+      const int64 expected_total_records) {
+    google::protobuf::RepeatedPtrField<master::TabletLocationsPB> tablets_temp = tablets;
+    
+    GetChangesRequestPB change_req;
+    GetChangesResponsePB change_resp;
+
+    int64 total_record_count = 0;
+
+    while (total_record_count < expected_total_records) {
+      for (int i = 0; i < tablets_temp.size(); ++i) {
+        master::TabletLocationsPB tablet = tablets_temp.Get(i);
+        auto cp = tablet_to_checkpoint.find(tablet.tablet_id());
+
+        if (cp == tablet_to_checkpoint.end()) {
+          PrepareChangeRequest(&change_req, stream_id, tablet.tablet_id(), i);
+          tablet_to_checkpoint[tablet.tablet_id()] = nullptr;
+        } else {
+          PrepareChangeRequest(&change_req, stream_id, tablet.tablet_id(), *cp->second, i);
+        }
+
+        rpc::RpcController get_changes_rpc;
+
+        LOG(INFO) << "Calling GetChanges on " << tablet.tablet_id()
+                  << " with " << change_req.from_cdc_sdk_checkpoint().term()
+                  << ":" << change_req.from_cdc_sdk_checkpoint().index();
+        auto status = cdc_proxy_->GetChanges(change_req, &change_resp, &get_changes_rpc);
+
+        if (status.ok() && !change_resp.has_error()) {
+          // Process the records here.
+          for (auto record : change_resp.cdc_sdk_proto_records()) {
+            if (IsDMLRecord(record)) {
+              ++total_record_count;
+            }
+          }
+
+          LOG(INFO) << "Received records for tablet " << tablet.tablet_id()
+                    << ": " << change_resp.cdc_sdk_proto_records_size()
+                    << " with response checkpoint " << change_resp.cdc_sdk_checkpoint().term()
+                    << ":" << change_resp.cdc_sdk_checkpoint().index();
+
+          tablet_to_checkpoint[tablet.tablet_id()] = &change_resp.cdc_sdk_checkpoint();
+
+          LOG(INFO) << "VKVK total record count after processing " << total_record_count;
+        } else {
+          status = StatusFromPB(change_resp.error().status());
+          if (status.IsTabletSplit()) {
+            LOG(INFO) << "Got a tablet split on tablet " << tablet.tablet_id()
+                      << ", fetching new tablets";
+
+            RETURN_NOT_OK(test_client()->GetTablets(table, 0, &tablets_temp, nullptr));
+
+            // Store the opIds for the children tablets.
+            for (int j = 0; j < tablets_temp.size(); ++j) {
+              if (tablets_temp.Get(j).has_split_parent_tablet_id() && tablets_temp.Get(j).split_parent_tablet_id() == tablet.tablet_id()) {
+                LOG(INFO) << "Assigning from_op_id to child " << tablets_temp.Get(j).tablet_id();
+                tablet_to_checkpoint[tablets_temp.Get(j).tablet_id()] = cp->second;
+              }
+            }
+
+            LOG(INFO) << "VKVK breaking the loop with tablets_temp size: " << tablets_temp.size();
+            break;
+          } else {
+            RETURN_NOT_OK(status);
+          }
+        }
+      }
+    }
+
+    return total_record_count;
   }
 
   Result<GetChangesResponsePB> CDCSDKYsqlTest::GetChangesFromCDCWithoutRetry(

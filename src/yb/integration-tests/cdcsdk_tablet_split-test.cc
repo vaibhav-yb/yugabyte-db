@@ -12,9 +12,11 @@
 
 #include "yb/cdc/cdc_service.pb.h"
 #include "yb/gutil/dynamic_annotations.h"
+#include "yb/gutil/integral_types.h"
 #include "yb/integration-tests/cdcsdk_ysql_test_base.h"
 
 #include "yb/cdc/cdc_state_table.h"
+#include "yb/util/result.h"
 #include "yb/util/test_macros.h"
 
 namespace yb {
@@ -1788,6 +1790,122 @@ TEST_F(CDCSDKTabletSplitTest, YB_DISABLE_TEST_IN_TSAN(TestSplitAfterSplit)) {
         return expected_tablet_ids == tablets_found;
       },
       MonoDelta::FromSeconds(60), "Waiting for stream metadata cleanup."));
+}
+
+TEST_F(CDCSDKTabletSplitTest, YB_DISABLE_TEST_IN_TSAN(TestSplitAfterSplitVK)) {
+  ANNOTATE_UNPROTECTED_WRITE(FLAGS_update_min_cdc_indices_interval_secs) = 1;
+  ANNOTATE_UNPROTECTED_WRITE(FLAGS_cdc_state_checkpoint_update_interval_ms) = 0;
+  ANNOTATE_UNPROTECTED_WRITE(FLAGS_aborted_intent_cleanup_ms) = 1000;
+  ANNOTATE_UNPROTECTED_WRITE(FLAGS_cdc_parent_tablet_deletion_task_retry_secs) = 1;
+
+  google::protobuf::RepeatedPtrField<master::TabletLocationsPB> tablets;
+  ASSERT_OK(SetUpWithParams(1, 1, false));
+  const uint32_t num_tablets = 1;
+
+  auto table = ASSERT_RESULT(CreateTable(&test_cluster_, kNamespaceName, kTableName, num_tablets));
+  ASSERT_OK(test_client()->GetTablets(table, 0, &tablets, nullptr));
+  ASSERT_EQ(tablets.size(), num_tablets);
+
+  xrepl::StreamId stream_id = ASSERT_RESULT(CreateDBStream(IMPLICIT));
+  auto resp = ASSERT_RESULT(SetCDCCheckpoint(stream_id, tablets));
+  ASSERT_FALSE(resp.has_error());
+
+  TableId table_id = ASSERT_RESULT(GetTableId(&test_cluster_, kNamespaceName, kTableName));
+  ASSERT_OK(WriteRows(1, 200, &test_cluster_));
+  ASSERT_OK(test_client()->FlushTables({table.table_id()}, false, 100, false));
+
+  WaitUntilSplitIsSuccesful(tablets.Get(0).tablet_id(), table);
+
+  ASSERT_OK(WriteRows(200, 400, &test_cluster_));
+  ASSERT_OK(test_client()->FlushTables({table.table_id()}, false, 100, false));
+
+  google::protobuf::RepeatedPtrField<master::TabletLocationsPB> tablets_after_first_split;
+  ASSERT_OK(test_client()->GetTablets(table, 0, &tablets_after_first_split, nullptr));
+  ASSERT_EQ(tablets_after_first_split.size(), 2);
+
+  LOG(INFO) << "VKVK After waiting for tablets after first split";
+
+  WaitUntilSplitIsSuccesful(tablets_after_first_split.Get(0).tablet_id(), table, 3);
+  WaitUntilSplitIsSuccesful(tablets_after_first_split.Get(1).tablet_id(), table, 4);
+
+  // Don't insert anything, just split the tablets further
+  ASSERT_OK(test_client()->FlushTables({table.table_id()}, false, 100, false));
+
+  // ASSERT_RESULT(GetChangesFromCDC(stream_id, tablets_after_first_split, nullptr, 0));
+  // ASSERT_RESULT(GetChangesFromCDC(stream_id, tablets_after_first_split, nullptr, 1));
+
+  google::protobuf::RepeatedPtrField<master::TabletLocationsPB> tablets_after_third_split;
+  ASSERT_OK(test_client()->GetTablets(table, 0, &tablets_after_third_split, nullptr));
+  ASSERT_EQ(tablets_after_third_split.size(), 4);
+
+  WaitUntilSplitIsSuccesful(tablets_after_third_split.Get(1).tablet_id(), table, 5);
+
+  LOG(INFO) << "VKVK After waiting for tablets after fourth split";
+
+  // const int expected_total_records = 3002;
+  // The array stores counts of DDL, INSERT, UPDATE, DELETE, READ, TRUNCATE, BEGIN, COMMIT in that
+  // order.
+  // const int expected_records_count[] = {5, 601, 0, 0, 0, 0, 999, 999};
+
+  // int total_records = 0;
+  // int record_count[] = {0, 0, 0, 0, 0, 0, 0, 0};
+
+  std::map<TabletId, const CDCSDKCheckpointPB*> checkpoint_map;
+  int64 received_records = ASSERT_RESULT(GetChangeRecordCount(stream_id, table, tablets, checkpoint_map, 199 + 199));
+
+  ASSERT_GE(received_records, 199 + 199);
+
+  // google::protobuf::RepeatedPtrField<master::TabletLocationsPB> final_tablets;
+  // ASSERT_OK(test_client()->GetTablets(table, 0, &final_tablets, nullptr));
+  // ASSERT_EQ(final_tablets.size(), 5);
+
+  // for (int i = 0; i < final_tablets.size(); ++i) {
+  //   // Call GetChanges will a nullptr checkpoint.
+  //   GetChangesResponsePB resp =
+  //     ASSERT_RESULT(GetChangesFromCDC(stream_id, final_tablets, nullptr, i));
+
+  //   for (auto record : resp.cdc_sdk_proto_records()) {
+  //     UpdateRecordCount(record, record_count);
+  //     ++total_records;
+  //   }
+  // }
+
+  // for (int i = 0; i < 8; i++) {
+  //   ASSERT_EQ(expected_records_count[i], record_count[i]);
+  // }
+
+  // LOG(INFO) << "Got " << total_records << " records";
+  // ASSERT_EQ(expected_total_records, total_records);
+
+  // std::unordered_set<TabletId> expected_tablet_ids;
+  // for (int i = 0; i < final_tablets.size(); ++i) {
+  //   expected_tablet_ids.insert(final_tablets.Get(i).tablet_id());
+  // }
+
+  // Verify that the cdc_state has only current set of children tablets.
+  // CDCStateTable cdc_state_table(test_client());
+  // ASSERT_OK(WaitFor(
+  //     [&]() -> Result<bool> {
+  //       Status s;
+  //       std::unordered_set<TabletId> tablets_found;
+  //       for (auto row_result : VERIFY_RESULT(cdc_state_table.GetTableRange(
+  //                CDCStateTableEntrySelector().IncludeCheckpoint(), &s))) {
+  //         RETURN_NOT_OK(row_result);
+  //         auto& row = *row_result;
+  //         if (row.key.stream_id == stream_id && !expected_tablet_ids.contains(row.key.tablet_id)) {
+  //           // Still have a tablet left over from a dropped table.
+  //           return false;
+  //         }
+  //         if (row.key.stream_id == stream_id) {
+  //           tablets_found.insert(row.key.tablet_id);
+  //         }
+  //       }
+  //       RETURN_NOT_OK(s);
+  //       LOG(INFO) << "tablets found: " << AsString(tablets_found)
+  //                 << ", expected tablets: " << AsString(expected_tablet_ids);
+  //       return expected_tablet_ids == tablets_found;
+  //     },
+  //     MonoDelta::FromSeconds(60), "Waiting for stream metadata cleanup."));
 }
 
 TEST_F(

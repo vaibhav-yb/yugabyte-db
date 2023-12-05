@@ -2613,6 +2613,7 @@ Status GetChangesForCDCSDK(
 
             // We first verify if a split has indeed occured succesfully by checking if there are
             // two children tablets for the tablet.
+            // TODO VK: This can be removed since we are not relying on the tablet count to verify whether split has completed.
             if (!(VerifyTabletSplitOnParentTablet(table_id, tablet_id, client))) {
               // We could verify the tablet split succeeded. This is possible when the child tablets
               // of a split are not running yet.
@@ -2642,6 +2643,7 @@ Status GetChangesForCDCSDK(
                           << ", and if we did not see any other records we will report the tablet "
                              "split to the client";
 
+                // TODO VK: What does this method do? What if we skip it in case of new tablet splitting?
                 AcknowledgeStreamedMsg(
                     msg, ShouldUpdateSafeTime(wal_records, index), safe_hybrid_time_req,
                     &next_checkpoint_index, all_checkpoints, &checkpoint, last_streamed_op_id,
@@ -2667,6 +2669,7 @@ Status GetChangesForCDCSDK(
         }
 
         // There can be NO_OP messages after a SPLIT_OP. Ignore them.
+        // TODO VK: saw_split_op can be removed
         if (pending_intents || saw_split_op) {
           break;
         }
@@ -2694,6 +2697,7 @@ Status GetChangesForCDCSDK(
 
   // If the GetChanges call is not for snapshot and then we know that a split has indeed been
   // successful then we should report the split to the client.
+  // TODO VK: Remove since the flow is not coming here now.
   if (!snapshot_operation && report_tablet_split) {
     LOG(INFO) << "Tablet split detected for tablet " << tablet_id
               << ", moving to children tablets immediately";

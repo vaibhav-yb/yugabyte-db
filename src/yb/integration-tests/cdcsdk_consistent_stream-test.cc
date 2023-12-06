@@ -654,7 +654,7 @@ void CDCSDKConsistentStreamTest::TestCDCSDKConsistentStreamWithTabletSplit(
   ASSERT_OK(test_client()->GetTablets(table, 0, &final_tablets, nullptr));
 
   GetAllPendingChangesResponse pending_changes_resp;
-  // auto parent_get_changes = GetAllPendingChangesFromCdc(stream_id, tablets);
+  auto parent_get_changes = GetAllPendingChangesFromCdc(stream_id, tablets);
   for (int i = 0; i < final_tablets.size(); ++i) {
     GetChangesResponsePB resp =
         ASSERT_RESULT(GetChangesFromCDC(stream_id, final_tablets, nullptr, i));

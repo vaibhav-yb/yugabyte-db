@@ -11,11 +11,11 @@
 // under the License.
 
 #include "yb/integration-tests/cdcsdk_ysql_test_base.h"
-#include <gtest/gtest.h>
 #include <cstddef>
 #include <list>
 #include <map>
 #include <vector>
+#include <gtest/gtest.h>
 
 #include "yb/cdc/cdc_fwd.h"
 #include "yb/cdc/cdc_service.pb.h"

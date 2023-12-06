@@ -11,7 +11,11 @@
 // under the License.
 
 #include "yb/integration-tests/cdcsdk_ysql_test_base.h"
+#include <gtest/gtest.h>
+#include <cstddef>
+#include <list>
 #include <map>
+#include <vector>
 
 #include "yb/cdc/cdc_fwd.h"
 #include "yb/cdc/cdc_service.pb.h"
@@ -863,7 +867,11 @@ namespace cdc {
     change_req->set_tablet_id(tablet_id);
     change_req->mutable_from_cdc_sdk_checkpoint()->set_term(cp.term());
     change_req->mutable_from_cdc_sdk_checkpoint()->set_index(cp.index());
-    change_req->mutable_from_cdc_sdk_checkpoint()->set_key(cp.key());
+
+    if (cp.has_key()) {
+      change_req->mutable_from_cdc_sdk_checkpoint()->set_key(cp.key());
+    }
+
     change_req->mutable_from_cdc_sdk_checkpoint()->set_write_id(cp.write_id());
   }
 
@@ -1375,9 +1383,12 @@ namespace cdc {
       const xrepl::StreamId& stream_id,
       const YBTableName& table,
       const google::protobuf::RepeatedPtrField<master::TabletLocationsPB>& tablets,
-      std::map<TabletId, const CDCSDKCheckpointPB*> tablet_to_checkpoint,
+      std::map<TabletId, CDCSDKCheckpointPB> tablet_to_checkpoint,
       const int64 expected_total_records) {
-    google::protobuf::RepeatedPtrField<master::TabletLocationsPB> tablets_temp = tablets;
+    std::vector<TabletId> tablet_ids;
+    for (int i = 0; i < tablets.size(); ++i) {
+      tablet_ids.push_back(tablets.Get(i).tablet_id());
+    }
     
     GetChangesRequestPB change_req;
     GetChangesResponsePB change_resp;
@@ -1385,20 +1396,18 @@ namespace cdc {
     int64 total_record_count = 0;
 
     while (total_record_count < expected_total_records) {
-      for (int i = 0; i < tablets_temp.size(); ++i) {
-        master::TabletLocationsPB tablet = tablets_temp.Get(i);
-        auto cp = tablet_to_checkpoint.find(tablet.tablet_id());
+      for (uint32_t i = 0; i < tablet_ids.size(); ++i) {
+        auto cp = tablet_to_checkpoint.find(tablet_ids[i]);
 
         if (cp == tablet_to_checkpoint.end()) {
-          PrepareChangeRequest(&change_req, stream_id, tablet.tablet_id(), i);
-          tablet_to_checkpoint[tablet.tablet_id()] = nullptr;
+          PrepareChangeRequest(&change_req, stream_id, tablet_ids[i], i);
         } else {
-          PrepareChangeRequest(&change_req, stream_id, tablet.tablet_id(), *cp->second, i);
+          PrepareChangeRequest(&change_req, stream_id, tablet_ids[i], cp->second, i);
         }
 
         rpc::RpcController get_changes_rpc;
 
-        LOG(INFO) << "Calling GetChanges on " << tablet.tablet_id()
+        LOG(INFO) << "Calling GetChanges on " << tablet_ids[i]
                   << " with " << change_req.from_cdc_sdk_checkpoint().term()
                   << ":" << change_req.from_cdc_sdk_checkpoint().index();
         auto status = cdc_proxy_->GetChanges(change_req, &change_resp, &get_changes_rpc);
@@ -1411,37 +1420,44 @@ namespace cdc {
             }
           }
 
-          LOG(INFO) << "Received records for tablet " << tablet.tablet_id()
+          LOG(INFO) << "Received records for tablet " << tablet_ids[i]
                     << ": " << change_resp.cdc_sdk_proto_records_size()
                     << " with response checkpoint " << change_resp.cdc_sdk_checkpoint().term()
                     << ":" << change_resp.cdc_sdk_checkpoint().index();
 
-          tablet_to_checkpoint[tablet.tablet_id()] = &change_resp.cdc_sdk_checkpoint();
-
-          LOG(INFO) << "VKVK total record count after processing " << total_record_count;
+          tablet_to_checkpoint[tablet_ids[i]] = change_resp.cdc_sdk_checkpoint();
         } else {
           status = StatusFromPB(change_resp.error().status());
           if (status.IsTabletSplit()) {
-            LOG(INFO) << "Got a tablet split on tablet " << tablet.tablet_id()
+            LOG(INFO) << "Got a tablet split on tablet " << tablet_ids[i]
                       << ", fetching new tablets";
 
-            RETURN_NOT_OK(test_client()->GetTablets(table, 0, &tablets_temp, nullptr));
+            auto get_tablets_resp = VERIFY_RESULT(
+                GetTabletListToPollForCDC(stream_id, table.table_id(), tablet_ids[i]));
+
+            VERIFY_EQ(get_tablets_resp.tablet_checkpoint_pairs_size(), 2);
 
             // Store the opIds for the children tablets.
-            for (int j = 0; j < tablets_temp.size(); ++j) {
-              if (tablets_temp.Get(j).has_split_parent_tablet_id() && tablets_temp.Get(j).split_parent_tablet_id() == tablet.tablet_id()) {
-                LOG(INFO) << "Assigning from_op_id to child " << tablets_temp.Get(j).tablet_id();
-                tablet_to_checkpoint[tablets_temp.Get(j).tablet_id()] = cp->second;
-              }
+            for (int j = 0; j < get_tablets_resp.tablet_checkpoint_pairs_size(); ++j) {
+              auto pair = get_tablets_resp.tablet_checkpoint_pairs(j);
+              tablet_to_checkpoint[pair.tablet_locations().tablet_id()] = pair.cdc_sdk_checkpoint();
+              tablet_ids.push_back(pair.tablet_locations().tablet_id());
+
+              LOG(INFO) << "Assigned from_op_id " << pair.cdc_sdk_checkpoint().term() << ":"
+                        << pair.cdc_sdk_checkpoint().index() << " to child "
+                        << pair.tablet_locations().tablet_id();
             }
 
-            LOG(INFO) << "VKVK breaking the loop with tablets_temp size: " << tablets_temp.size();
+            tablet_ids.erase(find(tablet_ids.begin(), tablet_ids.end(), tablet_ids[i]));
+
             break;
           } else {
             RETURN_NOT_OK(status);
           }
         }
       }
+
+      LOG(INFO) << "Total records consumed so far: " << total_record_count;
     }
 
     return total_record_count;

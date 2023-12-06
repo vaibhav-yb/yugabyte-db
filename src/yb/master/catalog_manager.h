@@ -362,8 +362,14 @@ class CatalogManager : public tserver::TabletPeerLookupIf,
 
   // Gets the backfill jobs state associated with the requested table.
   Status GetBackfillJobs(const GetBackfillJobsRequestPB* req,
-                                      GetBackfillJobsResponsePB* resp,
-                                      rpc::RpcContext* rpc);
+                         GetBackfillJobsResponsePB* resp,
+                         rpc::RpcContext* rpc);
+
+  // Gets the index permissions of the specified index tables. The response will contain all the
+  // specified tables with either their index permissions or an error in the corresponding field.
+  Status GetBackfillStatus(const GetBackfillStatusRequestPB* req,
+                           GetBackfillStatusResponsePB* resp,
+                           rpc::RpcContext* rpc);
 
   // Backfill the indexes for the specified table.
   // Used for backfilling YCQL defered indexes when triggered from yb-admin.
@@ -1231,6 +1237,7 @@ class CatalogManager : public tserver::TabletPeerLookupIf,
       const LeaderEpoch& epoch);
 
   Status PopulateCDCStateTableWithCDCSDKSnapshotSafeOpIdDetails(
+    const scoped_refptr<TableInfo>& table,
     const yb::TabletId& tablet_id,
     const xrepl::StreamId& cdc_sdk_stream_id,
     const yb::OpIdPB& safe_opid,
@@ -1265,6 +1272,11 @@ class CatalogManager : public tserver::TabletPeerLookupIf,
   // Update a CDC stream.
   Status UpdateCDCStream(
       const UpdateCDCStreamRequestPB* req, UpdateCDCStreamResponsePB* resp, rpc::RpcContext* rpc);
+
+  Status YsqlBackfillReplicationSlotNameToCDCSDKStream(
+      const YsqlBackfillReplicationSlotNameToCDCSDKStreamRequestPB* req,
+      YsqlBackfillReplicationSlotNameToCDCSDKStreamResponsePB* resp,
+      rpc::RpcContext* rpc);
 
   // Query if Bootstrapping is required for a CDC stream (e.g. Are we missing logs).
   Status IsBootstrapRequired(
@@ -2672,6 +2684,12 @@ class CatalogManager : public tserver::TabletPeerLookupIf,
       const std::vector<TableId>& table_ids, const std::optional<const NamespaceId>& namespace_id,
       CreateCDCStreamResponsePB* resp, const LeaderEpoch& epoch, rpc::RpcContext* rpc);
 
+  Status PopulateCDCStateTable(const xrepl::StreamId& stream_id,
+                               const std::vector<TableId>& table_ids,
+                               bool has_consistent_snapshot_option,
+                               bool consistent_snapshot_option_use,
+                               uint64_t consistent_snapshot_time);
+
   Status SetAllCDCSDKRetentionBarriers(
       const CreateCDCStreamRequestPB& req, rpc::RpcContext* rpc, const LeaderEpoch& epoch,
       const std::vector<TableId>& table_ids, const xrepl::StreamId& stream_id,
@@ -2680,6 +2698,8 @@ class CatalogManager : public tserver::TabletPeerLookupIf,
       const TableId& table_id, rpc::RpcContext* rpc, const LeaderEpoch& epoch);
   Status BackfillMetadataForCDC(
       const TableId& table_id, rpc::RpcContext* rpc, const LeaderEpoch& epoch);
+
+  Status ReplicationSlotValidateName(const std::string& replication_slot_name);
 
   // Create the cdc_state table if needed (i.e. if it does not exist already).
   //

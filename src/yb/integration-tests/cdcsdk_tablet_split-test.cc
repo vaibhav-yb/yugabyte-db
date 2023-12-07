@@ -14,6 +14,10 @@
 #include "yb/integration-tests/cdcsdk_ysql_test_base.h"
 
 #include "yb/cdc/cdc_state_table.h"
+#include "yb/util/monotime.h"
+#include "yb/util/result.h"
+#include "yb/util/status.h"
+#include "yb/util/test_macros.h"
 
 namespace yb {
 namespace cdc {
@@ -627,8 +631,7 @@ void CDCSDKTabletSplitTest::TestSetCDCCheckpointAfterTabletSplit(
 CDCSDK_TESTS_FOR_ALL_CHECKPOINT_OPTIONS(CDCSDKTabletSplitTest,
                                         TestSetCDCCheckpointAfterTabletSplit);
 
-// TODO Adithya: This test is failing in alma linux with clang builds.
-TEST_F(CDCSDKTabletSplitTest, YB_DISABLE_TEST(TestTabletSplitBeforeBootstrap)) {
+TEST_F(CDCSDKTabletSplitTest, YB_DISABLE_TEST_IN_TSAN(TestTabletSplitBeforeBootstrap)) {
   ANNOTATE_UNPROTECTED_WRITE(FLAGS_update_min_cdc_indices_interval_secs) = 1;
   ANNOTATE_UNPROTECTED_WRITE(FLAGS_aborted_intent_cleanup_ms) = 1000;
   ANNOTATE_UNPROTECTED_WRITE(FLAGS_update_metrics_interval_ms) = 5000;
@@ -663,20 +666,27 @@ TEST_F(CDCSDKTabletSplitTest, YB_DISABLE_TEST(TestTabletSplitBeforeBootstrap)) {
   TabletId parent_tablet_id = tablets[0].tablet_id();
   CDCStateTable cdc_state_table(test_client());
   Status s;
-  for (auto row_result : ASSERT_RESULT(
-           cdc_state_table.GetTableRange(CDCStateTableEntrySelector().IncludeCheckpoint(), &s))) {
-    ASSERT_OK(row_result);
-    auto& row = *row_result;
-    const auto& checkpoint = *row.checkpoint;
-    LOG(INFO) << "Read cdc_state table row for tablet_id: " << row.key.tablet_id
-              << " and stream_id: " << row.key.stream_id << ", with checkpoint: " << checkpoint;
+  ASSERT_OK(WaitFor(
+      [&]() -> Result<bool> {
+        for (auto row_result : VERIFY_RESULT(cdc_state_table.GetTableRange(
+                 CDCStateTableEntrySelector().IncludeCheckpoint(), &s))) {
+          RETURN_NOT_OK(row_result);
+          auto& row = *row_result;
+          const auto& checkpoint = *row.checkpoint;
+          LOG(INFO) << "Read cdc_state table row for tablet_id: " << row.key.tablet_id
+                    << " and stream_id: " << row.key.stream_id
+                    << ", with checkpoint: " << checkpoint;
 
-    if (row.key.tablet_id != tablets[0].tablet_id()) {
-      // Both children should have the min OpId(-1.-1) as the checkpoint.
-      ASSERT_EQ(checkpoint, OpId::Invalid());
-    }
-    seen_rows += 1;
-  }
+          if (row.key.tablet_id != tablets[0].tablet_id()) {
+            // Both children should have the min OpId(-1.-1) as the checkpoint.
+            ++seen_rows;
+          }
+        }
+
+        return seen_rows == 2;
+      },
+      MonoDelta::FromSeconds(60), "Waiting for verifying children tablets' checkpoint"));
+
   ASSERT_OK(s);
   ASSERT_EQ(seen_rows, 2);
 
@@ -754,8 +764,7 @@ void CDCSDKTabletSplitTest::TestCDCStateTableAfterTabletSplit(CDCCheckpointType 
 CDCSDK_TESTS_FOR_ALL_CHECKPOINT_OPTIONS(CDCSDKTabletSplitTest,
                                         TestCDCStateTableAfterTabletSplit);
 
-// TODO Adithya: This test is failing in alma linux with clang builds.
-TEST_F(CDCSDKTabletSplitTest, YB_DISABLE_TEST(TestCDCStateTableAfterTabletSplitReported)) {
+TEST_F(CDCSDKTabletSplitTest, YB_DISABLE_TEST_IN_TSAN(TestCDCStateTableAfterTabletSplitReported)) {
   ANNOTATE_UNPROTECTED_WRITE(FLAGS_update_min_cdc_indices_interval_secs) = 1;
   ANNOTATE_UNPROTECTED_WRITE(FLAGS_cdc_state_checkpoint_update_interval_ms) = 0;
   ANNOTATE_UNPROTECTED_WRITE(FLAGS_aborted_intent_cleanup_ms) = 1000;

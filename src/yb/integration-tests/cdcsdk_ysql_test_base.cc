@@ -1431,7 +1431,7 @@ namespace cdc {
 
     int64 total_record_count = 0;
 
-    while (total_record_count < expected_total_records) {
+    RETURN_NOT_OK(WaitFor([&]() -> Result<bool> {
       for (uint32_t i = 0; i < tablet_ids.size(); ++i) {
         auto cp = tablet_to_checkpoint.find(tablet_ids[i]);
 
@@ -1443,9 +1443,9 @@ namespace cdc {
 
         rpc::RpcController get_changes_rpc;
 
-        LOG(INFO) << "Calling GetChanges on " << tablet_ids[i]
-                  << " with " << change_req.from_cdc_sdk_checkpoint().term()
-                  << ":" << change_req.from_cdc_sdk_checkpoint().index();
+        LOG(INFO) << "Calling GetChanges on " << tablet_ids[i] << " with "
+                  << change_req.from_cdc_sdk_checkpoint().term() << ":"
+                  << change_req.from_cdc_sdk_checkpoint().index();
         auto status = cdc_proxy_->GetChanges(change_req, &change_resp, &get_changes_rpc);
 
         if (status.ok() && !change_resp.has_error()) {
@@ -1456,10 +1456,10 @@ namespace cdc {
             }
           }
 
-          LOG(INFO) << "Received records for tablet " << tablet_ids[i]
-                    << ": " << change_resp.cdc_sdk_proto_records_size()
-                    << " with response checkpoint " << change_resp.cdc_sdk_checkpoint().term()
-                    << ":" << change_resp.cdc_sdk_checkpoint().index();
+          LOG(INFO) << "Received records for tablet " << tablet_ids[i] << ": "
+                    << change_resp.cdc_sdk_proto_records_size() << " with response checkpoint "
+                    << change_resp.cdc_sdk_checkpoint().term() << ":"
+                    << change_resp.cdc_sdk_checkpoint().index();
 
           tablet_to_checkpoint[tablet_ids[i]] = change_resp.cdc_sdk_checkpoint();
         } else {
@@ -1494,7 +1494,11 @@ namespace cdc {
       }
 
       LOG(INFO) << "Total records consumed so far: " << total_record_count;
-    }
+
+      return total_record_count >= expected_total_records;
+    },
+    MonoDelta::FromSeconds(300),
+    "Timed out while fetching the changes"));
 
     return total_record_count;
   }

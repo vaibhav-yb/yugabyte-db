@@ -2222,7 +2222,6 @@ Status GetChangesForCDCSDK(
   // previously declared 'checkpoint' or the 'from_op_id'.
   bool checkpoint_updated = false;
   bool report_tablet_split = false;
-  OpId split_op_id = OpId::Invalid();
   bool snapshot_operation = false;
   bool pending_intents = false;
   int wal_segment_index = GetWalSegmentIndex(wal_segment_index_req);
@@ -2650,8 +2649,7 @@ Status GetChangesForCDCSDK(
               } else {
                 // If 'GetChangesForCDCSDK' was called with the OpId just before the SplitOp's
                 // record, and if there is no more data to stream and we can notify the client
-                // about the split and update the checkpoint. At this point, we will store the
-                // split_op_id.
+                // about the split and update the checkpoint.
                 LOG(INFO) << "Found SPLIT_OP record with OpId: " << op_id
                           << ", for parent tablet: " << tablet_id
                           << ", and if we did not see any other records we will report the tablet "
@@ -2663,7 +2661,6 @@ Status GetChangesForCDCSDK(
                     &safe_hybrid_time_resp, &wal_segment_index);
                 checkpoint_updated = true;
                 report_tablet_split = true;
-                split_op_id = op_id;
               }
             }
           } break;

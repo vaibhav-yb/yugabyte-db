@@ -602,7 +602,7 @@ class CDCServiceImpl::Impl {
   Status AddEntriesForChildrenTabletsOnSplitOp(
       const ProducerTabletInfo& info,
       const std::array<TabletId, 2>& tablets,
-      const OpId& split_op_id) {
+      const OpId& children_op_id) {
     std::lock_guard l(mutex_);
 
     for (const auto& tablet : tablets) {
@@ -612,16 +612,16 @@ class CDCServiceImpl::Impl {
           .producer_tablet_info = producer_info,
           .cdc_state_checkpoint =
               TabletCheckpoint{
-                  .op_id = split_op_id, .last_update_time = {}, .last_active_time = {}},
+                  .op_id = children_op_id, .last_update_time = {}, .last_active_time = {}},
           .sent_checkpoint =
               TabletCheckpoint{
-                  .op_id = split_op_id, .last_update_time = {}, .last_active_time = {}},
+                  .op_id = children_op_id, .last_update_time = {}, .last_active_time = {}},
           .mem_tracker = nullptr,
       });
       cdc_state_metadata_.emplace(CDCStateMetadataInfo{
           .producer_tablet_info = producer_info,
           .commit_timestamp = {},
-          .last_streamed_op_id = split_op_id,
+          .last_streamed_op_id = children_op_id,
           .schema_details_map = {},
           .mem_tracker = nullptr,
       });
@@ -3966,13 +3966,26 @@ void CDCServiceImpl::IsBootstrapRequired(
 
 Status CDCServiceImpl::UpdateChildrenTabletsOnSplitOpForCDCSDK(const ProducerTabletInfo& info) {
   auto tablets = VERIFY_RESULT(GetTablets(info.stream_id, true /* ignore_errors */));
+  
+  // Initializing the children to 0.0 to prevent garbage collection on them.
   const OpId& children_op_id = OpId();
 
-  auto tablet_peer = context_->LookupTablet(info.tablet_id);
-  auto children = tablet_peer->tablet_metadata()->split_child_tablet_ids();
+  std::array<TabletId, 2> children;
+  uint found_children = 0;
+  for (auto const& tablet : tablets) {
+    if (tablet.has_split_parent_tablet_id() && tablet.split_parent_tablet_id() == info.tablet_id) {
+      children[found_children] = tablet.tablet_id();
+      found_children += 1;
 
-  LOG_IF(DFATAL, children.size() != 2)
-      << "Could not find the two split children for the tablet: " << info.tablet_id;
+      if (found_children == 2) {
+        break;
+      }
+    }
+  }
+
+  RSTATUS_DCHECK(
+      found_children == 2, InternalError,
+      Format("Could not find the two split children for tablet: $0", info.tablet_id));
 
   RETURN_NOT_OK_SET_CODE(
       impl_->AddEntriesForChildrenTabletsOnSplitOp(info, children, children_op_id),

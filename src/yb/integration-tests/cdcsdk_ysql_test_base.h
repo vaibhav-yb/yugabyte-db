@@ -14,9 +14,9 @@
 #include <algorithm>
 #include <chrono>
 #include <utility>
+#include <vector>
 
 #include <boost/assign.hpp>
-#include <vector>
 #include <gmock/gmock.h>
 #include <gtest/gtest.h>
 

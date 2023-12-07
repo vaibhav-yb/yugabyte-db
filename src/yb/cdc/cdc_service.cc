@@ -3966,7 +3966,7 @@ void CDCServiceImpl::IsBootstrapRequired(
 
 Status CDCServiceImpl::UpdateChildrenTabletsOnSplitOpForCDCSDK(const ProducerTabletInfo& info) {
   auto tablets = VERIFY_RESULT(GetTablets(info.stream_id, true /* ignore_errors */));
-  
+
   // Initializing the children to 0.0 to prevent garbage collection on them.
   const OpId& children_op_id = OpId();
 

@@ -1420,14 +1420,23 @@ namespace cdc {
       const YBTableName& table,
       const google::protobuf::RepeatedPtrField<master::TabletLocationsPB>& tablets,
       std::map<TabletId, CDCSDKCheckpointPB> tablet_to_checkpoint,
-      const int64 expected_total_records) {
+      const int64 expected_total_records,
+      bool explicit_checkpointing_enabled,
+      std::map<TabletId, std::vector<CDCSDKProtoRecordPB>> records) {
     std::vector<TabletId> tablet_ids;
+    std::map<TabletId, CDCSDKCheckpointPB> explicit_checkpoints;
     for (int i = 0; i < tablets.size(); ++i) {
       tablet_ids.push_back(tablets.Get(i).tablet_id());
     }
 
     GetChangesRequestPB change_req;
     GetChangesResponsePB change_resp;
+
+    CDCSDKCheckpointPB explicit_checkpoint;
+    explicit_checkpoint.set_term(0);
+    explicit_checkpoint.set_index(0);
+    explicit_checkpoint.set_write_id(0);
+    explicit_checkpoint.set_key("");
 
     int64 total_record_count = 0;
 
@@ -1439,6 +1448,20 @@ namespace cdc {
           PrepareChangeRequest(&change_req, stream_id, tablet_ids[i], i);
         } else {
           PrepareChangeRequest(&change_req, stream_id, tablet_ids[i], cp->second, i);
+        }
+
+        // If the stream is configured for explicit checkpointing, then we will populate the
+        // explicit_cdc_sdk_checkpoint field as well.
+        auto iter = explicit_checkpoints.find(tablet_ids[i]);
+        CDCSDKCheckpointPB explicit_cp;
+        if (explicit_checkpointing_enabled) {
+          if (iter == explicit_checkpoints.end()) {
+            change_req.mutable_explicit_cdc_sdk_checkpoint()->CopyFrom(explicit_checkpoint);
+          } else {
+            explicit_cp = iter->second;
+            change_req.mutable_explicit_cdc_sdk_checkpoint()->CopyFrom(explicit_cp);
+
+          }
         }
 
         rpc::RpcController get_changes_rpc;
@@ -1453,6 +1476,18 @@ namespace cdc {
           for (auto record : change_resp.cdc_sdk_proto_records()) {
             if (IsDMLRecord(record)) {
               ++total_record_count;
+            }
+
+            if (record.row_message().op() != RowMessage::DDL) {
+              records[tablet_ids[i]].push_back(record);
+            }
+
+            if (explicit_checkpointing_enabled) {
+              explicit_cp.set_term(record.from_op_id().term());
+              explicit_cp.set_index(record.from_op_id().index());
+              explicit_cp.set_key(record.from_op_id().write_id_key());
+              explicit_cp.set_write_id(record.from_op_id().write_id());
+              explicit_cp.set_snapshot_time(record.row_message().commit_time() - 1);
             }
           }
 
@@ -1477,6 +1512,8 @@ namespace cdc {
             for (int j = 0; j < get_tablets_resp.tablet_checkpoint_pairs_size(); ++j) {
               auto pair = get_tablets_resp.tablet_checkpoint_pairs(j);
               tablet_to_checkpoint[pair.tablet_locations().tablet_id()] = pair.cdc_sdk_checkpoint();
+              explicit_checkpoints[pair.tablet_locations().tablet_id()] = pair.cdc_sdk_checkpoint();
+
               tablet_ids.push_back(pair.tablet_locations().tablet_id());
 
               LOG(INFO) << "Assigned from_op_id " << pair.cdc_sdk_checkpoint().term() << ":"

@@ -16,6 +16,7 @@
 #include <utility>
 
 #include <boost/assign.hpp>
+#include <vector>
 #include <gmock/gmock.h>
 #include <gtest/gtest.h>
 
@@ -367,11 +368,11 @@ class CDCSDKYsqlTest : public CDCSDKTestBase {
   }
 
   Result<int64> GetChangeRecordCount(
-      const xrepl::StreamId& stream_id,
-      const YBTableName& table,
+      const xrepl::StreamId& stream_id, const YBTableName& table,
       const google::protobuf::RepeatedPtrField<master::TabletLocationsPB>& tablets,
       std::map<TabletId, CDCSDKCheckpointPB> tablet_to_checkpoint,
-      const int64 expected_total_records);
+      const int64 expected_total_records, bool explicit_checkpointing_enabled = false,
+      std::map<TabletId, std::vector<CDCSDKProtoRecordPB>> records = {});
 
   Result<SetCDCCheckpointResponsePB> SetCDCCheckpoint(
       const xrepl::StreamId& stream_id,

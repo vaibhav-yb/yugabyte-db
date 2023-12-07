@@ -1671,7 +1671,8 @@ void CDCSDKTabletSplitTest::TestRecordCountsAfterMultipleTabletSplits(
   const int expected_total_records = 1000;
   std::map<TabletId, CDCSDKCheckpointPB> tablet_to_checkpoint;
   int64 total_records = ASSERT_RESULT(GetChangeRecordCount(
-      stream_id, table, tablets, tablet_to_checkpoint, expected_total_records));
+      stream_id, table, tablets, tablet_to_checkpoint, expected_total_records,
+      checkpoint_type == CDCCheckpointType::EXPLICIT));
 
   LOG(INFO) << "Got " << total_records << " records";
   ASSERT_EQ(expected_total_records, total_records);

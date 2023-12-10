@@ -1124,6 +1124,8 @@ Status PopulateCDCSDKWriteRecord(
       Slice sub_doc_key = key;
       dockv::SubDocKey decoded_key;
 
+      // With tablet splits we will end up reading records from this tablet's ancestors -
+      // only process records that are in this tablet's key range.
       const auto& key_bounds = tablet_ptr->key_bounds();
       if (!key_bounds.IsWithinBounds(key)) {
         VLOG(1) << "Key for the read record is not within tablet bounds, skipping the key: "
@@ -2739,12 +2741,6 @@ Status GetChangesForCDCSDK(
 
   if (last_streamed_op_id->index > 0) {
     last_streamed_op_id->ToPB(resp->mutable_checkpoint()->mutable_op_id());
-  }
-
-  if (report_tablet_split) {
-    return STATUS_FORMAT(
-        TabletSplit, "Tablet Split on tablet: $0, will stream further records from children",
-        tablet_id);
   }
 
   // We do not populate SAFEPOINT records in two scenarios:

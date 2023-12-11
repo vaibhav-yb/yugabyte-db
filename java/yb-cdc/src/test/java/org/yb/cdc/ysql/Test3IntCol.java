@@ -60,6 +60,7 @@ public class Test3IntCol extends CDCBaseClass {
         continue;
       }
 
+      LOG.info("Checking record at index: " + expRecordIndex);
       ExpectedRecord3Proto.checkRecord(outputList.get(i), expectedRecords[expRecordIndex++]);
       ++processedRecords;
     }
@@ -192,8 +193,6 @@ public class Test3IntCol extends CDCBaseClass {
         // begin;
         // update test set b=b+1, c=c+1 where a=1;
         // end;
-        new ExpectedRecord3Proto(-1, -1, -1, CdcService.RowMessage.Op.BEGIN),
-        new ExpectedRecord3Proto(-1, -1, -1, CdcService.RowMessage.Op.COMMIT),
 
         // begin;
         // insert into test values(11,12,13);

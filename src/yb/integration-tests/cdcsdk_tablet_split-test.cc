@@ -1143,8 +1143,7 @@ TEST_F(
   tablet_to_checkpoint[tablets.Get(0).tablet_id()] = change_resp_1.cdc_sdk_checkpoint();
 
   int64 received_records = ASSERT_RESULT(GetChangeRecordCount(
-      stream_id, table, tablets, tablet_to_checkpoint, 400,
-      checkpoint_type == CDCCheckpointType::EXPLICIT));
+      stream_id, table, tablets, tablet_to_checkpoint, 400));
   ASSERT_EQ(received_records, 400);
 }
 
@@ -1200,8 +1199,7 @@ TEST_F(CDCSDKTabletSplitTest, YB_DISABLE_TEST_IN_TSAN(TestTabletSplitOnAddedTabl
 
   std::map<TabletId, CDCSDKCheckpointPB> tablet_to_checkpoint;
   int64 received_records = ASSERT_RESULT(GetChangeRecordCount(
-      stream_id, table_2, tablets_2, tablet_to_checkpoint, 200,
-      checkpoint_type == CDCCheckpointType::EXPLICIT));
+      stream_id, table_2, tablets_2, tablet_to_checkpoint, 200));
 
   ASSERT_EQ(received_records, 200);
 }
@@ -1265,8 +1263,7 @@ TEST_F(
   std::map<TabletId, CDCSDKCheckpointPB> tablet_to_checkpoint;
   tablet_to_checkpoint[tablets_2.Get(0).tablet_id()] = change_resp.cdc_sdk_checkpoint();
   int64 record_count = ASSERT_RESULT(GetChangeRecordCount(
-      stream_id, table_2, tablets_2, tablet_to_checkpoint, 199,
-      checkpoint_type == CDCCheckpointType::EXPLICIT));
+      stream_id, table_2, tablets_2, tablet_to_checkpoint, 199));
 
   // Verify the count of records for the table.
   ASSERT_EQ(record_count, 199);
@@ -1414,8 +1411,7 @@ TEST_F(CDCSDKTabletSplitTest, YB_DISABLE_TEST_IN_TSAN(TestTransactionCommitAfter
   tablet_to_checkpoint[tablets.Get(0).tablet_id()] = change_resp_1.cdc_sdk_checkpoint();
 
   int64 received_records = ASSERT_RESULT(GetChangeRecordCount(
-      stream_id, table, tablets, tablet_to_checkpoint, 400,
-      checkpoint_type == CDCCheckpointType::EXPLICIT));
+      stream_id, table, tablets, tablet_to_checkpoint, 400));
 
   ASSERT_EQ(received_records, 400);
 }
@@ -1571,8 +1567,7 @@ TEST_F(CDCSDKTabletSplitTest, YB_DISABLE_TEST_IN_TSAN(TestRecordCountsAfterMulti
   const int expected_total_records = 1000;
   std::map<TabletId, CDCSDKCheckpointPB> tablet_to_checkpoint;
   int64 total_records = ASSERT_RESULT(GetChangeRecordCount(
-      stream_id, table, tablets, tablet_to_checkpoint, expected_total_records,
-      checkpoint_type == CDCCheckpointType::EXPLICIT));
+      stream_id, table, tablets, tablet_to_checkpoint, expected_total_records));
 
   LOG(INFO) << "Got " << total_records << " records";
   ASSERT_EQ(expected_total_records, total_records);
@@ -1697,8 +1692,7 @@ TEST_F(
   const int expected_total_records = 400;
   std::map<TabletId, CDCSDKCheckpointPB> tablet_to_checkpoint;
   int64 total_records = ASSERT_RESULT(GetChangeRecordCount(
-      stream_id, table, tablets, tablet_to_checkpoint, expected_total_records,
-      checkpoint_type == CDCCheckpointType::EXPLICIT));
+      stream_id, table, tablets, tablet_to_checkpoint, expected_total_records));
 
   LOG(INFO) << "Got " << total_records << " records";
   ASSERT_EQ(expected_total_records, total_records);
@@ -1738,8 +1732,7 @@ TEST_F(CDCSDKTabletSplitTest, YB_DISABLE_TEST_IN_TSAN(TestGetTabletListToPollFor
   tablet_to_checkpoint[tablets.Get(0).tablet_id()] = cp;
 
   int64 record_count = ASSERT_RESULT(GetChangeRecordCount(
-      stream_id, table, tablets, tablet_to_checkpoint, 200,
-      checkpoint_type == CDCCheckpointType::EXPLICIT));
+      stream_id, table, tablets, tablet_to_checkpoint, 200));
   ASSERT_EQ(record_count, 200);
 
   auto get_tablets_resp =

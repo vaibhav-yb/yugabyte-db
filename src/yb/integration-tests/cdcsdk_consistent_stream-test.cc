@@ -625,7 +625,7 @@ TEST_F(CDCSDKYsqlTest, YB_DISABLE_TEST_IN_TSAN(TestCDCSDKConsistentStreamWithTab
   std::map<TabletId, std::vector<CDCSDKProtoRecordPB>> records_by_tablet;
   int64 total_received_records = ASSERT_RESULT(GetChangeRecordCount(
       stream_id, table, tablets, tablet_to_checkpoint, expected_total_records,
-      checkpoint_type == CDCCheckpointType::EXPLICIT, records_by_tablet));
+      false /* explicit_checkpointing */, records_by_tablet));
 
   ASSERT_EQ(expected_total_records, total_received_records);
 

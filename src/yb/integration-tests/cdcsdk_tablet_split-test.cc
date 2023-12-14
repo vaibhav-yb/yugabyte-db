@@ -514,7 +514,7 @@ void CDCSDKTabletSplitTest::TestGetChangesOnParentTabletAfterTabletSplit(
   int64 received_records = ASSERT_RESULT(GetChangeRecordCount(
       stream_id, table, tablets, tablet_to_checkpoint, expected_total_records,
       checkpoint_type == CDCCheckpointType::EXPLICIT));
-  
+
   ASSERT_EQ(received_records, expected_total_records);
   LOG(INFO) << "Number of records after restart: " << expected_total_records;
 }

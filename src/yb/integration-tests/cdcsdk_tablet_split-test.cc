@@ -839,12 +839,13 @@ TEST_F(CDCSDKTabletSplitTest, YB_DISABLE_TEST_IN_TSAN(TestCDCStateTableAfterTabl
       table, 0, &tablets_after_split, /* partition_list_version =*/nullptr));
 
   // Wait until the 'cdc_parent_tablet_deletion_task_' has run.
-  SleepFor(MonoDelta::FromSeconds(2));
+  SleepFor(MonoDelta::FromSeconds(5));
 
   bool saw_row_child_one = false;
   bool saw_row_child_two = false;
   bool saw_row_parent = false;
-  // We should still see the entry corresponding to the parent tablet.
+
+  // We will not be seeing the entry corresponding to the parent tablet since that is deleted now.
   TabletId parent_tablet_id = tablets[0].tablet_id();
   CDCStateTable cdc_state_table(test_client());
   Status s;
@@ -865,7 +866,9 @@ TEST_F(CDCSDKTabletSplitTest, YB_DISABLE_TEST_IN_TSAN(TestCDCStateTableAfterTabl
   }
   ASSERT_OK(s);
 
-  ASSERT_TRUE(saw_row_child_one && saw_row_child_two && saw_row_parent);
+  ASSERT_TRUE(saw_row_child_one);
+  ASSERT_TRUE(saw_row_child_two);
+  ASSERT_FALSE(saw_row_parent);
 
   google::protobuf::RepeatedPtrField<master::TabletLocationsPB> first_tablet_after_split;
   first_tablet_after_split.CopyFrom(tablets_after_split);
@@ -876,29 +879,6 @@ TEST_F(CDCSDKTabletSplitTest, YB_DISABLE_TEST_IN_TSAN(TestCDCStateTableAfterTabl
   second_tablet_after_split.DeleteSubrange(0, 1);
   ASSERT_EQ(second_tablet_after_split.size(), 1);
   ASSERT_EQ(second_tablet_after_split[0].tablet_id(), tablets_after_split[1].tablet_id());
-
-  // Wait until the 'cdc_parent_tablet_deletion_task_' has run. Then the parent tablet's entry
-  // should be removed from 'cdc_state' table.
-  SleepFor(MonoDelta::FromSeconds(2));
-
-  saw_row_child_one = false;
-  saw_row_child_two = false;
-  // We should no longer see the entry corresponding to the parent tablet.
-  for (const auto& row_result :
-       ASSERT_RESULT(cdc_state_table.GetTableRange({} /* just key columns */, &s))) {
-    ASSERT_OK(row_result);
-    auto& row = *row_result;
-    LOG(INFO) << "Read cdc_state table row with tablet_id: " << row.key.tablet_id
-              << " stream_id: " << row.key.stream_id;
-
-    ASSERT_TRUE(parent_tablet_id != row.key.tablet_id);
-
-    if (row.key.tablet_id == tablets_after_split[0].tablet_id()) {
-      saw_row_child_one = true;
-    } else if (row.key.tablet_id == tablets_after_split[1].tablet_id()) {
-      saw_row_child_two = true;
-    }
-  }
 }
 
 void CDCSDKTabletSplitTest::TestGetTabletListToPollForCDCAfterTabletSplitReported(

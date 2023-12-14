@@ -6454,10 +6454,6 @@
     "LdapUnivSyncFormData" : {
       "description" : "Config to sync universe roles with ldap users",
       "properties" : {
-        "allowDropSuperuser" : {
-          "description" : "Allow the API to drop a superuser role which is not an LDAP group",
-          "type" : "boolean"
-        },
         "createGroups" : {
           "description" : "Allow the API to create the LDAP groups as DB superusers",
           "type" : "boolean"
@@ -12032,6 +12028,11 @@
           "description" : "Keyspace",
           "type" : "string"
         },
+        "mainTableUUID" : {
+          "description" : "Main Table UUID of index tables",
+          "format" : "uuid",
+          "type" : "string"
+        },
         "nameSpace" : {
           "description" : "Namespace or Schema",
           "type" : "string"
@@ -14047,6 +14048,7 @@
           "additionalProperties" : {
             "type" : "string"
           },
+          "description" : "User-defined gflags for master. Deprecated since YBA version 2.18.5.0, use specificGFlags",
           "type" : "object"
         },
         "masterInstanceType" : {
@@ -14082,7 +14084,8 @@
           "type" : "integer"
         },
         "specificGFlags" : {
-          "$ref" : "#/definitions/SpecificGFlags"
+          "$ref" : "#/definitions/SpecificGFlags",
+          "description" : "User-defined gflags for all processes."
         },
         "spotPrice" : {
           "format" : "double",
@@ -14092,6 +14095,7 @@
           "additionalProperties" : {
             "type" : "string"
           },
+          "description" : "User-defined gflags for tserver. Deprecated since YBA version 2.18.5.0, use specificGFlags",
           "type" : "object"
         },
         "tserverK8SNodeResourceSpec" : {

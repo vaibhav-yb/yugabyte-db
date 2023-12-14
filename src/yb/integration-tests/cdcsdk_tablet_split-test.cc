@@ -246,7 +246,7 @@ void CDCSDKTabletSplitTest::TestTransactionInsertAfterTabletSplit(
   auto resp = ASSERT_RESULT(SetCDCCheckpoint(stream_id, tablets));
   ASSERT_FALSE(resp.has_error());
 
-  ASSERT_OK(WriteRowsHelper(1, 200, &test_cluster_, true));
+  ASSERT_OK(WriteRowsHelper(0, 200, &test_cluster_, true));
   ASSERT_OK(test_client()->FlushTables(
       {table.table_id()}, /* add_indexes = */ false, /* timeout_secs = */ 30,
       /* is_compaction = */ true));
@@ -282,7 +282,7 @@ void CDCSDKTabletSplitTest::TestTransactionInsertAfterTabletSplit(
       {table.table_id()}, /* add_indexes = */ false, /* timeout_secs = */ 30,
       /* is_compaction = */ false));
 
-  const int expected_total_records = 100;
+  const int expected_total_records = (checkpoint_type == CDCCheckpointType::EXPLICIT) ? 300 : 100;
 
   std::map<TabletId, CDCSDKCheckpointPB> tablet_to_checkpoint;
   tablet_to_checkpoint[tablets.Get(0).tablet_id()] = change_resp_1.cdc_sdk_checkpoint();

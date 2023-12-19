@@ -815,7 +815,7 @@ TEST_F(CDCSDKTabletSplitTest, YB_DISABLE_TEST_IN_TSAN(TestCDCStateTableAfterTabl
       table, 0, &tablets_after_split, /* partition_list_version =*/nullptr));
 
   // Wait until the 'cdc_parent_tablet_deletion_task_' has run.
-  SleepFor(MonoDelta::FromSeconds(5));
+  SleepFor(MonoDelta::FromSeconds(10));
 
   bool saw_row_child_one = false;
   bool saw_row_child_two = false;

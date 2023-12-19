@@ -134,7 +134,7 @@ DEFINE_UNKNOWN_int32(max_wait_for_safe_time_ms, 5000,
              "Maximum time in milliseconds to wait for the safe time to advance when trying to "
              "scan at the given hybrid_time.");
 
-DEFINE_UNKNOWN_int32(num_concurrent_backfills_allowed, -1,
+DEFINE_RUNTIME_int32(num_concurrent_backfills_allowed, -1,
              "Maximum number of concurrent backfill jobs that is allowed to run.");
 
 DEFINE_test_flag(bool, tserver_noop_read_write, false, "Respond NOOP to read/write.");
@@ -217,6 +217,10 @@ DEFINE_test_flag(bool, fail_alter_schema_after_abort_transactions, false,
 
 DEFINE_test_flag(bool, txn_status_moved_rpc_force_fail, false,
                  "Force updates in transaction status location to fail.");
+
+DEFINE_test_flag(bool, txn_status_moved_rpc_force_fail_retryable, true,
+                 "Forced updates in transaction status location failure should be retryable "
+                 "error.");
 
 DEFINE_test_flag(int32, txn_status_moved_rpc_handle_delay_ms, 0,
                  "Inject delay to slowdown handling of updates in transaction status location.");
@@ -994,23 +998,18 @@ Status TabletServiceAdminImpl::SetupCDCSDKRetention(const tablet::ChangeMetadata
     return s;
   }
 
-  // Check if there is a valid CDC History cutoff requirement.
-  // Else, get the current time and set that as history cutoff
   // Now, from this point on, till the Followers Apply the ChangeMetadataOperation,
   // any proposed history cutoff they process can only be less than Now()
-  if (req->has_cdc_sdk_require_history_cutoff() && req->cdc_sdk_require_history_cutoff()) {
-    if (tablet_peer->get_cdc_sdk_safe_time() == HybridTime::kInvalid) {
-      auto s = tablet_peer->set_cdc_sdk_safe_time(server_->Clock()->Now());
-
-      // If there was an error while setting the history cutoff, respond with an error
-      if (!s.ok()) {
-        LOG_WITH_PREFIX(WARNING) << "CDCSDK Create Stream context: "
-                                 << "Unable to set history cutoff: "
-                                 << s;
-        return s;
-      }
-    }
+  auto require_history_cutoff =
+      req->has_cdc_sdk_require_history_cutoff() && req->cdc_sdk_require_history_cutoff();
+  auto res = tablet_peer->SetAllInitialCDCSDKRetentionBarriers(
+      data.op_id, server_->Clock()->Now(), require_history_cutoff);
+  // If there was an error while setting the retention barrier cutoff, respond with an error
+  if (!res.ok()) {
+    WARN_NOT_OK(res, "CDCSDK Create Stream context: Unable to set history cutoff");
+    RETURN_NOT_OK(res);
   }
+
   return Status::OK();
 }
 
@@ -1333,7 +1332,11 @@ Status TabletServiceImpl::HandleUpdateTransactionStatusLocation(
   }
 
   if (PREDICT_FALSE(FLAGS_TEST_txn_status_moved_rpc_force_fail)) {
-    return STATUS(IllegalState, "UpdateTransactionStatusLocation forced to fail");
+    if (FLAGS_TEST_txn_status_moved_rpc_force_fail_retryable) {
+      return STATUS(IllegalState, "UpdateTransactionStatusLocation forced to fail");
+    } else {
+      return STATUS(Expired, "UpdateTransactionStatusLocation forced to fail");
+    }
   }
 
   auto txn_id = VERIFY_RESULT(FullyDecodeTransactionId(req->transaction_id()));

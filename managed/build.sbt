@@ -140,6 +140,7 @@ libraryDependencies ++= Seq(
   "com.google.inject.extensions" % "guice-assistedinject" % "5.1.0",
   "org.postgresql" % "postgresql" % "42.3.3",
   "net.logstash.logback" % "logstash-logback-encoder" % "6.2",
+  "ch.qos.logback" % "logback-classic" % "1.4.14",
   "org.codehaus.janino" % "janino" % "3.1.9",
   "org.apache.commons" % "commons-compress" % "1.21",
   "org.apache.commons" % "commons-csv" % "1.9.0",
@@ -151,11 +152,11 @@ libraryDependencies ++= Seq(
   "org.yaml" % "snakeyaml" % "2.1",
   "org.bouncycastle" % "bcpkix-jdk15on" % "1.61",
   "org.springframework.security" % "spring-security-core" % "5.8.3",
-  "com.amazonaws" % "aws-java-sdk-ec2" % "1.12.129",
-  "com.amazonaws" % "aws-java-sdk-kms" % "1.12.129",
-  "com.amazonaws" % "aws-java-sdk-iam" % "1.12.129",
-  "com.amazonaws" % "aws-java-sdk-sts" % "1.12.129",
-  "com.amazonaws" % "aws-java-sdk-s3" % "1.12.129",
+  "com.amazonaws" % "aws-java-sdk-ec2" % "1.12.599",
+  "com.amazonaws" % "aws-java-sdk-kms" % "1.12.599",
+  "com.amazonaws" % "aws-java-sdk-iam" % "1.12.599",
+  "com.amazonaws" % "aws-java-sdk-sts" % "1.12.599",
+  "com.amazonaws" % "aws-java-sdk-s3" % "1.12.599",
   "com.amazonaws" % "aws-java-sdk-elasticloadbalancingv2" % "1.12.327",
   "com.amazonaws" % "aws-java-sdk-route53" % "1.12.400",
   "com.amazonaws" % "aws-java-sdk-cloudtrail" % "1.12.498",
@@ -195,7 +196,7 @@ libraryDependencies ++= Seq(
   "com.google.cloud" % "google-cloud-logging" % "3.14.5",
   "com.google.oauth-client" % "google-oauth-client" % "1.34.1",
   "org.projectlombok" % "lombok" % "1.18.26",
-  "com.squareup.okhttp3" % "okhttp" % "4.9.2",
+  "com.squareup.okhttp3" % "okhttp" % "4.12.0",
   "io.kamon" %% "kamon-bundle" % "2.5.9",
   "io.kamon" %% "kamon-prometheus" % "2.5.9",
   "org.unix4j" % "unix4j-command" % "0.6",
@@ -494,8 +495,8 @@ runPlatform := {
   Project.extract(newState).runTask(runPlatformTask, newState)
 }
 
-libraryDependencies += "org.yb" % "yb-client" % "0.8.73-SNAPSHOT"
-libraryDependencies += "org.yb" % "ybc-client" % "2.0.0.0-b20"
+libraryDependencies += "org.yb" % "yb-client" % "0.8.75-SNAPSHOT"
+libraryDependencies += "org.yb" % "ybc-client" % "2.0.0.0-b21"
 libraryDependencies += "org.yb" % "yb-perf-advisor" % "1.0.0-b32"
 
 libraryDependencies ++= Seq(

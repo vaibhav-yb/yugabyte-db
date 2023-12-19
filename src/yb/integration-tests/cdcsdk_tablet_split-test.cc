@@ -791,7 +791,7 @@ TEST_F(CDCSDKTabletSplitTest, YB_DISABLE_TEST_IN_TSAN(TestCDCStateTableAfterTabl
   GetChangesResponsePB change_resp_1 = ASSERT_RESULT(GetChangesFromCDC(stream_id, tablets));
 
   TableId table_id = ASSERT_RESULT(GetTableId(&test_cluster_, kNamespaceName, kTableName));
-  ASSERT_OK(WriteRowsHelper(1, 200, &test_cluster_, true));
+  ASSERT_OK(WriteRowsHelper(0, 200, &test_cluster_, true));
   ASSERT_OK(test_client()->FlushTables(
       {table.table_id()}, /* add_indexes = */ false, /* timeout_secs = */ 30,
       /* is_compaction = */ true));
@@ -801,26 +801,27 @@ TEST_F(CDCSDKTabletSplitTest, YB_DISABLE_TEST_IN_TSAN(TestCDCStateTableAfterTabl
 
   WaitUntilSplitIsSuccesful(tablets.Get(0).tablet_id(), table);
 
-  change_resp_1 =
-      ASSERT_RESULT(GetChangesFromCDC(stream_id, tablets, &change_resp_1.cdc_sdk_checkpoint()));
-  ASSERT_GE(change_resp_1.cdc_sdk_proto_records_size(), 200);
-  LOG(INFO) << "Number of records after restart: " << change_resp_1.cdc_sdk_proto_records_size();
+  const int expected_total_records = 200;
 
-  // Now that there are no more records to stream, further calls of 'GetChangesFromCDC' to the same
-  // tablet should fail.
-  ASSERT_NOK(GetChangesFromCDC(stream_id, tablets, &change_resp_1.cdc_sdk_checkpoint()));
+  std::map<TabletId, CDCSDKCheckpointPB> tablet_to_checkpoint;
+  tablet_to_checkpoint[tablets.Get(0).tablet_id()] = change_resp_1.cdc_sdk_checkpoint();
+  int64 received_records = ASSERT_RESULT(GetChangeRecordCount(
+      stream_id, table, tablets, tablet_to_checkpoint, expected_total_records));
+  ASSERT_EQ(received_records, expected_total_records);
+  LOG(INFO) << "Number of records after restart: " << received_records;
 
   google::protobuf::RepeatedPtrField<master::TabletLocationsPB> tablets_after_split;
   ASSERT_OK(test_client()->GetTablets(
       table, 0, &tablets_after_split, /* partition_list_version =*/nullptr));
 
   // Wait until the 'cdc_parent_tablet_deletion_task_' has run.
-  SleepFor(MonoDelta::FromSeconds(2));
+  SleepFor(MonoDelta::FromSeconds(5));
 
   bool saw_row_child_one = false;
   bool saw_row_child_two = false;
   bool saw_row_parent = false;
-  // We should still see the entry corresponding to the parent tablet.
+
+  // We will not be seeing the entry corresponding to the parent tablet since that is deleted now.
   TabletId parent_tablet_id = tablets[0].tablet_id();
   CDCStateTable cdc_state_table(test_client());
   Status s;
@@ -841,7 +842,9 @@ TEST_F(CDCSDKTabletSplitTest, YB_DISABLE_TEST_IN_TSAN(TestCDCStateTableAfterTabl
   }
   ASSERT_OK(s);
 
-  ASSERT_TRUE(saw_row_child_one && saw_row_child_two && saw_row_parent);
+  ASSERT_TRUE(saw_row_child_one);
+  ASSERT_TRUE(saw_row_child_two);
+  ASSERT_FALSE(saw_row_parent);
 
   google::protobuf::RepeatedPtrField<master::TabletLocationsPB> first_tablet_after_split;
   first_tablet_after_split.CopyFrom(tablets_after_split);
@@ -852,43 +855,6 @@ TEST_F(CDCSDKTabletSplitTest, YB_DISABLE_TEST_IN_TSAN(TestCDCStateTableAfterTabl
   second_tablet_after_split.DeleteSubrange(0, 1);
   ASSERT_EQ(second_tablet_after_split.size(), 1);
   ASSERT_EQ(second_tablet_after_split[0].tablet_id(), tablets_after_split[1].tablet_id());
-
-  GetChangesResponsePB change_resp_2 = ASSERT_RESULT(
-      GetChangesFromCDC(stream_id, first_tablet_after_split, &change_resp_1.cdc_sdk_checkpoint()));
-  LOG(INFO) << "Number of records from GetChanges() call on first tablet after split: "
-            << change_resp_2.cdc_sdk_proto_records_size();
-  ASSERT_RESULT(
-      GetChangesFromCDC(stream_id, first_tablet_after_split, &change_resp_2.cdc_sdk_checkpoint()));
-
-  GetChangesResponsePB change_resp_3 = ASSERT_RESULT(
-      GetChangesFromCDC(stream_id, second_tablet_after_split, &change_resp_1.cdc_sdk_checkpoint()));
-  LOG(INFO) << "Number of records from GetChanges() call on second tablet after split: "
-            << change_resp_3.cdc_sdk_proto_records_size();
-  ASSERT_RESULT(
-      GetChangesFromCDC(stream_id, second_tablet_after_split, &change_resp_3.cdc_sdk_checkpoint()));
-
-  // Wait until the 'cdc_parent_tablet_deletion_task_' has run. Then the parent tablet's entry
-  // should be removed from 'cdc_state' table.
-  SleepFor(MonoDelta::FromSeconds(2));
-
-  saw_row_child_one = false;
-  saw_row_child_two = false;
-  // We should no longer see the entry corresponding to the parent tablet.
-  for (const auto& row_result :
-       ASSERT_RESULT(cdc_state_table.GetTableRange({} /* just key columns */, &s))) {
-    ASSERT_OK(row_result);
-    auto& row = *row_result;
-    LOG(INFO) << "Read cdc_state table row with tablet_id: " << row.key.tablet_id
-              << " stream_id: " << row.key.stream_id;
-
-    ASSERT_TRUE(parent_tablet_id != row.key.tablet_id);
-
-    if (row.key.tablet_id == tablets_after_split[0].tablet_id()) {
-      saw_row_child_one = true;
-    } else if (row.key.tablet_id == tablets_after_split[1].tablet_id()) {
-      saw_row_child_two = true;
-    }
-  }
 }
 
 void CDCSDKTabletSplitTest::TestGetTabletListToPollForCDCAfterTabletSplitReported(

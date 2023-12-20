@@ -826,11 +826,12 @@ TEST_F(CDCSDKTabletSplitTest, YB_DISABLE_TEST_IN_TSAN(TestCDCStateTableAfterTabl
   CDCStateTable cdc_state_table(test_client());
   Status s;
   for (auto row_result :
-       ASSERT_RESULT(cdc_state_table.GetTableRange({} /* just key columns */, &s))) {
+       ASSERT_RESULT(cdc_state_table.GetTableRange(CDCStateTableEntrySelector().IncludeAll(), &s))) {
     ASSERT_OK(row_result);
     auto& row = *row_result;
     LOG(INFO) << "Read cdc_state table row with tablet_id: " << row.key.tablet_id
               << " stream_id: " << row.key.stream_id;
+    LOG(INFO) << "VKVK row value: " << row.ToString();
 
     if (row.key.tablet_id == tablets_after_split[0].tablet_id()) {
       saw_row_child_one = true;

@@ -785,7 +785,7 @@ TEST_F(CDCSDKTabletSplitTest, YB_DISABLE_TEST_IN_TSAN(TestCDCStateTableAfterTabl
   ASSERT_OK(test_client()->GetTablets(table, 0, &tablets, /* partition_list_version =*/nullptr));
   ASSERT_EQ(tablets.size(), num_tablets);
 
-  xrepl::StreamId stream_id = ASSERT_RESULT(CreateDBStream(IMPLICIT));
+  xrepl::StreamId stream_id = ASSERT_RESULT(CreateDBStream(EXPLICIT));
   auto resp = ASSERT_RESULT(SetCDCCheckpoint(stream_id, tablets));
   ASSERT_FALSE(resp.has_error());
   GetChangesResponsePB change_resp_1 = ASSERT_RESULT(GetChangesFromCDC(stream_id, tablets));
@@ -806,7 +806,7 @@ TEST_F(CDCSDKTabletSplitTest, YB_DISABLE_TEST_IN_TSAN(TestCDCStateTableAfterTabl
   std::map<TabletId, CDCSDKCheckpointPB> tablet_to_checkpoint;
   tablet_to_checkpoint[tablets.Get(0).tablet_id()] = change_resp_1.cdc_sdk_checkpoint();
   int64 received_records = ASSERT_RESULT(GetChangeRecordCount(
-      stream_id, table, tablets, tablet_to_checkpoint, expected_total_records));
+      stream_id, table, tablets, tablet_to_checkpoint, expected_total_records, true));
   ASSERT_EQ(received_records, expected_total_records);
   LOG(INFO) << "Number of records after restart: " << received_records;
 
@@ -825,8 +825,8 @@ TEST_F(CDCSDKTabletSplitTest, YB_DISABLE_TEST_IN_TSAN(TestCDCStateTableAfterTabl
   TabletId parent_tablet_id = tablets[0].tablet_id();
   CDCStateTable cdc_state_table(test_client());
   Status s;
-  for (auto row_result :
-       ASSERT_RESULT(cdc_state_table.GetTableRange(CDCStateTableEntrySelector().IncludeAll(), &s))) {
+  for (auto row_result : ASSERT_RESULT(
+           cdc_state_table.GetTableRange(CDCStateTableEntrySelector().IncludeAll(), &s))) {
     ASSERT_OK(row_result);
     auto& row = *row_result;
     LOG(INFO) << "Read cdc_state table row with tablet_id: " << row.key.tablet_id

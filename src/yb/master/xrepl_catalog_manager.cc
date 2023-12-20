@@ -6357,7 +6357,6 @@ void CatalogManager::ScheduleCDCParentTabletDeletionTask() {
 void CatalogManager::ProcessCDCParentTabletDeletionPeriodically() {
   if (!CheckIsLeaderAndReady().IsOk()) {
     cdc_parent_tablet_deletion_task_running_ = false;
-    LOG(INFO) << "VKVK leader is not ready";
     return;
   }
   WARN_NOT_OK(DoProcessCDCSDKTabletDeletion(), "Failed to run DoProcessCDCSdkTabletDeletion.");
@@ -6368,12 +6367,10 @@ void CatalogManager::ProcessCDCParentTabletDeletionPeriodically() {
 }
 
 Status CatalogManager::DoProcessCDCSDKTabletDeletion() {
-  LOG(INFO) << "VKVK inside tablet deletion method";
   std::unordered_map<TabletId, HiddenReplicationParentTabletInfo> hidden_tablets;
   {
     SharedLock lock(mutex_);
     if (retained_by_cdcsdk_.empty()) {
-      LOG(INFO) << "VKVK retained by cdcsdk map is empty, returning early";
       return Status::OK();
     }
     hidden_tablets = retained_by_cdcsdk_;
@@ -6388,7 +6385,6 @@ Status CatalogManager::DoProcessCDCSDKTabletDeletion() {
     // If our parent tablet is still around, need to process that one first.
     const auto& parent_tablet_id = hidden_tablet.parent_tablet_id_;
     if (!parent_tablet_id.empty() && hidden_tablets.contains(parent_tablet_id)) {
-      LOG(INFO) << "VKVK found parent tablet for a hidden tablet";
       continue;
     }
 
@@ -6408,7 +6404,6 @@ Status CatalogManager::DoProcessCDCSDKTabletDeletion() {
 
       // This means we already deleted the entry for this stream in a previous iteration.
       if (!entry_opt) {
-        LOG(INFO) << "VKVK no entry for tablet " << tablet_id;
         VLOG(2) << "Did not find an entry corresponding to the tablet: " << tablet_id
                 << ", and stream: " << stream_id << ", in the cdc_state table";
         ++count_streams_already_deleted;
@@ -6462,8 +6457,6 @@ Status CatalogManager::DoProcessCDCSDKTabletDeletion() {
       }
     }
 
-    LOG(INFO) << "VKVK entries to delete " << AsString(entries_to_delete);
-
     if (count_tablet_streams_to_delete + count_streams_already_deleted == stream_ids.size()) {
       tablets_to_delete.insert(tablet_id);
     }
@@ -6486,7 +6479,6 @@ Status CatalogManager::DoProcessCDCSDKTabletDeletion() {
   {
     LockGuard lock(mutex_);
     for (const auto& tablet_id : tablets_to_delete) {
-      LOG(INFO) << "VKVK deleting entry " << tablet_id << " from retained_by_cdcsdk_";
       retained_by_cdcsdk_.erase(tablet_id);
     }
   }

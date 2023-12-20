@@ -776,6 +776,7 @@ TEST_F(CDCSDKTabletSplitTest, YB_DISABLE_TEST_IN_TSAN(TestCDCStateTableAfterTabl
   ANNOTATE_UNPROTECTED_WRITE(FLAGS_cdc_state_checkpoint_update_interval_ms) = 0;
   ANNOTATE_UNPROTECTED_WRITE(FLAGS_aborted_intent_cleanup_ms) = 1000;
   ANNOTATE_UNPROTECTED_WRITE(FLAGS_cdc_parent_tablet_deletion_task_retry_secs) = 1;
+  ANNOTATE_UNPROTECTED_WRITE(FLAGS_cleanup_split_tablets_interval_sec) = 1;
 
   google::protobuf::RepeatedPtrField<master::TabletLocationsPB> tablets;
   ASSERT_OK(SetUpWithParams(3, 1, false));
@@ -826,12 +827,11 @@ TEST_F(CDCSDKTabletSplitTest, YB_DISABLE_TEST_IN_TSAN(TestCDCStateTableAfterTabl
   CDCStateTable cdc_state_table(test_client());
   Status s;
   for (auto row_result : ASSERT_RESULT(
-           cdc_state_table.GetTableRange(CDCStateTableEntrySelector().IncludeAll(), &s))) {
+           cdc_state_table.GetTableRange({} /* just key columns */, &s))) {
     ASSERT_OK(row_result);
     auto& row = *row_result;
     LOG(INFO) << "Read cdc_state table row with tablet_id: " << row.key.tablet_id
               << " stream_id: " << row.key.stream_id;
-    LOG(INFO) << "VKVK row value: " << row.ToString();
 
     if (row.key.tablet_id == tablets_after_split[0].tablet_id()) {
       saw_row_child_one = true;

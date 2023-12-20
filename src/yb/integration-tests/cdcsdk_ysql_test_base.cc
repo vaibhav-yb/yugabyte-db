@@ -1419,7 +1419,7 @@ namespace cdc {
       const xrepl::StreamId& stream_id,
       const YBTableName& table,
       const google::protobuf::RepeatedPtrField<master::TabletLocationsPB>& tablets,
-      std::map<TabletId, CDCSDKCheckpointPB> tablet_to_checkpoint,
+      std::map<TabletId, CDCSDKCheckpointPB>& tablet_to_checkpoint,
       const int64 expected_total_records,
       bool explicit_checkpointing_enabled,
       std::map<TabletId, std::vector<CDCSDKProtoRecordPB>> records) {

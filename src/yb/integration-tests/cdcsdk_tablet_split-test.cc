@@ -813,9 +813,17 @@ TEST_F(CDCSDKTabletSplitTest, YB_DISABLE_TEST_IN_TSAN(TestCDCStateTableAfterTabl
   google::protobuf::RepeatedPtrField<master::TabletLocationsPB> tablets_after_split;
   ASSERT_OK(test_client()->GetTablets(
       table, 0, &tablets_after_split, /* partition_list_version =*/nullptr));
+  
+  // Call GetChanges on children to ensure removal of parent.
+  GetChangesResponsePB child_resp_1 = ASSERT_RESULT(GetChangesFromCDC(
+      stream_id, tablets_after_split, &tablet_to_checkpoint[tablets_after_split.Get(0).tablet_id()],
+      0));
+  GetChangesResponsePB child_resp_2 = ASSERT_RESULT(GetChangesFromCDC(
+      stream_id, tablets_after_split, &tablet_to_checkpoint[tablets_after_split.Get(1).tablet_id()],
+      1));
 
   // Wait until the 'cdc_parent_tablet_deletion_task_' has run.
-  SleepFor(MonoDelta::FromSeconds(10));
+  SleepFor(MonoDelta::FromSeconds(5));
 
   bool saw_row_child_one = false;
   bool saw_row_child_two = false;

@@ -11,7 +11,6 @@
 // under the License.
 
 #include "yb/cdc/cdc_service.pb.h"
-#include "yb/common/wire_protocol.h"
 #include "yb/gutil/dynamic_annotations.h"
 #include "yb/gutil/integral_types.h"
 #include "yb/integration-tests/cdcsdk_ysql_test_base.h"

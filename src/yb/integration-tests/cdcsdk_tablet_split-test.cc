@@ -11,6 +11,7 @@
 // under the License.
 
 #include "yb/cdc/cdc_service.pb.h"
+#include "yb/common/wire_protocol.h"
 #include "yb/gutil/dynamic_annotations.h"
 #include "yb/gutil/integral_types.h"
 #include "yb/integration-tests/cdcsdk_ysql_test_base.h"
@@ -338,7 +339,7 @@ void CDCSDKTabletSplitTest::TestGetChangesReportsTabletSplitErrorOnRetries(
 
   // Initiate a tablet split request, since there are around 5000 rows in the table/ tablet, it will
   // take some time for the child tablets to be in running state.
-  ASSERT_OK(SplitTablet(tablets.Get(0).tablet_id(), &test_cluster_));
+  WaitUntilSplitIsSuccesful(tablets.Get(0).tablet_id(), table);
 
   // Keep calling 'GetChange' until we get an error for the tablet split, this will only happen
   // after both the child tablets are in running state.

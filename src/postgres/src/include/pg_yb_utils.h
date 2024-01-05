@@ -674,7 +674,8 @@ int32_t YBFollowerReadStalenessMs();
  * Allocates YBCPgYBTupleIdDescriptor with nattrs arguments by using palloc.
  * Resulted object can be released with pfree.
  */
-YBCPgYBTupleIdDescriptor* YBCCreateYBTupleIdDescriptor(Oid db_oid, Oid table_oid, int nattrs);
+YBCPgYBTupleIdDescriptor* YBCCreateYBTupleIdDescriptor(Oid db_oid, Oid table_relfilenode_oid,
+	int nattrs);
 void YBCFillUniqueIndexNullAttribute(YBCPgYBTupleIdDescriptor* descr);
 
 /*
@@ -784,12 +785,16 @@ extern const int yb_funcs_unsafe_for_pushdown_count;
 void YBSetParentDeathSignal();
 
 /**
- * Return the relid to be used for the relation's storage in docDB.
- * Ex: If we have swapped relation A with relation B, relation A's
- * filenode has been set to relation B's OID.
+ * Given a relation, return it's relfilenode OID. In YB, the relfilenode OID
+ * maps to the relation's DocDB table ID. Note: if the table has not
+ * previously been rewritten, this function returns the OID of the table.
  */
-Oid YbGetStorageRelid(Relation relation);
+Oid YbGetRelfileNodeId(Relation relation);
 
+/**
+ * Given a relation ID, return the relation's relfilenode OID.
+ */
+Oid YbGetRelfileNodeIdFromRelId(Oid relationId);
 /*
  * Check whether the user ID is of a user who has the yb_db_admin role.
  */
@@ -947,6 +952,7 @@ OptSplit *YbGetSplitOptions(Relation rel);
 		YBCStatus _status = (status); \
 		if (_status) \
 		{ \
+			const int 		adjusted_elevel = YBCStatusIsFatalError(_status) ? FATAL : elevel; \
 			const uint32_t	pg_err_code = YBCStatusPgsqlError(_status); \
 			const uint16_t	txn_err_code = YBCStatusTransactionError(_status); \
 			const char	   *filename = YBCStatusFilename(_status); \
@@ -963,7 +969,7 @@ OptSplit *YbGetSplitOptions(Relation rel);
 										   &detail_buf, &detail_nargs, \
 										   &detail_args); \
 			YBCFreeStatus(_status); \
-			if (errstart(elevel, __FILE__, \
+			if (errstart(adjusted_elevel, __FILE__, \
 						 lineno > 0 ? lineno : __LINE__, \
 						 PG_FUNCNAME_MACRO, \
 						 TEXTDOMAIN)) \
@@ -1026,5 +1032,9 @@ extern char* YbReadWholeFile(const char *filename, int* length, int elevel);
  * statement if it increments the catalog version.
  */
 extern void YBCheckDdlForDBCatalogVersionMode(YbDdlMode mode);
+
+extern void YbATCopyPrimaryKeyToCreateStmt(Relation rel,
+										   Relation pg_constraint,
+										   CreateStmt *create_stmt);
 
 #endif /* PG_YB_UTILS_H */

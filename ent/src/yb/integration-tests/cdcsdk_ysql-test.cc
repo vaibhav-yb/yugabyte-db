@@ -116,6 +116,7 @@ DECLARE_bool(TEST_cdc_snapshot_failure);
 DECLARE_bool(ysql_enable_packed_row);
 DECLARE_uint64(ysql_packed_row_size_limit);
 DECLARE_string(vmodule);
+DECLARE_bool(TEST_cdcsdk_skip_processing_dynamic_table_addition);
 
 namespace yb {
 
@@ -156,6 +157,27 @@ class CDCSDKYsqlTest : public CDCSDKTestBase {
     int32_t key;
     int32_t value;
   };
+
+  void VerifyTablesInStreamMetadata(
+      const std::string& stream_id, const std::unordered_set<std::string>& expected_table_ids,
+      const std::string& timeout_msg) {
+    ASSERT_OK(WaitFor(
+        [&]() -> Result<bool> {
+          auto get_resp = GetDBStreamInfo(stream_id);
+          if (get_resp.ok() && !get_resp->has_error()) {
+            const uint64_t table_info_size = get_resp->table_info_size();
+            if (table_info_size == expected_table_ids.size()) {
+              std::unordered_set<std::string> table_ids;
+              for (auto entry : get_resp->table_info()) {
+                table_ids.insert(entry.table_id());
+              }
+              if (expected_table_ids == table_ids) return true;
+            }
+          }
+          return false;
+        },
+        MonoDelta::FromSeconds(60), timeout_msg));
+  }
 
   struct ExpectedRecordWithThreeColumns {
     int32_t key;
@@ -1682,6 +1704,23 @@ class CDCSDKYsqlTest : public CDCSDKTestBase {
     return Status::OK();
   }
 
+  Status SetStreamAsActiveState(
+      const std::string& ns, const std::unordered_set<std::string>& stream_ids) {
+    string tool_path = GetToolPath("../bin", "yb-admin");
+    vector<string> argv;
+    argv.push_back(tool_path);
+    argv.push_back("--master_addresses");
+    argv.push_back(AsString(test_cluster_.mini_cluster_->GetMasterAddresses()));
+    argv.push_back("set_stream_state_as_active");
+    argv.push_back(ns);
+    for (const auto& stream_id : stream_ids) {
+      argv.push_back(stream_id);
+    }
+    RETURN_NOT_OK(Subprocess::Call(argv));
+
+    return Status::OK();
+  }
+
   int CountEntriesInDocDB(std::vector<tablet::TabletPeerPtr> peers, const std::string& table_id) {
     int count = 0;
     for (const auto& peer : peers) {
@@ -3065,6 +3104,263 @@ TEST_F(CDCSDKYsqlTest, YB_DISABLE_TEST_IN_TSAN(TestSchemaChangeBeforeImage)) {
   }
   LOG(INFO) << "Got " << count[1] << " insert record and " << count[2] << " update record";
   CheckCount(FLAGS_ysql_enable_packed_row ? expected_count_packed_row : expected_count, count);
+}
+
+TEST_F(CDCSDKYsqlTest, YB_DISABLE_TEST_IN_TSAN(TestAddTableAfterDropTableAfterUpdateStreamState)) {
+  // Setup cluster.
+  ASSERT_OK(SetUpWithParams(3, 3, false));
+
+  const vector<string> table_list_suffix = {"_1", "_2", "_3", "_4", "_5"};
+  const int kNumTables = 5;
+  vector<YBTableName> table(kNumTables);
+  int idx = 0;
+  vector<google::protobuf::RepeatedPtrField<master::TabletLocationsPB>> tablets(kNumTables);
+
+  while (idx < 3) {
+    table[idx] = ASSERT_RESULT(CreateTable(
+        &test_cluster_, kNamespaceName, kTableName, 1, true, false, 0, true,
+        table_list_suffix[idx]));
+    ASSERT_OK(test_client()->GetTablets(
+        table[idx], 0, &tablets[idx], /* partition_list_version = */ nullptr));
+    ASSERT_OK(WriteEnumsRows(
+        0 /* start */, 100 /* end */, &test_cluster_, table_list_suffix[idx], kNamespaceName,
+        kTableName));
+    idx += 1;
+  }
+  std::unordered_set<std::string> stream_ids;
+  auto stream_id_1 = ASSERT_RESULT(CreateDBStream(EXPLICIT));
+  stream_ids.insert(stream_id_1);
+  auto stream_id_2 = ASSERT_RESULT(CreateDBStream(EXPLICIT));
+  stream_ids.insert(stream_id_2);
+  SleepFor(MonoDelta::FromSeconds(2));
+  DropTable(&test_cluster_, "test_table_1");
+
+  // Drop table will trigger the background thread to start the stream metadata cleanup, here
+  // wait for the metadata cleanup to finish by the background thread.
+  std::unordered_set<std::string> expected_table_ids_after_drop = {
+      table[1].table_id(), table[2].table_id()};
+  VerifyTablesInStreamMetadata(
+      stream_id_1, expected_table_ids_after_drop, "Waiting for stream metadata cleanup.");
+  VerifyTablesInStreamMetadata(
+      stream_id_2, expected_table_ids_after_drop, "Waiting for stream metadata cleanup.");
+
+  // create a new table and verify that it gets added to stream metadata.
+  table[idx] = ASSERT_RESULT(CreateTable(
+      &test_cluster_, kNamespaceName, kTableName, 1, true, false, 0, true, table_list_suffix[idx]));
+  ASSERT_OK(test_client()->GetTablets(
+      table[idx], 0, &tablets[idx], /* partition_list_version = */ nullptr));
+  idx += 1;
+
+  // Wait for the bg threads to complete a run.
+  SleepFor(MonoDelta::FromSeconds(3));
+  std::unordered_set<std::string> expected_table_ids_after_create_table =
+      expected_table_ids_after_drop;
+  VerifyTablesInStreamMetadata(
+      stream_id_1, expected_table_ids_after_create_table,
+      "Waiting for GetDBStreamInfo after table creation.");
+  VerifyTablesInStreamMetadata(
+      stream_id_2, expected_table_ids_after_create_table,
+      "Waiting for GetDBStreamInfo after table creation.");
+
+  // Change the stream to ACTIVE state.
+  ASSERT_OK(SetStreamAsActiveState(kNamespaceName, stream_ids));
+
+  // Stream metadata should now reflect the newly created table.
+  std::unordered_set<std::string> expected_table_ids_after_updating_stream_state =
+      expected_table_ids_after_drop;
+  expected_table_ids_after_updating_stream_state.insert(table[idx - 1].table_id());
+  VerifyTablesInStreamMetadata(
+      stream_id_1, expected_table_ids_after_updating_stream_state,
+      "Waiting for GetDBStreamInfo after updating state to active.");
+  VerifyTablesInStreamMetadata(
+      stream_id_2, expected_table_ids_after_updating_stream_state,
+      "Waiting for GetDBStreamInfo after updating state to active.");
+
+  // create a new table and verify that it gets added to stream metadata.
+  table[idx] = ASSERT_RESULT(CreateTable(
+      &test_cluster_, kNamespaceName, kTableName, 1, true, false, 0, true, table_list_suffix[idx]));
+  ASSERT_OK(test_client()->GetTablets(
+      table[idx], 0, &tablets[idx], /* partition_list_version = */ nullptr));
+
+  // Stream metadata should now reflect both the new tables created drop table.
+  expected_table_ids_after_updating_stream_state.insert(table[idx].table_id());
+  VerifyTablesInStreamMetadata(
+      stream_id_1, expected_table_ids_after_updating_stream_state,
+      "Waiting for GetDBStreamInfo after updating state and create table.");
+  VerifyTablesInStreamMetadata(
+      stream_id_2, expected_table_ids_after_updating_stream_state,
+      "Waiting for GetDBStreamInfo after updating state and create table.");
+
+  // verify tablets of the new tables are added to cdc_state table.
+  std::unordered_set<std::string> expected_tablet_ids;
+  for (idx = 1; idx < 5; idx++) {
+    expected_tablet_ids.insert(tablets[idx].Get(0).tablet_id());
+  }
+
+  std::unordered_set<TabletId> tablets_found_for_stream_1;
+  std::unordered_set<TabletId> tablets_found_for_stream_2;
+  client::TableHandle table_handle;
+  client::YBTableName cdc_state_table(
+      YQL_DATABASE_CQL, master::kSystemNamespaceName, master::kCdcStateTableName);
+  ASSERT_OK(table_handle.Open(cdc_state_table, test_client()));
+
+  for (const auto& row : client::TableRange(table_handle)) {
+    const auto& row_stream_id = row.column(master::kCdcStreamIdIdx).string_value();
+    const auto& tablet_id = row.column(master::kCdcTabletIdIdx).string_value();
+    const auto& checkpoint = row.column(master::kCdcCheckpointIdx).string_value();
+    LOG(INFO) << "Read cdc_state table row for tablet_id: " << tablet_id
+              << " and stream_id: " << row_stream_id << ", with checkpoint: " << checkpoint;
+    if (row_stream_id == stream_id_1) {
+      tablets_found_for_stream_1.insert(tablet_id);
+    }
+
+    if (row_stream_id == stream_id_2) {
+      tablets_found_for_stream_2.insert(tablet_id);
+    }
+  }
+  LOG(INFO) << "tablets found: " << AsString(tablets_found_for_stream_1)
+            << ", expected tablets: " << AsString(expected_tablet_ids);
+  LOG(INFO) << "tablets found for stream 2: " << AsString(tablets_found_for_stream_2)
+            << ", expected tablets: " << AsString(expected_tablet_ids);
+  ASSERT_EQ(expected_tablet_ids, tablets_found_for_stream_1);
+  ASSERT_EQ(expected_tablet_ids, tablets_found_for_stream_2);
+}
+
+TEST_F(
+    CDCSDKYsqlTest,
+    YB_DISABLE_TEST_IN_TSAN(TestAddTableAfterDropTableAfterUpdateStreamStateaAndMasterRestart)) {
+  // Setup cluster.
+  ASSERT_OK(SetUpWithParams(3, 3, false));
+  const vector<string> table_list_suffix = {"_1", "_2", "_3", "_4", "_5"};
+  const int kNumTables = 5;
+  vector<YBTableName> table(kNumTables);
+  int idx = 0;
+  vector<google::protobuf::RepeatedPtrField<master::TabletLocationsPB>> tablets(kNumTables);
+
+  while (idx < 3) {
+    table[idx] = ASSERT_RESULT(CreateTable(
+        &test_cluster_, kNamespaceName, kTableName, 1, true, false, 0, true,
+        table_list_suffix[idx]));
+    ASSERT_OK(test_client()->GetTablets(
+        table[idx], 0, &tablets[idx], /* partition_list_version = */ nullptr));
+    ASSERT_OK(WriteEnumsRows(
+        0 /* start */, 100 /* end */, &test_cluster_, table_list_suffix[idx], kNamespaceName,
+        kTableName));
+    idx += 1;
+  }
+  std::unordered_set<std::string> stream_ids;
+  auto stream_id_1 = ASSERT_RESULT(CreateDBStream(EXPLICIT));
+  stream_ids.insert(stream_id_1);
+  auto stream_id_2 = ASSERT_RESULT(CreateDBStream(EXPLICIT));
+  stream_ids.insert(stream_id_2);
+  SleepFor(MonoDelta::FromSeconds(2));
+  DropTable(&test_cluster_, "test_table_1");
+
+  // Drop table will trigger the background thread to start the stream metadata cleanup, here
+  // wait for the metadata cleanup to finish by the background thread.
+  std::unordered_set<std::string> expected_table_ids_after_drop = {
+      table[1].table_id(), table[2].table_id()};
+  VerifyTablesInStreamMetadata(
+      stream_id_1, expected_table_ids_after_drop, "Waiting for stream metadata cleanup.");
+  VerifyTablesInStreamMetadata(
+      stream_id_2, expected_table_ids_after_drop, "Waiting for stream metadata cleanup.");
+
+  // create a new table and verify that it does not get added to stream metadata.
+  table[idx] = ASSERT_RESULT(CreateTable(
+      &test_cluster_, kNamespaceName, kTableName, 1, true, false, 0, true, table_list_suffix[idx]));
+  ASSERT_OK(test_client()->GetTablets(
+      table[idx], 0, &tablets[idx], /* partition_list_version = */ nullptr));
+  idx += 1;
+
+  SleepFor(MonoDelta::FromSeconds(3));
+  std::unordered_set<std::string> expected_table_ids_after_create_table =
+      expected_table_ids_after_drop;
+  VerifyTablesInStreamMetadata(
+      stream_id_1, expected_table_ids_after_create_table,
+      "Waiting for GetDBStreamInfo after table creation.");
+  VerifyTablesInStreamMetadata(
+      stream_id_2, expected_table_ids_after_create_table,
+      "Waiting for GetDBStreamInfo after table creation.");
+
+  // Before changing state to ACTIVE, skip processing any newly created table by bg thread to test
+  // with master restart case.
+  ANNOTATE_UNPROTECTED_WRITE(FLAGS_TEST_cdcsdk_skip_processing_dynamic_table_addition) = true;
+  SleepFor(MonoDelta::FromSeconds(3));
+  ASSERT_OK(SetStreamAsActiveState(kNamespaceName, stream_ids));
+
+  // Verify new table is not part of stream metadata even after state change.
+  SleepFor(MonoDelta::FromSeconds(3));
+  VerifyTablesInStreamMetadata(
+      stream_id_1, expected_table_ids_after_create_table,
+      "Waiting for GetDBStreamInfo after changing state.");
+  VerifyTablesInStreamMetadata(
+      stream_id_2, expected_table_ids_after_create_table,
+      "Waiting for GetDBStreamInfo after changing state.");
+
+  // Restart leader master to repopulate namespace_to_cdcsdk_unprocessed_table_map_ in-memory map.
+  auto leader_master = ASSERT_RESULT(test_cluster_.mini_cluster_->GetLeaderMiniMaster());
+  ASSERT_OK(leader_master->Restart());
+  LOG(INFO) << "Master Restarted";
+  SleepFor(MonoDelta::FromSeconds(5));
+
+  // Enable bg threads to process tables that are not part of cdc stream.
+  ANNOTATE_UNPROTECTED_WRITE(FLAGS_TEST_cdcsdk_skip_processing_dynamic_table_addition) = false;
+
+  // verify newly created table has been added to stream metadata.
+  std::unordered_set<std::string> expected_table_ids_after_restart = expected_table_ids_after_drop;
+  expected_table_ids_after_restart.insert(table[idx - 1].table_id());
+  VerifyTablesInStreamMetadata(
+      stream_id_1, expected_table_ids_after_restart, "Waiting for GetDBStreamInfo after restart.");
+  VerifyTablesInStreamMetadata(
+      stream_id_2, expected_table_ids_after_restart, "Waiting for GetDBStreamInfo after restart.");
+
+  // create a new table and verify that it gets added to stream metadata.
+  table[idx] = ASSERT_RESULT(CreateTable(
+      &test_cluster_, kNamespaceName, kTableName, 1, true, false, 0, true, table_list_suffix[idx]));
+  ASSERT_OK(test_client()->GetTablets(
+      table[idx], 0, &tablets[idx], /* partition_list_version = */ nullptr));
+
+  expected_table_ids_after_restart.insert(table[idx].table_id());
+  VerifyTablesInStreamMetadata(
+      stream_id_1, expected_table_ids_after_restart,
+      "Waiting for GetDBStreamInfo after creating 2nd new table.");
+  VerifyTablesInStreamMetadata(
+      stream_id_2, expected_table_ids_after_restart,
+      "Waiting for GetDBStreamInfo after creating 2nd new table.");
+
+  // verify tablets of the new table are added to cdc_state table.
+  std::unordered_set<std::string> expected_tablet_ids;
+  for (idx = 1; idx < 5; idx++) {
+    expected_tablet_ids.insert(tablets[idx].Get(0).tablet_id());
+  }
+
+  std::unordered_set<TabletId> tablets_found_for_stream_1;
+  std::unordered_set<TabletId> tablets_found_for_stream_2;
+  client::TableHandle table_handle;
+  client::YBTableName cdc_state_table(
+      YQL_DATABASE_CQL, master::kSystemNamespaceName, master::kCdcStateTableName);
+  ASSERT_OK(table_handle.Open(cdc_state_table, test_client()));
+
+  for (const auto& row : client::TableRange(table_handle)) {
+    const auto& row_stream_id = row.column(master::kCdcStreamIdIdx).string_value();
+    const auto& tablet_id = row.column(master::kCdcTabletIdIdx).string_value();
+    const auto& checkpoint = row.column(master::kCdcCheckpointIdx).string_value();
+    LOG(INFO) << "Read cdc_state table row for tablet_id: " << tablet_id
+              << " and stream_id: " << row_stream_id << ", with checkpoint: " << checkpoint;
+    if (row_stream_id == stream_id_1) {
+      tablets_found_for_stream_1.insert(tablet_id);
+    }
+
+    if (row_stream_id == stream_id_2) {
+      tablets_found_for_stream_2.insert(tablet_id);
+    }
+  }
+  LOG(INFO) << "tablets found for stream 1: " << AsString(tablets_found_for_stream_1)
+            << ", expected tablets: " << AsString(expected_tablet_ids);
+  LOG(INFO) << "tablets found for stream 2: " << AsString(tablets_found_for_stream_2)
+            << ", expected tablets: " << AsString(expected_tablet_ids);
+  ASSERT_EQ(expected_tablet_ids, tablets_found_for_stream_1);
+  ASSERT_EQ(expected_tablet_ids, tablets_found_for_stream_2);
 }
 
 TEST_F(CDCSDKYsqlTest, YB_DISABLE_TEST_IN_TSAN(TestBeforeImageRetention)) {

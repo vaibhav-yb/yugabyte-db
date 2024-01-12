@@ -1418,6 +1418,93 @@ Status ClusterAdminClient::ListCDCSDKStreams(const std::string& namespace_name) 
   return Status::OK();
 }
 
+Status ClusterAdminClient::SetCDCSDKStreamAsActive(
+    const TypedNamespaceName& ns, const std::unordered_set<std::string>& db_stream_ids) {
+  // Get the list of CDC streams for the namespace.
+  master::ListCDCStreamsRequestPB req;
+  master::ListCDCStreamsResponsePB resp;
+  req.set_id_type(yb::master::IdTypePB::NAMESPACE_ID);
+
+  const std::string namespace_name = ns.name;
+  master::GetNamespaceInfoResponsePB namespace_info_resp;
+  RETURN_NOT_OK(
+      yb_client_->GetNamespaceInfo("", namespace_name, YQL_DATABASE_PGSQL, &namespace_info_resp));
+  req.set_namespace_id(namespace_info_resp.namespace_().id());
+
+  RpcController rpc;
+  rpc.set_timeout(timeout_);
+  RETURN_NOT_OK(master_replication_proxy_->ListCDCStreams(req, &resp, &rpc));
+
+  if (resp.has_error()) {
+    cout << "Error getting CDC stream list: " << resp.error().status().message() << endl;
+    return StatusFromPB(resp.error().status());
+  }
+
+  // Get the CDC stream info for the received stream id if it exists in the received namespace.
+  std::vector<master::CDCStreamInfoPB> cdcsdk_streams_info;
+  std::unordered_set<std::string> streams_to_be_updated;
+  for (const auto& stream_info : resp.streams()) {
+    if (db_stream_ids.contains(stream_info.stream_id())) {
+      streams_to_be_updated.insert(stream_info.stream_id());
+      cdcsdk_streams_info.push_back(stream_info);
+    }
+  }
+
+  // Filter out streams that were passed by user but not found in the passed namespace.
+  std::unordered_set<std::string> streams_not_updated;
+  for (const auto& stream_id : db_stream_ids) {
+    if (!streams_to_be_updated.contains(stream_id)) {
+      streams_not_updated.insert(stream_id);
+    }
+  }
+
+  master::UpdateCDCStreamRequestPB update_req;
+  master::UpdateCDCStreamResponsePB update_resp;
+  for (auto& stream_info : cdcsdk_streams_info) {
+    master::SysCDCStreamEntryPB updated_stream_info;
+    updated_stream_info.set_namespace_id(namespace_info_resp.namespace_().id());
+    updated_stream_info.mutable_table_id()->CopyFrom(stream_info.table_id());
+
+    for (const auto& entry : *stream_info.mutable_options()) {
+      auto key = entry.key();
+      auto value = entry.value();
+      if (key == cdc::kStreamState) {
+        // We will set state explicitly.
+        continue;
+      }
+      auto new_option = updated_stream_info.add_options();
+      new_option->set_key(key);
+      new_option->set_value(value);
+    }
+    updated_stream_info.set_state(master::SysCDCStreamEntryPB::ACTIVE);
+
+    auto stream = update_req.add_streams();
+    stream->set_stream_id(stream_info.stream_id());
+    stream->mutable_entry()->CopyFrom(updated_stream_info);
+  }
+
+  rpc.Reset();
+  rpc.set_timeout(timeout_);
+  RETURN_NOT_OK(master_replication_proxy_->UpdateCDCStream(update_req, &update_resp, &rpc));
+
+  if (update_resp.has_error()) {
+    cout << "Error updating CDC stream: " << update_resp.error().status().message() << endl;
+    return StatusFromPB(update_resp.error().status());
+  }
+
+  if (streams_to_be_updated.size() > 0) {
+    cout << "Successfully updated the streams " << AsString(streams_to_be_updated)
+         << " to ACTIVE state \n";
+  }
+
+  if (streams_not_updated.size() > 0) {
+    cout << "WARNING: Could not find the following streams in the namespace " << namespace_name
+         << ". They will not be updated to ACTIVE state.\n"
+         << AsString(streams_not_updated) << endl;
+  }
+  return Status::OK();
+}
+
 Status ClusterAdminClient::GetCDCDBStreamInfo(const std::string& db_stream_id) {
   master::GetCDCDBStreamInfoRequestPB req;
   master::GetCDCDBStreamInfoResponsePB resp;

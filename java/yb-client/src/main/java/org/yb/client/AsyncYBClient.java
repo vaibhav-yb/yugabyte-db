@@ -2409,7 +2409,7 @@ public class AsyncYBClient implements AutoCloseable {
       YBTable table, byte[] partitionKey, boolean includeInactive) {
     final boolean has_permit = acquireMasterLookupPermit();
     String tableId = table.getTableId();
-    if (!has_permit) {
+    if (!has_permit && partitionKey != null) {
       // If we failed to acquire a permit, it's worth checking if someone
       // looked up the tablet we're interested in.  Every once in a while
       // this will save us a Master lookup.

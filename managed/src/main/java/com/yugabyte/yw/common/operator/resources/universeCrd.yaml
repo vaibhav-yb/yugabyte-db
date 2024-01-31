@@ -92,11 +92,6 @@ spec:
                 x-kubernetes-validations:
                 - message: enableYSQL cannot be changed
                   rule: self == oldSelf
-              enableYEDIS:
-                type: boolean
-                x-kubernetes-validations:
-                - message: enableYEDIS cannot be changed
-                  rule: self == oldSelf
               enableNodeToNodeEncrypt:
                 type: boolean
                 x-kubernetes-validations:
@@ -183,8 +178,13 @@ spec:
                 properties:
                   volumeSize:
                     type: integer
+                    default: 100
                   numVolumes:
                     type: integer
+                    default: 1
+                    x-kubernetes-validations:
+                      - message:   numVolumes cannot be changed once set.
+                        rule: self == oldSelf
                   diskIops:
                     type: integer
                     x-kubernetes-validations:

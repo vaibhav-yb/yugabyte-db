@@ -256,6 +256,7 @@ public abstract class UniverseTaskBase extends AbstractTaskBase {
   protected static final Set<TaskType> PLACEMENT_MODIFICATION_TASKS =
       ImmutableSet.of(
           TaskType.CreateUniverse,
+          TaskType.CreateKubernetesUniverse,
           TaskType.ReadOnlyClusterCreate,
           TaskType.EditUniverse,
           TaskType.AddNodeToUniverse,
@@ -2925,6 +2926,7 @@ public abstract class UniverseTaskBase extends AbstractTaskBase {
               while (tableUUIDIter.hasNext()) {
                 BackupTableParams perTableParam =
                     new BackupTableParams(bP, tableUUIDIter.next(), tableNameIter.next());
+                perTableParam.tableByTableBackup = true;
                 flatParamsList.add(perTableParam);
               }
             });

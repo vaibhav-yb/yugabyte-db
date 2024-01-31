@@ -184,7 +184,9 @@ public class KubernetesOperatorStatusUpdater implements OperatorStatusUpdater {
       action.setStatus(Actions.Status.QUEUED);
       ybUniverse.setStatus(ybuStatus);
       String eventStr =
-          String.format("Queued task %s on universe %s", taskName, universe.getName());
+          String.format(
+              "Queued task %s on universe resource: %s, namespace: %s",
+              taskName, universeName.name, universeName.namespace);
       this.updateUniverseStatus(client, ybUniverse, universe, universeName, eventStr);
     } catch (Exception e) {
       log.warn("Error in creating Kubernetes Operator Universe status", e);
@@ -294,7 +296,8 @@ public class KubernetesOperatorStatusUpdater implements OperatorStatusUpdater {
           .updateStatus(); // Note: Vscode is saying this is invalid, but it is the right way.
 
       // Update Swamper Targets configMap
-      String configMapName = ybUniverse.getMetadata().getName() + "-prometheus-targets";
+      String configMapName =
+          YBUniverseReconciler.getYbaUniverseName(ybUniverse) + "-prometheus-targets";
       // TODO (@anijhawan) should call the swamperHelper target function but we are in static
       // context here.
       if (u != null) {
@@ -437,6 +440,29 @@ public class KubernetesOperatorStatusUpdater implements OperatorStatusUpdater {
       kubernetesClient.v1().events().inNamespace(namespace).resource(event).createOrReplace();
     } catch (Exception e) {
       log.warn("Failed to create kubernetes event: ", e);
+    }
+  }
+
+  @Override
+  public synchronized void updateUniverseState(
+      KubernetesResourceDetails universeName, UniverseState state) {
+    try (final KubernetesClient kubernetesClient =
+        new KubernetesClientBuilder().withConfig(k8sClientConfig).build()) {
+      YBUniverse ybUniverse = getYBUniverse(kubernetesClient, universeName);
+      if (ybUniverse == null) {
+        log.error("YBUniverse {} no longer exists", universeName);
+        return;
+      }
+      YBUniverseStatus ybUniverseStatus = getOrCreateUniverseStatus(ybUniverse);
+      ybUniverseStatus.setUniverseState(state.getUniverseStateString());
+      ybUniverse.setStatus(ybUniverseStatus);
+      kubernetesClient
+          .resources(YBUniverse.class)
+          .inNamespace(ybUniverse.getMetadata().getNamespace())
+          .resource(ybUniverse)
+          .replaceStatus();
+    } catch (Exception e) {
+      log.error("Could not update Universe state: ", e);
     }
   }
 

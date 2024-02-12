@@ -2802,12 +2802,12 @@ public class AsyncYBClient implements AutoCloseable {
     ConcurrentSkipListMap<byte[], RemoteTablet> tablets = tabletsCache.get(tableId);
 
     if (tablets == null) {
-      LOG.warn("Tablets cache does not have any information for table " + tableId);
+      LOG.debug("Tablets cache does not have any information for table " + tableId);
       return null;
     }
 
     if (tablets.firstEntry() == null) {
-      LOG.warn("Tablets cache map empty for table " + tableId);
+      LOG.debug("Tablets cache map empty for table " + tableId);
       return null;
     }
 
@@ -2817,7 +2817,7 @@ public class AsyncYBClient implements AutoCloseable {
       }
     }
 
-    LOG.error("No remote tablet found with a tablet server for table " + tableId);
+    LOG.debug("No remote tablet found with a tablet server for table " + tableId);
     return null;
   }
 

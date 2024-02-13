@@ -116,6 +116,16 @@ public class CreateXClusterConfig extends XClusterConfigTaskBase {
               X_CLUSTER_TABLE_CONFIG_PENDING_STATUS_LIST);
       xClusterConfig.updateStatusForTables(
           tablesInPendingStatus, XClusterTableConfig.Status.Failed);
+
+      // Prevent all other DR tasks except delete from running.
+      log.info(
+          "Setting the dr config state of xCluster config {} to {} from {}",
+          xClusterConfig.getUuid(),
+          State.Error,
+          xClusterConfig.getDrConfig().getState());
+      xClusterConfig.getDrConfig().setState(State.Error);
+      xClusterConfig.getDrConfig().update();
+
       // Set backup and restore status to failed and alter load balanced.
       boolean isLoadBalancerAltered = false;
       for (Restore restore : restoreList) {
@@ -422,7 +432,8 @@ public class CreateXClusterConfig extends XClusterConfigTaskBase {
         // Delete hanging replication streams, otherwise deleting the database will fail.
         createDeleteRemnantStreamsTask(targetUniverse.getUniverseUUID(), namespaceName);
         // If the table type is YSQL, delete the database from the target universe before restore.
-        createDeleteKeySpaceTask(namespaceName, CommonTypes.TableType.PGSQL_TABLE_TYPE);
+        createDeleteKeySpaceTask(
+            namespaceName, CommonTypes.TableType.PGSQL_TABLE_TYPE, true /*ysqlForce*/);
       }
 
       // Wait for sometime to make sure the above drop database has reached all the nodes.

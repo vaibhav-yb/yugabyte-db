@@ -2524,7 +2524,7 @@ TEST_F(CDCSDKYsqlTest, YB_DISABLE_TEST_IN_TSAN(TestPopulationOfDDLRecordUponCach
   ASSERT_OK(test_client()->GetTablets(table, 0, &tablets, /* partition_list_version=*/nullptr));
   ASSERT_EQ(tablets.size(), num_tablets);
 
-  xrepl::StreamId stream_id = ASSERT_RESULT(CreateDBStream(EXPLICIT));
+  CDCStreamId stream_id = ASSERT_RESULT(CreateDBStream(EXPLICIT));
   auto resp = ASSERT_RESULT(SetCDCCheckpoint(stream_id, tablets));
   ASSERT_FALSE(resp.has_error());
 
@@ -2555,7 +2555,7 @@ TEST_F(CDCSDKYsqlTest, YB_DISABLE_TEST_IN_TSAN(TestPopulationOfDDLRecordUponCach
   ASSERT_OK(test_client()->GetTablets(table_2, 0, &tablets_2, /* partition_list_version=*/nullptr));
   ASSERT_EQ(tablets_2.size(), num_tablets);
 
-  xrepl::StreamId stream_id_2 = ASSERT_RESULT(CreateDBStream(EXPLICIT));
+  CDCStreamId stream_id_2 = ASSERT_RESULT(CreateDBStream(EXPLICIT));
   auto resp_2 = ASSERT_RESULT(SetCDCCheckpoint(stream_id_2, tablets_2));
   ASSERT_FALSE(resp_2.has_error());
 

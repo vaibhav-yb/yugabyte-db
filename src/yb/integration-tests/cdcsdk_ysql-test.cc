@@ -2570,8 +2570,7 @@ TEST_F(CDCSDKYsqlTest, YB_DISABLE_TEST_IN_TSAN(TestPopulationOfDDLRecordUponCach
   GetChangesResponsePB change_resp_2 =
       ASSERT_RESULT(GetChangesFromCDC(stream_id_2, tablets_2, nullptr, 0,
                                       -1 /* safe_hybrid_time */, 0 /* wal_Segment_index */,
-                                      true /* populate_checkpoint */, true /* should_retry */,
-                                      true /* need_schema_info */));
+                                      true /* populate_checkpoint */, true /* need_schema_info */));
   uint32_t record_size_2 = change_resp_2.cdc_sdk_proto_records_size();
   ASSERT_EQ(record_size_2, 1 + 1 + insert_count + 1 /* DDL + BEGIN + 3 INSERTS + COMMIT */);
 

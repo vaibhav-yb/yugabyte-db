@@ -17,23 +17,29 @@ YugabyteDB’s logical replication feature makes use of the concepts like replic
 
 - Replication slot
 
-  - A replication slot represents a stream of changes that can be replayed to a client in the order they were made on the origin server. Each slot streams a sequence of changes from a single database. ([PG documentation](https://www.postgresql.org/docs/current/logicaldecoding-explanation.html#LOGICALDECODING-REPLICATION-SLOTS))
+  - A replication slot represents a stream of changes that can be replayed to a client in the order they were made on the origin server. Each slot streams a sequence of changes from a single database. See [Postgres documentation](https://www.postgresql.org/docs/current/logicaldecoding-explanation.html#LOGICALDECODING-REPLICATION-SLOTS) for more details.
 
 - Publication
 
-  - A publication is a set of changes generated from a table or a group of tables, and might also be described as a change set or replication set. Each publication exists in only one database. ([PG documentation](https://www.postgresql.org/docs/current/logical-replication-publication.html#LOGICAL-REPLICATION-PUBLICATION))
+  - A publication is a set of changes generated from a table or a group of tables, and might also be described as a change set or replication set. Each publication exists in only one database. See [Postgres documentation](https://www.postgresql.org/docs/current/logical-replication-publication.html#LOGICAL-REPLICATION-PUBLICATION) for more details.
 
 - Output Plugins
 
-  - Output plugins transform the data from the write-ahead log's internal representation into the format the consumer of a replication slot desires. ([PG documentation](https://www.postgresql.org/docs/current/logicaldecoding-output-plugin.html))
+  - Output plugins transform the data from the write-ahead log's internal representation into the format the consumer of a replication slot desires. See [Postgres documentation](https://www.postgresql.org/docs/current/logicaldecoding-output-plugin.html) for more details.
 
 - LSN
 
-  - An unsigned 64bit integer that uniquely identifies a change record or a transaction boundary record that is consumed from a given replication slot. In YugabyteDB, LSN values from different slots are considered unrelated and should not be compared. 
+  - An unsigned 64-bit integer that uniquely identifies a change record or a transaction boundary record that is consumed from a given replication slot.
 
-- Replica Identity
+{{< note title="Note" >}}
 
-  - Replica identity is a table level parameter that can be used to control the amount of information being written to the change records. ([PG documentation](https://www.postgresql.org/docs/current/sql-altertable.html#SQL-ALTERTABLE-REPLICA-IDENTITY))
+In YugabyteDB, LSN values from different slots are considered unrelated and should not be compared. 
+
+{{< /note >}}
+
+- Replica identity
+
+  - Replica identity is a table level parameter that can be used to control the amount of information being written to the change records. See [Postgres documentation](https://www.postgresql.org/docs/current/sql-altertable.html#SQL-ALTERTABLE-REPLICA-IDENTITY) for more details.
 
 - Replication protocols
 

@@ -13,11 +13,11 @@ type: docs
 
 In this section, we explore a range of topics that are designed to provide deeper insights and enhance your understanding of advanced functionalities. 
 
-## Schema Evolution
+## Schema evolution
 
-A change in the schema of the tables (Alter Table) being streamed are transparently handled by the database without manual intervention.
+A change in the schema of the tables (Alter Table) being streamed is transparently handled by the database without manual intervention.
 
-This is illustrated in the below example. Note that the client being used for example purposes is `pg_recvlogical` which is discussed in [this section](../using-logical-replication/get-started.md).
+This is illustrated in the below example. Note that the client being used for example purposes is `pg_recvlogical` which is discussed in [this section](../using-logical-replication/get-started).
 
 ```sh
 # Create table and create the replication slot. pg_recvlogical uses test_decoding output plugin by default.
@@ -57,9 +57,9 @@ COMMIT 5
 ```
 
 
-## Addition of Tables to Publication
+## Addition of tables to publication
 
-Addition of tables to the streaming list after slot creation is currently a preview feature. Inorder to enable dynamic table addition the tserver preview flag [cdcsdk_enable_dynamic_table_support](../../../../reference/configuration/yb-tserver/#cdcsdk_enable_dynamic_table_support) should be set to true.
+Addition of tables to the streaming list after slot creation is currently a preview feature. In order to enable dynamic table addition the tserver preview flag [cdcsdk_enable_dynamic_table_support](../../../../reference/configuration/yb-tserver/#cdcsdk_enable_dynamic_table_support) should be set to true.
 
 The Publication’s tables list can change in two cases. The first case is when a previously created table is added to the publication by performing an alter publication. 
 
@@ -72,10 +72,9 @@ CREATE PUBLICATION PUB FOR TABLE test_table_1;
 -- Start consumption through a replication slot.
 
 ALTER PUBLICATION ADD TABLE test_table_2;
-
 ```
 
-The second case is when a dynamically created table is added to ALL TABLES publication upon creation.
+The second case is when a dynamically created table is added to `ALL TABLES` publication upon creation.
 
 ```sql
 CREATE TABLE test_table_1(id INT PRIMARY KEY, aa INT, bb INT);
@@ -87,8 +86,7 @@ CREATE PUBLICATION PUB FOR ALL TABLES;
 CREATE TABLE test_table_2(id INT PRIMARY KEY, aa INT, bb INT);
 
 ```
-
-Unlike Postgres, any changes made to the publication’s tables list will not be applied immediately in YB. Instead the publication’s tables list will be periodically refreshed and changes, if any, will be applied. The refresh interval is denoted by the flag [cdcsdk_publication_list_refresh_interval_secs](../../../../reference/configuration/yb-tserver/#cdcsdk_publication_list_refresh_interval_secs) and has a default value of one hour (3600 sec). This means that any changes made to the publication’s tables list will be applied after `cdcsdk_publication_list_refresh_interval_secs` in the worst case. Consider the following example:
+Unlike Postgres, any changes made to the publication’s tables list will not be applied immediately in YugabyteDB. Instead the publication’s tables list will be periodically refreshed and changes, if any, will be applied. The refresh interval is denoted by the flag [cdcsdk_publication_list_refresh_interval_secs](../../../../reference/configuration/yb-tserver/#cdcsdk_publication_list_refresh_interval_secs) and has a default value of one hour (3600 sec). This means that any changes made to the publication’s tables list will be applied after `cdcsdk_publication_list_refresh_interval_secs` in the worst case. Consider the following example:
 
 ```
 Suppose that the value of the flag cdcsdk_publication_list_refresh_interval_secs is 3600 sec (1 hour) and the publication's tables list is being refreshed every hour at 8 am, 9 am, 10 am...

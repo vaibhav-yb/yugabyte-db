@@ -29,7 +29,7 @@ Yugabyte provides the pg_recvlogical binary located in `<yugabyte-dir>/postgres/
 ./bin/yugabyted start \
   --advertise_address=127.0.0.1 \
   --base_dir="${HOME}/var/node1" \
-  --tserver_flags="allowed_preview_flags_csv={cdcsdk_enable_dynamic_table_support},cdcsdk_enable_dynamic_table_support=true,cdcsdk_publication_list_refresh_interval_secs=5"
+  --tserver_flags="allowed_preview_flags_csv={cdcsdk_enable_dynamic_table_support},cdcsdk_enable_dynamic_table_support=true,cdcsdk_publication_list_refresh_interval_secs=2"
 ```
 
 #### Create tables

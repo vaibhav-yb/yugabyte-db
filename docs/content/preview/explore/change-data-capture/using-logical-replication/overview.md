@@ -37,7 +37,7 @@ YugabyteDB’s logical replication feature makes use of many concepts like repli
 
 - Replication Protocols
 
-  - Postgres has defined protocols for replication that need to be followed by clients to establish replication connection as well as message structures for streaming data. This includes two protocols - Streaming Replication protocol ([PG documentation](https://www.postgresql.org/docs/11/protocol-replication.html)), Logical Streaming Replication protocol ([PG documentation](https://www.postgresql.org/docs/11/protocol-logical-replication.html))
+  - Postgres has defined protocols for replication that need to be followed by clients to establish replication connection as well as message structures for streaming data. This includes two protocols - Streaming Replication protocol ([PG documentation](https://www.postgresql.org/docs/11/protocol-replication.html)), Logical Streaming Replication protocol ([PG documentation](https://www.postgresql.org/docs/11/protocol-logical-replication.html)).
 
 
 The following sections explain each of the above concept in detail:
@@ -75,7 +75,7 @@ LSN in YugabyteDB is an unsigned 64 bit integer that uniquely identifies a chang
 
 In YugabyteDB, LSN values from different slots are considered unrelated and should not be compared. In YugabyteDB, LSN no longer represents the byte offset of a WAL record. 
 
-LSN values for a single replication slot satisfy the following properties -* 
+LSN values for a single replication slot satisfy the following properties: 
 
 - **Uniqueness** 
 
@@ -83,13 +83,13 @@ LSN values for a single replication slot satisfy the following properties -*
 
 * **Ordering** 
 
-  - LSN values can be compared ( <, >, = )
+  - LSN values can be compared ( <, >, = ).
 
-  - The LSN of the BEGIN record of a transaction will be strictly lower than the LSN of the changes in that transaction that in turn will be strictly lower than the LSN of the COMMIT record of the same transaction
+  - The LSN of the BEGIN record of a transaction will be strictly lower than the LSN of the changes in that transaction that in turn will be strictly lower than the LSN of the COMMIT record of the same transaction.
 
   - The LSNs of change records within a transaction will be in increasing order and will correspond to the order in which those changes were made in that transaction. That is, the LSN of an earlier change will have a strictly lower value than the LSN of a later change within the same transaction. This is the case even if the changes correspond to rows in different tablets of the same or different tables.
 
-  - The LSN of the commit record of a transaction will be strictly lower than the LSN of the BEGIN record of  a transaction with greater commit time
+  - The LSN of the commit record of a transaction will be strictly lower than the LSN of the BEGIN record of  a transaction with greater commit time.
 
 - **Determinism** 
 
@@ -122,7 +122,7 @@ Users should refrain from altering the replica identity of a dynamically created
 
 ### REPLICATION PROTOCOLS
 
-Postgres has defined protocols for replication that needs to be followed by clients to establish replication connection as well as message structures for streaming data. This includes two protocols - Streaming Replication protocol ([PG documentation](https://www.postgresql.org/docs/11/protocol-replication.html)), Logical Streaming Replication protocol ([PG documentation](https://www.postgresql.org/docs/11/protocol-logical-replication.html))
+Postgres has defined protocols for replication that needs to be followed by clients to establish replication connection as well as message structures for streaming data. This includes two protocols - Streaming Replication protocol ([PG documentation](https://www.postgresql.org/docs/11/protocol-replication.html)), Logical Streaming Replication protocol ([PG documentation](https://www.postgresql.org/docs/11/protocol-logical-replication.html)).
 
 The logical streaming replication protocol sends individual transactions one by one. This means that all messages between a pair of Begin and Commit messages belong to the same transaction.
 
@@ -158,18 +158,18 @@ See [Getting Started with Logical Replication](../../../explore/logical-replicat
 
 ### Resilience
 
-1. Following a failure of the application or server or n/w, the replication can continue from any of the available server nodes 
+1. Following a failure of the application or server or n/w, the replication can continue from any of the available server nodes. 
 
 2. Replication continues from the transaction immediately after the transaction that was last acknowledged by the application. There will be no transactions that will be missed by the application. 
 
 
 ### Security
 
-   CDC in YugabyteDB being based on the Postgres Logical Replication model means 
+CDC in YugabyteDB being based on the Postgres Logical Replication model means:
 
-1. CDC user persona will be a 'PG Replication client'
+1. CDC user persona will be a 'PG Replication client'.
 
-2. A standard replication connection is used for consumption and all the server side configurations of authentication, authorizations, SSL modes and connection load balancing automatically can be leveraged
+2. A standard replication connection is used for consumption and all the server side configurations of authentication, authorizations, SSL modes and connection load balancing automatically can be leveraged.
 
 
 ## Limitations

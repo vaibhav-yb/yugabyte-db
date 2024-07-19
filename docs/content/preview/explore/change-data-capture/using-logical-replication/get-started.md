@@ -18,7 +18,6 @@ To stream data change events from a YugabyteDB database using a replication slot
 
 `pg_recvlogical` is a command-line tool provided by PostgreSQL for interacting with the logical replication feature. It is specifically used to receive changes from the database using logical replication slots.
 
-
 Yugabyte provides the pg_recvlogical binary located in `<yugabyte-dir>/postgres/bin/`, which is inherited and based on PostgreSQL-11.2. Although PostgreSQL also offers a pg_recvlogical binary, users are strongly advised to use Yugabyte's version to avoid compatibility issues due to PostgreSQL version.
 
 ### Setting up pg_recvlogical

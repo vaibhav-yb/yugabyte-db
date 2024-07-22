@@ -12,13 +12,19 @@ menu:
 type: docs
 ---
 
-To stream data change events from a YugabyteDB database using a replication slot, user has either of the client options: `pg_recvlogical`, or the YugabyteDB connector. __CDC via logical replication is supported in YugabyteDB starting from version 2024.1.1.__
+To get started for streaming data change events from a YugabyteDB database using a replication slot, user has either of the client options: `pg_recvlogical`, or the Debezium YugabyteDB connector.
+
+{{< note title="Note" >}}
+
+CDC via logical replication is supported in YugabyteDB starting from version 2024.1.1.
+
+{{< /note >}}
 
 ## Getting started with pg_recvlogical
 
 `pg_recvlogical` is a command-line tool provided by PostgreSQL for interacting with the logical replication feature. It is specifically used to receive changes from the database using logical replication slots.
 
-Yugabyte provides the pg_recvlogical binary located in `<yugabyte-dir>/postgres/bin/`, which is inherited and based on PostgreSQL-11.2. Although PostgreSQL also offers a pg_recvlogical binary, users are strongly advised to use Yugabyte's version to avoid compatibility issues due to PostgreSQL version.
+YugabyteDB provides the `pg_recvlogical` binary located in `<yugabyte-db-dir>/postgres/bin/`, which is inherited and based on `PostgreSQL-11.2`. Although PostgreSQL also offers a `pg_recvlogical` binary, users are strongly advised to use YugabyteDB's version to avoid compatibility issues due to `PostgreSQL` version.
 
 ### Setting up pg_recvlogical
 
@@ -69,7 +75,7 @@ Expected output after running the command that indicates successful creation of 
 
 #### Configure & start pg_recvlogical
 
-`pg_recvlogical` binary can be found under `<yugabyte-dir>/postgres/bin/`. We'll use the same replication slot created in previous section with pg_recvlogical.
+`pg_recvlogical` binary can be found under `<yugabyte-db-dir>/postgres/bin/`. We'll use the same replication slot created in previous section with `pg_recvlogical`.
 
 1. Open a new shell and start `pg_recvlogical` to connect to the `yugabyte` database with the superuser `yugabyte` and replicate changes using the following command: 
 
@@ -85,7 +91,9 @@ Expected output after running the command that indicates successful creation of 
 Any changes that gets replicated will be printed on the stdout.
 
 {{< tip title="Explore" >}}
-For more pg_recvlogical configurations, please refer the official documentation of [pg_recvlogical](https://www.postgresql.org/docs/11/app-pgrecvlogical.html) from PostgreSQL.
+
+For more `pg_recvlogical` configurations, please refer the official documentation of [pg_recvlogical](https://www.postgresql.org/docs/11/app-pgrecvlogical.html) from PostgreSQL.
+
 << /tip>>
 
 #### Verify Replication
@@ -102,7 +110,6 @@ INSERT INTO employees (name, email, department_id)
 VALUES ('Bob Smith', 'bob@example.com', 2);
 
 COMMIT;
-
 ```
 
 Expected output observed on stdout where pg_recvlogical is running:

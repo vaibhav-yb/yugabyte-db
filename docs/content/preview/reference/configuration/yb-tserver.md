@@ -1300,7 +1300,7 @@ Following set of flags are only relevant for CDC using logical replication. To l
 
 ##### --ysql_yb_default_replica_identity
 
-The default replica identity to be assigned to user defined tables at the time of creation. The flag is case sensitive and can take four possible values, `FULL`, `DEFAULT`,`'NOTHING` and `CHANGE`. If any value other than these is assigned to the flag, the replica identity `CHANGE` will be used as default at the time of table creation.
+The default replica identity to be assigned to user defined tables at the time of creation. The flag is case sensitive and can take only one of the four possible values, `FULL`, `DEFAULT`,`'NOTHING` and `CHANGE`.
 
 Default: `CHANGE`
 
@@ -1318,13 +1318,13 @@ Default: `3600`
 
 ##### --cdcsdk_max_consistent_records
 
-Controls the maximum number of records sent from Virtual WAL (VWAL) to Walsender in consistent order.
+Controls the maximum number of records sent from Virtual WAL (VWAL) to walsender in consistent order.
 
 Default: `500`
 
 ##### --cdcsdk_vwal_getchanges_resp_max_size_bytes
 
-Max size (in bytes) of changes sent from CDC Service to Virtual WAL (VWAL) for a particular tablet.
+Max size (in bytes) of changes sent from CDC Service to [Virtual WAL](../../../architecture/docdb-replication/cdc-logical-replication)(VWAL) for a particular tablet.
 
 Default: `1 MB`
 

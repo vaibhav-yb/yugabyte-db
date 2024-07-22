@@ -24,7 +24,7 @@ The following `tserver` flags can be used to tune logical replication deployment
 
 ## Retention of Resources
 
-CDC retains resources, such as WAL segments, that contain information related to the changes involved in the transactions. These resources are typically retained until the consuming client acknowledges the receipt of all the transactions contained in that resource. Retaining resources has an impact on the system. Clients are expected to consume these transactions within configurable duration limits. Resources will be released if the duration exceeds these configured limits. The following are the configuration Gflags that control the duration limits for which resources are retained:
+CDC retains resources such as WAL segments that contain information related to the changes involved in the transactions. These resources are typically retained until the consuming client acknowledges the receipt of all the transactions contained in that resource. Retaining resources has an impact on the system. Clients are expected to consume these transactions within configurable duration limits. Resources will be released if the duration exceeds these configured limits. The following are the configuration Gflags that control the duration limits for which resources are retained:
 
 * [cdc_wal_retention_secs](../../../../reference/configuration/yb-tserver/#cdc-wal-retention-secs)
 * [cdc_intent_retention_ms](../../../../reference/configuration/yb-tserver/#cdc-intent-retention-ms)

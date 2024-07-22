@@ -10,8 +10,6 @@ menu:
     weight: 60
 type: docs
 ---
-
-
 This section mentions best practices to achieve scalability and performance.
 
 ## Parallel consumption

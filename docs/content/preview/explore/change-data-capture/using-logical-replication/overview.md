@@ -92,7 +92,7 @@ LSN values for a single replication slot satisfy the following properties:
 
   - The LSNs of change records within a transaction will be in increasing order and will correspond to the order in which those changes were made in that transaction. That is, the LSN of an earlier change will have a strictly lower value than the LSN of a later change within the same transaction. This is the case even if the changes correspond to rows in different tablets of the same or different tables.
 
-  - The LSN of the `COMMIT` record of a transaction will be strictly lower than the LSN of the `BEGIN` record of a transaction with greater commit time.
+  - For a given replication slot, the LSN of a `COMMIT` record of an earlier transaction will be strictly lower than the LSN of the `COMMIT` record of a later transaction.
 
 - **Determinism** 
 

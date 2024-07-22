@@ -86,7 +86,7 @@ CREATE PUBLICATION PUB FOR ALL TABLES;
 CREATE TABLE test_table_2(id INT PRIMARY KEY, aa INT, bb INT);
 ```
 
-### YugabyteDB Semantics
+### YugabyteDB semantics
 Unlike Postgres, any changes made to the publication’s tables list will not be applied immediately in YugabyteDB. Instead the publication’s tables list will be periodically refreshed and changes, if any, will be applied. The refresh interval is denoted by the flag [cdcsdk_publication_list_refresh_interval_secs](../../../../reference/configuration/yb-tserver/#cdcsdk_publication_list_refresh_interval_secs) and has a default value of one hour (3600 sec). This means that any changes made to the publication’s tables list will be applied after `cdcsdk_publication_list_refresh_interval_secs` in the worst case. Consider the following example:
 
 ```
@@ -103,58 +103,63 @@ Suppose that the value of the flag cdcsdk_publication_list_refresh_interval_secs
 This change will only be applied after 9:00 am, i.e the publication's tables list will be next refreshed at 9:00 am. However the next refresh will happen at 9:10 am, and the subsequent refreshes will take place every 10 minutes.
 ```
 
-### Settings Required
-Incase you want to enable dynamic table addition, following are the recommended steps:
+### Required settings
+
+To enable dynamic table addition, perform the following steps:
 
 1. In order to enable dynamic table addition the tserver preview flag [cdcsdk_enable_dynamic_table_support](../../../../reference/configuration/yb-tserver/#cdcsdk_enable_dynamic_table_support) should be set to true. 
 
-   - Since its a preview flag, we'll have to first add it to the `allowed_preview_flags_csv` list to be able to set it. 
+   - Since it's a preview flag, we'll have to first add it to the `allowed_preview_flags_csv` list to be able to set it. 
 
       ```sh
-      ./yb-ts-cli --server_address=<IP address:PORT> set_flag allowed_preview_flags_csv cdcsdk_enable_dynamic_table_support
+      ./yb-ts-cli --server_address=<tserverIpAddress:tserverPort> set_flag allowed_preview_flags_csv cdcsdk_enable_dynamic_table_support
       ```
 
     - Set the flag `cdcsdk_enable_dynamic_table_support` to true.
 
       ```sh
-      ./yb-ts-cli --server_address=<IP address:PORT> set_flag cdcsdk_enable_dynamic_table_support true
+      ./yb-ts-cli --server_address=<tserverIpAddress:tserverPort> set_flag cdcsdk_enable_dynamic_table_support true
       ```
 
-2. Set the flag [cdcsdk_publication_list_refresh_interval_secs](../../../../reference/configuration/yb-tserver/#cdcsdk_publication_list_refresh_interval_secs) to a lower value like 60/120 seconds. Please note, the effect of this setting would take place after the upcoming publication refresh is performed (as explained in the example in the previous sub-section).
+2. Set the flag [cdcsdk_publication_list_refresh_interval_secs](../../../../reference/configuration/yb-tserver/#cdcsdk_publication_list_refresh_interval_secs) to a lower value like 60 or 120 seconds. Note that the effect of this setting would take place after the upcoming publication refresh is performed (as explained in the example in the previous sub-section).
 
 ```sh
-./yb-ts-cli --server_address=<IP address:PORT> set_flag cdcsdk_publication_list_refresh_interval_secs 120
+./yb-ts-cli --server_address=<tserverIpAddress:tserverPort> set_flag cdcsdk_publication_list_refresh_interval_secs 120
 ```
 
 3. Once you start receiving records from the newly added table in the publication, reset the flag `cdcsdk_publication_list_refresh_interval_secs` to a high value (e.g. 3600 seconds).
 
 ```sh
-./yb-ts-cli --server_address=<IP address:PORT> set_flag cdcsdk_publication_list_refresh_interval_secs 3600
+./yb-ts-cli --server_address=<tserverIpAddress:tserverPort> set_flag cdcsdk_publication_list_refresh_interval_secs 3600
 ```
+## Initial snapshot
 
-
-## Initial Snapshot
-
-The [initial snapshot](../../../architecture/docdb-replication/cdc-logical-replication#initial-snapshot) data for a table is consumed by executing a snapshot query (SELECT statement). To ensure that the streaming phase continues exactly from where the snapshot left, this snapshot query is executed as of a specific database state. In YugabyteDB, this database state is represented by a value of HybridTime. Changes due to transactions with commit time strictly greater than this snapshot HybridTime will be consumed during the streaming phase.
+The [initial snapshot](../../../architecture/docdb-replication/cdc-logical-replication#initial-snapshot) data for a table is consumed by executing a snapshot query (SELECT statement). To ensure that the streaming phase continues exactly from where the snapshot left, this snapshot query is executed as of a specific database state. In YugabyteDB, this database state is represented by a value of `HybridTime`. Changes due to transactions with commit time strictly greater than this snapshot `HybridTime` will be consumed during the streaming phase.
 
 The consistent database state on which the snapshot query is to be executed is specified using the following command -
 
 ```sql
-SET LOCAL yb_read_time TO '<consistent_point commit time> ht’
+SET LOCAL yb_read_time TO '<consistent_point commit time> ht';
 ```
 		
 This command should first be executed on the connection (session). The SELECT statement corresponding to the snapshot query should then be executed as part of the same transaction. The HybridTime value to use in the `SET LOCAL yb_read_time` command is the value of the `snapshot_name` field that is returned by the [CREATE_REPLICATION_SLOT](../../../api/ysql/the-sql-language/statements/#create-replication-slot) command. This value can also be be obtained by executing the following query:
 
 ```sql
 select yb_restart_commit_ht
-from pg_replication_slots where slot_name = <slot_name>
+from pg_replication_slots where slot_name = <slot_name>;
 ```
 
-{{<< note Title="Explore" >>}}
-For more details on pg_replication_slots catalog view, please refer the [pg_replication_slots](../using-logical-replication/monitor#pg-replication-slots) section.
-{{<< /note >>}}
+{{< note Title="Explore" >}}
 
-Only a superuser can execute the command to set the value of the `yb_read_time` variable. 
+For more details on `pg_replication_slots` catalog view, please refer the [pg_replication_slots](../using-logical-replication/monitor#pg-replication-slots) section.
+
+{{< /note >}}
+
+{{< note title="Note" >}}
+
+Only a superuser can execute the command to set the value of the `yb_read_time`.
+
+{{< /note }}
 
 For a non-super user to be able to perform an initial snapshot, the following YugabyteDB specific additional setup is required (apart from granting the required SELECT and USAGE privileges)
 

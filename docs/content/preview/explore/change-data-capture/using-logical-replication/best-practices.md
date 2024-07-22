@@ -12,7 +12,7 @@ type: docs
 ---
 
 
-This sections mentions best practices to achieve scalability and performance.
+This section mentions best practices to achieve scalability and performance.
 
 ## Parallel consumption
 The recommended approach towards addressing the requirement of consuming changes in parallel from different tables is to use multiple replication slots. One replication slot per table could be used. Each replication slot is independent of the other and the changes from the tables are consumed in parallel.

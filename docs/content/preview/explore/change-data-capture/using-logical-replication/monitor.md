@@ -17,16 +17,16 @@ type: docs
 
 Contains all publication objects contained in the database.
 
-| Column Name  | Data Type | Description                                                                                        |
-| ------------ | --------- | -------------------------------------------------------------------------------------------------- |
-| oid          | oid       | Row identifier                                                                                     |
-| pubname      | name      | Name of the publication                                                                            |
-| pubowner     | oid       | OID of the owner                                                                                   |
-| puballtables | bool      | If true, this publication includes all tables in the database including those added in the future. |
-| pubinsert    | bool      | If true, INSERT operations are replicated for tables in the publication.                           |
-| pubupdate    | bool      | If true, UPDATE operations are replicated for tables in the publication.                           |
-| pubdelete    | bool      | If true, DELETE operations are replicated for tables in the publication.                           |
-| pubtruncate  | bool      | If true, TRUNCATE operations are replicated for tables in the publication.                         |
+| Column name  | Data type | Description |
+| :----- | :----- | :----- |
+| oid | oid | Row identifier |
+| pubname | name | Name of the publication |
+| pubowner | oid | OID of the owner. |
+| puballtables | bool | If true, this publication includes all tables in the database including those added in the future. |
+| pubinsert | bool | If true, INSERT operations are replicated for tables in the publication. |
+| pubupdate | bool | If true, UPDATE operations are replicated for tables in the publication. |
+| pubdelete | bool | If true, DELETE operations are replicated for tables in the publication. |
+| pubtruncate | bool | If true, TRUNCATE operations are replicated for tables in the publication. |
 
 
 ### pg_publication_rel
@@ -44,16 +44,16 @@ Contains mapping between publications and tables. This is a many to many mapping
 
 Contains mapping between publications and tables. It is a wrapper over `pg_publication_rel` as it expands the publications defined as FOR ALL TABLES, so for such publications there will be a row for each eligible table.
 
-| Column Name | Data Type | Description                     |
-| ----------- | --------- | ------------------------------- |
-| pubname     | name      | Name of publication             |
-| schemaname  | name      | Name of schema containing table |
-| tablename   | name      | Name of table                   |
+| Column name | Data type | Description |
+| :----- | :----- | :----- |
+| pubname | name | Name of publication |
+| schemaname | name | Name of schema containing table |
+| tablename | name | Name of table |
 
 
 ### pg_replication_slots
 
-Provides a listing of all replication slots that currently exist on the database cluster, along with their metadata.
+Provides a list of all replication slots that currently exist on the database cluster, along with their metadata.
 
 | Column Name | Data Type | Description |
 | ----------- | --------- | ----------- |

@@ -71,6 +71,7 @@ The YSQL statements are compatible with the SQL dialect that PostgreSQL supports
 | [`DROP OPERATOR`](ddl_drop_operator) | Delete an operator |
 | [`DROP OPERATOR CLASS`](ddl_drop_operator_class) | Delete an operator class |
 | [`DROP PROCEDURE`](ddl_drop_procedure) | Delete a procedure |
+| [`DROP PUBLICATION`](ddl_drop_publication) | Delete a publication |
 | [`DROP RULE`](ddl_drop_rule) | Delete a rule |
 | [`DROP SCHEMA`](ddl_drop_schema) | Delete a schema from the system |
 | [`DROP SEQUENCE`](ddl_drop_sequence) | Delete a sequence generator |

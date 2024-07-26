@@ -45,6 +45,8 @@ YugabyteDB supports the following four output plugins:
 
 All these plugins are pre-packaged with YugabyteDB and do not require any external installation.
 
+The plugin `yboutput` is Yugabyte specific. It is similar to `pgoutput` in most aspects. The only difference being that replica identity `CHANGE` is not supported in `pgoutput`. All other plugins support replica identity `CHANGE`.
+
 For more information, refer to [Logical Decoding Output Plugins](https://www.postgresql.org/docs/11/logicaldecoding-output-plugin.html) in the PostgreSQL documentation.
 
 ### LSN

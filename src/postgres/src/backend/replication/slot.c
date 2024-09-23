@@ -230,7 +230,8 @@ ReplicationSlotCreate(const char *name, bool db_specific,
 					  ReplicationSlotPersistency persistency,
 					  char *yb_plugin_name,
 					  CRSSnapshotAction yb_snapshot_action,
-					  uint64_t *yb_consistent_snapshot_time)
+					  uint64_t *yb_consistent_snapshot_time,
+					  LsnType lsn_type)
 {
 	ReplicationSlot *slot = NULL;
 	int			i;
@@ -247,9 +248,10 @@ ReplicationSlotCreate(const char *name, bool db_specific,
 	if (IsYugaByteEnabled())
 	{
 		int32_t max_clock_skew;
+		elog(INFO, "VKVK Inside ReplicationSlotCreate in slot.c");
 
 		YBCCreateReplicationSlot(name, yb_plugin_name, yb_snapshot_action,
-								 yb_consistent_snapshot_time);
+								 yb_consistent_snapshot_time, lsn_type);
 
 		/*
 		 * The creation of a replication slot establishes a boundry between the

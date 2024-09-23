@@ -39,6 +39,7 @@
 #include "replication/origin.h"
 #include "replication/snapbuild.h"
 
+#include "replication/walsender.h"
 #include "storage/proc.h"
 #include "storage/procarray.h"
 
@@ -641,6 +642,22 @@ YBValidateOutputPlugin(char *plugin)
 	callbacks = palloc(sizeof(OutputPluginCallbacks));
 	LoadOutputPlugin(callbacks, plugin);
 	pfree(callbacks);
+}
+
+void
+YBValidateReplicationSlotLsnType(char *lsn_type) {
+	if (strcmp(lsn_type, "SEQUENCE") != 0 || strcmp(lsn_type, "HYBRID_TIME") != 0)
+		elog(ERROR, "lsn type can only be SEQUENCE or HYBRID_TIME");
+}
+
+LsnType
+YBParseLsnType(char *lsn_type) {
+	if (strcmp(lsn_type, "SEQUENCE") == 0)
+		return SEQUENCE;
+	else if (strcmp(lsn_type, "HYBRID_TIME") == 0)
+		return HYBRID_TIME;
+	else
+		elog(ERROR, "invalid lsn type provided");
 }
 
 static void

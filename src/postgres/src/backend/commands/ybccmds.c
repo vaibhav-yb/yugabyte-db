@@ -49,6 +49,7 @@
 #include "commands/ybccmds.h"
 
 #include "access/htup_details.h"
+#include "replication/walsender.h"
 #include "utils/builtins.h"
 #include "utils/lsyscache.h"
 #include "utils/relcache.h"
@@ -58,6 +59,7 @@
 #include "executor/tuptable.h"
 #include "executor/ybcExpr.h"
 
+#include "yb/yql/pggate/ybc_pg_typedefs.h"
 #include "yb/yql/pggate/ybc_pggate.h"
 #include "pg_yb_utils.h"
 
@@ -1969,8 +1971,10 @@ void
 YBCCreateReplicationSlot(const char *slot_name,
 						 const char *plugin_name,
 						 CRSSnapshotAction snapshot_action,
-						 uint64_t *consistent_snapshot_time)
+						 uint64_t *consistent_snapshot_time,
+						 LsnType lsn_type)
 {
+	elog(INFO, "VKVK inside YBCCreateReplicationSlot");
 	YBCPgStatement handle;
 
 	YBCPgReplicationSlotSnapshotAction repl_slot_snapshot_action;
@@ -1987,10 +1991,23 @@ YBCCreateReplicationSlot(const char *slot_name,
 			pg_unreachable();
 	}
 
+	YBCLsnType repl_slot_lsn_type;
+	switch (lsn_type) {
+		case SEQUENCE:
+			elog(INFO, "VKVK assigning ybc replication slot sequence");
+			repl_slot_lsn_type = YB_REPLICATION_SLOT_LSN_TYPE_SEQUENCE;
+			break;
+		case HYBRID_TIME:
+			elog(INFO, "VKVK assigning ybc replication slot hybrid time");
+			repl_slot_lsn_type = YB_REPLICATION_SLOT_LSN_TYPE_HYBRID_TIME;
+			break;
+	}
+
 	HandleYBStatus(YBCPgNewCreateReplicationSlot(slot_name,
 												 plugin_name,
 												 MyDatabaseId,
 												 repl_slot_snapshot_action,
+												 repl_slot_lsn_type,
 												 &handle));
 
 	YBCStatus status = YBCPgExecCreateReplicationSlot(handle, consistent_snapshot_time);

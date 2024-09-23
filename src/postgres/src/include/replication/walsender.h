@@ -26,6 +26,12 @@ typedef enum
 	CRS_USE_SNAPSHOT
 } CRSSnapshotAction;
 
+typedef enum
+{
+	SEQUENCE,
+	HYBRID_TIME
+} LsnType;
+
 /* global state */
 extern bool am_walsender;
 extern bool am_cascading_walsender;

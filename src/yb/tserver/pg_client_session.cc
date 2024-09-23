@@ -871,6 +871,12 @@ Status PgClientSession::CreateReplicationSlot(
     }
   }
 
+  std::optional<LsnTypePB> lsn_type;
+  switch (req.lsn_type()) {
+    case SEQUENCE:
+      lsn_type = SEQUENCE;
+  }
+
   uint64_t consistent_snapshot_time;
   auto stream_result = VERIFY_RESULT(client().CreateCDCSDKStreamForNamespace(
       GetPgsqlNamespaceId(req.database_oid()), options,

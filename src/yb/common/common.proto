@@ -656,6 +656,11 @@ message PgDatumPB {
   }
 }
 
+enum LsnTypePB {
+  SEQUENCE = 0;
+  HYBRID_TIME = 1;
+}
+
 message AshMetadataPB {
   // The root level request id. i.e. the request id
   // corresponding to the call from the application to YSQL-Pg/YCQL

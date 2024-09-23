@@ -20,6 +20,7 @@
 #include "yb/tserver/pg_client.messages.h"
 
 #include "yb/yql/pggate/pg_statement.h"
+#include "yb/yql/pggate/ybc_pg_typedefs.h"
 
 namespace yb {
 namespace pggate {
@@ -334,7 +335,8 @@ class PgCreateReplicationSlot : public PgDdl {
                           const char *slot_name,
                           const char *plugin_name,
                           PgOid database_oid,
-                          YBCPgReplicationSlotSnapshotAction snapshot_action);
+                          YBCPgReplicationSlotSnapshotAction snapshot_action,
+                          YBCLsnType lsn_type);
 
   Result<tserver::PgCreateReplicationSlotResponsePB> Exec();
 

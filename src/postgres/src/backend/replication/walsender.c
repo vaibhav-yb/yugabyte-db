@@ -817,11 +817,14 @@ logical_read_xlog_page(XLogReaderState *state, XLogRecPtr targetPagePtr, int req
 static void
 parseCreateReplSlotOptions(CreateReplicationSlotCmd *cmd,
 						   bool *reserve_wal,
-						   CRSSnapshotAction *snapshot_action)
+						   CRSSnapshotAction *snapshot_action,
+						   LsnType *lsn_type)
 {
 	ListCell   *lc;
 	bool		snapshot_action_given = false;
 	bool		reserve_wal_given = false;
+
+	elog(INFO, "VKVK Parsing options");
 
 	/* Parse options */
 	foreach(lc, cmd->options)
@@ -859,6 +862,13 @@ parseCreateReplSlotOptions(CreateReplicationSlotCmd *cmd,
 			reserve_wal_given = true;
 			*reserve_wal = true;
 		}
+		else if (strcmp(defel->defname, "HYBRID_TIME") == 0) {
+			elog(INFO, "VKVK parsing replication slot with HYBRID_TIME");
+			*lsn_type = HYBRID_TIME;
+		} else if (strcmp(defel->defname, "SEQUENCE") == 0) {
+			elog(INFO, "VKVK parsing replication slot with SEQUENCE");
+			*lsn_type = SEQUENCE;
+		}
 		else
 			elog(ERROR, "unrecognized option: %s", defel->defname);
 	}
@@ -884,6 +894,7 @@ CreateReplicationSlot(CreateReplicationSlotCmd *cmd)
 	char	   *slot_name;
 	bool		reserve_wal = false;
 	CRSSnapshotAction snapshot_action = CRS_EXPORT_SNAPSHOT;
+	LsnType lsn_type = SEQUENCE;
 	DestReceiver *dest;
 	TupOutputState *tstate;
 	TupleDesc	tupdesc;
@@ -902,7 +913,7 @@ CreateReplicationSlot(CreateReplicationSlotCmd *cmd)
 	if (IsYugaByteEnabled())
 		snapshot_action = CRS_USE_SNAPSHOT;
 
-	parseCreateReplSlotOptions(cmd, &reserve_wal, &snapshot_action);
+	parseCreateReplSlotOptions(cmd, &reserve_wal, &snapshot_action, &lsn_type);
 
 	/* setup state for XLogReadPage */
 	sendTimeLineIsHistoric = false;
@@ -917,7 +928,7 @@ CreateReplicationSlot(CreateReplicationSlotCmd *cmd)
 
 		ReplicationSlotCreate(cmd->slotname, false,
 							  cmd->temporary ? RS_TEMPORARY : RS_PERSISTENT,
-							  cmd->plugin, snapshot_action, NULL);
+							  cmd->plugin, snapshot_action, NULL, lsn_type);
 	}
 	else
 	{
@@ -939,7 +950,7 @@ CreateReplicationSlot(CreateReplicationSlotCmd *cmd)
 			 */
 			ReplicationSlotCreate(cmd->slotname, true,
 								  cmd->temporary ? RS_TEMPORARY : RS_EPHEMERAL,
-								  cmd->plugin, snapshot_action, NULL);
+								  cmd->plugin, snapshot_action, NULL, lsn_type);
 		}
 	}
 
@@ -1027,7 +1038,7 @@ CreateReplicationSlot(CreateReplicationSlotCmd *cmd)
 			uint64_t consistent_snapshot_time;
 			ReplicationSlotCreate(cmd->slotname, true, RS_PERSISTENT,
 								  cmd->plugin, snapshot_action,
-								  &consistent_snapshot_time);
+								  &consistent_snapshot_time, lsn_type);
 
 			if (snapshot_action == CRS_USE_SNAPSHOT)
 			{

@@ -13,6 +13,8 @@
 
 #include "postgres.h"
 
+#include "c.h"
+#include "fmgr.h"
 #include "funcapi.h"
 #include "miscadmin.h"
 
@@ -21,6 +23,7 @@
 #include "replication/slot.h"
 #include "replication/logical.h"
 #include "replication/logicalfuncs.h"
+#include "replication/walsender.h"
 #include "utils/builtins.h"
 #include "utils/inval.h"
 #include "utils/pg_lsn.h"
@@ -74,7 +77,7 @@ pg_create_physical_replication_slot(PG_FUNCTION_ARGS)
 	ReplicationSlotCreate(NameStr(*name), false,
 						  temporary ? RS_TEMPORARY : RS_PERSISTENT,
 						  NULL /* yb_plugin_name */, CRS_NOEXPORT_SNAPSHOT,
-						  NULL);
+						  NULL, SEQUENCE);
 
 	values[0] = NameGetDatum(&MyReplicationSlot->data.name);
 	nulls[0] = false;
@@ -123,6 +126,7 @@ pg_create_logical_replication_slot(PG_FUNCTION_ARGS)
 	Name		name = PG_GETARG_NAME(0);
 	Name		plugin = PG_GETARG_NAME(1);
 	bool		temporary = PG_GETARG_BOOL(2);
+	Name		lsn_type = PG_GETARG_NAME(3); // if you have to use this function them pass temporary as false
 
 	LogicalDecodingContext *ctx = NULL;
 
@@ -158,6 +162,7 @@ pg_create_logical_replication_slot(PG_FUNCTION_ARGS)
 			elog(ERROR, "cannot initialize logical decoding without a specified plugin");
 
 		YBValidateOutputPlugin(NameStr(*plugin));
+		YBValidateReplicationSlotLsnType(NameStr(*lsn_type));
 	}
 
 	check_permissions();
@@ -179,7 +184,8 @@ pg_create_logical_replication_slot(PG_FUNCTION_ARGS)
 	 */
 	ReplicationSlotCreate(NameStr(*name), true,
 						  temporary ? RS_TEMPORARY : RS_EPHEMERAL,
-						  NameStr(*plugin), CRS_NOEXPORT_SNAPSHOT, NULL);
+						  NameStr(*plugin), CRS_NOEXPORT_SNAPSHOT, NULL,
+						  YBParseLsnType(NameStr(*lsn_type)));
 
 	memset(nulls, 0, sizeof(nulls));
 

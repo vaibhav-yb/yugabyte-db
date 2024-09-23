@@ -28,6 +28,7 @@
 #include "yb/util/tsan_util.h"
 
 #include "yb/yql/pggate/pg_client.h"
+#include "yb/yql/pggate/ybc_pg_typedefs.h"
 
 DEFINE_test_flag(int32, user_ddl_operation_timeout_sec, 0,
                  "Adjusts the timeout for a DDL operation from the YBClient default, if non-zero.");
@@ -500,7 +501,8 @@ PgCreateReplicationSlot::PgCreateReplicationSlot(PgSession::ScopedRefPtr pg_sess
                                                  const char *slot_name,
                                                  const char *plugin_name,
                                                  PgOid database_oid,
-                                                 YBCPgReplicationSlotSnapshotAction snapshot_action)
+                                                 YBCPgReplicationSlotSnapshotAction snapshot_action,
+                                                 YBCLsnType lsn_type)
     : PgDdl(pg_session) {
   req_.set_database_oid(database_oid);
   req_.set_replication_slot_name(slot_name);
@@ -517,6 +519,21 @@ PgCreateReplicationSlot::PgCreateReplicationSlot(PgSession::ScopedRefPtr pg_sess
       break;
     default:
       DCHECK(false) << "Unknown snapshot_action " << snapshot_action;
+  }
+
+  LOG(INFO) << "VKVK inside PgCreateReplicationSlot";
+  switch (lsn_type) {
+    case YB_REPLICATION_SLOT_LSN_TYPE_SEQUENCE:
+      LOG(INFO) << "VKVK inside PgCreateReplicationSlot for sequence";
+      req_.set_lsn_type(tserver::LsnTypePB::SEQUENCE);
+      break;
+    case YB_REPLICATION_SLOT_LSN_TYPE_HYBRID_TIME:
+      LOG(INFO) << "VKVK inside PgCreateReplicationSlot for hybrid time";
+      req_.set_lsn_type(tserver::LsnTypePB::HYBRID_TIME);
+      break;
+    default:
+      LOG(INFO) << "VKVK inside PgCreateReplicationSlot for sequence default";
+      req_.set_lsn_type(tserver::LsnTypePB::SEQUENCE);
   }
 }
 

@@ -14,6 +14,7 @@
 #include "access/xlog.h"
 #include "access/xlogreader.h"
 #include "replication/output_plugin.h"
+#include "replication/walsender.h"
 
 struct LogicalDecodingContext;
 
@@ -142,5 +143,7 @@ extern void LogicalConfirmReceivedLocation(XLogRecPtr lsn);
 extern bool filter_by_origin_cb_wrapper(LogicalDecodingContext *ctx, RepOriginId origin_id);
 
 extern void YBValidateOutputPlugin(char *plugin);
+extern void YBValidateReplicationSlotLsnType(char *lsn_type);
+extern LsnType YBParseLsnType(char *lsn_type);
 
 #endif

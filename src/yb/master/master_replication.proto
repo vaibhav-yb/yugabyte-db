@@ -52,6 +52,9 @@ message CDCStreamInfoPB {
   // This field stores the list of user created tables that have been removed from CDCSDK
   // stream.
   repeated bytes unqualified_table_id = 13;
+
+  // This field stores the type of the LSN being used by the replication slot.
+  optional LsnTypePB cdcsdk_ysql_replication_slot_lsn_type = 14 [default = SEQUENCE];
 }
 
 message ValidateReplicationInfoRequestPB {
@@ -79,6 +82,7 @@ message CreateCDCStreamRequestPB {
   // cdcsdk_stream_create_options field should be used for adding more stream creation options
   // related to CDCSDK in future.
   optional CDCSDKStreamCreateOptionsPB cdcsdk_stream_create_options = 11;
+  optional LsnTypePB lsn_type = 12;
 }
 
 message CreateCDCStreamResponsePB {

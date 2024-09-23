@@ -3052,6 +3052,13 @@ Status CatalogManager::ListCDCStreams(
           ltm->pb.cdcsdk_ysql_replication_slot_plugin_name());
     }
 
+    if (ltm->pb.has_cdcsdk_ysql_replication_slot_lsn_type()) {
+      stream->set_cdcsdk_ysql_replication_slot_lsn_type(
+          ltm->pb.cdcsdk_ysql_replication_slot_lsn_type());
+    } else {
+      LOG(INFO) << "VKVK lsn type is not present in ltm pb";
+    }
+
     if (ltm->pb.has_cdcsdk_stream_metadata()) {
       auto cdcsdk_stream_metadata = ltm->pb.cdcsdk_stream_metadata();
       if (cdcsdk_stream_metadata.has_snapshot_time()) {

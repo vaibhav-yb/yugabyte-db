@@ -1560,7 +1560,8 @@ Status YBClient::GetCDCStream(
     std::optional<uint64_t>* stream_creation_time,
     std::unordered_map<std::string, PgReplicaIdentity>* replica_identity_map,
     std::optional<std::string>* replication_slot_name,
-    std::vector<TableId>* unqualified_table_ids) {
+    std::vector<TableId>* unqualified_table_ids,
+    std::optional<LsnTypePB>* lsn_type) {
 
   // Setting up request.
   GetCDCStreamRequestPB req;
@@ -1617,6 +1618,10 @@ Status YBClient::GetCDCStream(
 
   if (replication_slot_name && resp.stream().has_cdcsdk_ysql_replication_slot_name()) {
     *replication_slot_name = resp.stream().cdcsdk_ysql_replication_slot_name();
+  }
+
+  if (lsn_type && resp.stream().has_cdcsdk_ysql_replication_slot_lsn_type()) {
+    *lsn_type = resp.stream().cdcsdk_ysql_replication_slot_lsn_type();
   }
 
   return Status::OK();

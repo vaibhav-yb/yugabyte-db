@@ -13,6 +13,7 @@
 #include "yb/cdc/xrepl_stream_metadata.h"
 #include "yb/cdc/cdc_service.h"
 #include "yb/client/session.h"
+#include "yb/common/common.pb.h"
 #include "yb/gutil/map-util.h"
 #include "yb/util/shared_lock.h"
 
@@ -115,6 +116,7 @@ Status StreamMetadata::GetStreamInfoFromMaster(
   StreamModeTransactional transactional(false);
   std::optional<uint64> consistent_snapshot_time;
   std::optional<CDCSDKSnapshotOption> consistent_snapshot_option;
+  std::optional<LsnTypePB> replication_slot_lsn_type;
   std::optional<uint64> stream_creation_time;
   std::unordered_map<std::string, PgReplicaIdentity> replica_identity_map;
   std::optional<std::string> replication_slot_name;
@@ -123,7 +125,7 @@ Status StreamMetadata::GetStreamInfoFromMaster(
   RETURN_NOT_OK(client->GetCDCStream(
       stream_id, &namespace_id, &object_ids, &options, &transactional, &consistent_snapshot_time,
       &consistent_snapshot_option, &stream_creation_time, &replica_identity_map,
-      &replication_slot_name, &unqualified_table_ids));
+      &replication_slot_name, &unqualified_table_ids, &replication_slot_lsn_type));
 
   AddDefaultOptionsIfMissing(&options);
 
@@ -188,6 +190,7 @@ Status StreamMetadata::GetStreamInfoFromMaster(
   stream_creation_time_.store(stream_creation_time, std::memory_order_release);
   consistent_snapshot_option_ = consistent_snapshot_option;
   replication_slot_name_ = replication_slot_name;
+  replication_slot_lsn_type_ = replication_slot_lsn_type;
 
   if (!is_refresh) {
     loaded_.store(true, std::memory_order_release);

@@ -2178,7 +2178,6 @@ YBCStatus YBCPgNewCreateReplicationSlot(const char *slot_name,
                                         YBCPgReplicationSlotSnapshotAction snapshot_action,
                                         YBCLsnType lsn_type,
                                         YBCPgStatement *handle) {
-  LOG(INFO) << "VKVK inside YBCPgNewCreateReplicationSlot";
   return ToYBCStatus(pgapi->NewCreateReplicationSlot(slot_name,
                                                      plugin_name,
                                                      database_oid,

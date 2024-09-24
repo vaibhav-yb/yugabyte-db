@@ -818,13 +818,11 @@ static void
 parseCreateReplSlotOptions(CreateReplicationSlotCmd *cmd,
 						   bool *reserve_wal,
 						   CRSSnapshotAction *snapshot_action,
-						   LsnType *lsn_type)
+						   CRSLsnType *lsn_type)
 {
 	ListCell   *lc;
 	bool		snapshot_action_given = false;
 	bool		reserve_wal_given = false;
-
-	elog(INFO, "VKVK Parsing options");
 
 	/* Parse options */
 	foreach(lc, cmd->options)
@@ -863,11 +861,9 @@ parseCreateReplSlotOptions(CreateReplicationSlotCmd *cmd,
 			*reserve_wal = true;
 		}
 		else if (strcmp(defel->defname, "HYBRID_TIME") == 0) {
-			elog(INFO, "VKVK parsing replication slot with HYBRID_TIME");
-			*lsn_type = HYBRID_TIME;
+			*lsn_type = CRS_HYBRID_TIME;
 		} else if (strcmp(defel->defname, "SEQUENCE") == 0) {
-			elog(INFO, "VKVK parsing replication slot with SEQUENCE");
-			*lsn_type = SEQUENCE;
+			*lsn_type = CRS_SEQUENCE;
 		}
 		else
 			elog(ERROR, "unrecognized option: %s", defel->defname);
@@ -894,7 +890,7 @@ CreateReplicationSlot(CreateReplicationSlotCmd *cmd)
 	char	   *slot_name;
 	bool		reserve_wal = false;
 	CRSSnapshotAction snapshot_action = CRS_EXPORT_SNAPSHOT;
-	LsnType lsn_type = SEQUENCE;
+	CRSLsnType lsn_type = CRS_SEQUENCE;
 	DestReceiver *dest;
 	TupOutputState *tstate;
 	TupleDesc	tupdesc;

@@ -1974,7 +1974,6 @@ YBCCreateReplicationSlot(const char *slot_name,
 						 uint64_t *consistent_snapshot_time,
 						 LsnType lsn_type)
 {
-	elog(INFO, "VKVK inside YBCCreateReplicationSlot");
 	YBCPgStatement handle;
 
 	YBCPgReplicationSlotSnapshotAction repl_slot_snapshot_action;
@@ -1994,11 +1993,9 @@ YBCCreateReplicationSlot(const char *slot_name,
 	YBCLsnType repl_slot_lsn_type;
 	switch (lsn_type) {
 		case SEQUENCE:
-			elog(INFO, "VKVK assigning ybc replication slot sequence");
 			repl_slot_lsn_type = YB_REPLICATION_SLOT_LSN_TYPE_SEQUENCE;
 			break;
 		case HYBRID_TIME:
-			elog(INFO, "VKVK assigning ybc replication slot hybrid time");
 			repl_slot_lsn_type = YB_REPLICATION_SLOT_LSN_TYPE_HYBRID_TIME;
 			break;
 	}

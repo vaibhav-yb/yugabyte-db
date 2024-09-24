@@ -28,9 +28,9 @@ typedef enum
 
 typedef enum
 {
-	SEQUENCE,
-	HYBRID_TIME
-} LsnType;
+	CRS_SEQUENCE,
+	CRS_HYBRID_TIME
+} CRSLsnType;
 
 /* global state */
 extern bool am_walsender;

@@ -26,6 +26,7 @@
 #include "replication/walsender.h"
 #include "utils/builtins.h"
 #include "utils/inval.h"
+#include "utils/palloc.h"
 #include "utils/pg_lsn.h"
 #include "utils/resowner.h"
 
@@ -126,7 +127,10 @@ pg_create_logical_replication_slot(PG_FUNCTION_ARGS)
 	Name		name = PG_GETARG_NAME(0);
 	Name		plugin = PG_GETARG_NAME(1);
 	bool		temporary = PG_GETARG_BOOL(2);
-	Name		lsn_type = PG_GETARG_NAME(3); // if you have to use this function them pass temporary as false
+	// todo: Make this lsn_type a dynamic argument.
+	Name		lsn_type = palloc(NAMEDATALEN);
+
+	strncpy(NameStr(*lsn_type), "SEQUENCE", NAMEDATALEN);
 
 	LogicalDecodingContext *ctx = NULL;
 

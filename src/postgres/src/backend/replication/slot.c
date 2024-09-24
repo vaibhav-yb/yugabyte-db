@@ -248,7 +248,6 @@ ReplicationSlotCreate(const char *name, bool db_specific,
 	if (IsYugaByteEnabled())
 	{
 		int32_t max_clock_skew;
-		elog(INFO, "VKVK Inside ReplicationSlotCreate in slot.c");
 
 		YBCCreateReplicationSlot(name, yb_plugin_name, yb_snapshot_action,
 								 yb_consistent_snapshot_time, lsn_type);

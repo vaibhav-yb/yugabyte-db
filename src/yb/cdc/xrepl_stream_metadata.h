@@ -17,6 +17,7 @@
 #include "yb/cdc/cdc_service.pb.h"
 #include "yb/cdc/cdc_types.h"
 #include "yb/cdc/xrepl_stream_stats.h"
+#include "yb/common/common.pb.h"
 #include "yb/common/entity_ids_types.h"
 #include "yb/common/hybrid_time.h"
 #include "yb/gutil/thread_annotations.h"
@@ -132,6 +133,10 @@ class StreamMetadata {
     DCHECK(loaded_);
     return replication_slot_name_;
   }
+  std::optional<LsnTypePB> GetReplicationSlotLsnType() const {
+    DCHECK(loaded_);
+    return replication_slot_lsn_type_;
+  }
 
 
   std::shared_ptr<StreamTabletMetadata> GetTabletMetadata(const TabletId& tablet_id)
@@ -155,6 +160,7 @@ class StreamMetadata {
   CDCRequestSource source_type_;
   CDCCheckpointType checkpoint_type_;
   std::optional<CDCSDKSnapshotOption> consistent_snapshot_option_;
+  std::optional<LsnTypePB> replication_slot_lsn_type_;
   std::atomic<master::SysCDCStreamEntryPB_State> state_;
   std::atomic<StreamModeTransactional> transactional_{StreamModeTransactional::kFalse};
   std::atomic<std::optional<uint64_t>> consistent_snapshot_time_;

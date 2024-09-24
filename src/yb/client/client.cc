@@ -1509,7 +1509,7 @@ Result<xrepl::StreamId> YBClient::CreateCDCSDKStreamForNamespace(
     CoarseTimePoint deadline,
     const CDCSDKDynamicTablesOption& dynamic_tables_option,
     uint64_t *consistent_snapshot_time_out,
-    const std::optional<LsnTypePB> lsn_type) {
+    const std::optional<LsnTypePB>& lsn_type) {
   CreateCDCStreamRequestPB req;
 
   if (populate_namespace_id_as_table_id) {

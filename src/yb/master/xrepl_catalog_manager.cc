@@ -1005,8 +1005,6 @@ Status CatalogManager::CreateNewCdcsdkStream(
 
   if (req.has_lsn_type()) {
     metadata->set_cdcsdk_ysql_replication_slot_lsn_type(req.lsn_type());
-  } else {
-    LOG(INFO) << "VKVK create request doesn't have lsn type while creating stream";
   }
 
   {
@@ -3061,8 +3059,6 @@ Status CatalogManager::ListCDCStreams(
     if (ltm->pb.has_cdcsdk_ysql_replication_slot_lsn_type()) {
       stream->set_cdcsdk_ysql_replication_slot_lsn_type(
           ltm->pb.cdcsdk_ysql_replication_slot_lsn_type());
-    } else {
-      LOG(INFO) << "VKVK lsn type is not present in ltm pb";
     }
 
     if (ltm->pb.has_cdcsdk_stream_metadata()) {

@@ -521,18 +521,14 @@ PgCreateReplicationSlot::PgCreateReplicationSlot(PgSession::ScopedRefPtr pg_sess
       DCHECK(false) << "Unknown snapshot_action " << snapshot_action;
   }
 
-  LOG(INFO) << "VKVK inside PgCreateReplicationSlot";
   switch (lsn_type) {
     case YB_REPLICATION_SLOT_LSN_TYPE_SEQUENCE:
-      LOG(INFO) << "VKVK inside PgCreateReplicationSlot for sequence";
       req_.set_lsn_type(tserver::LsnTypePB::SEQUENCE);
       break;
     case YB_REPLICATION_SLOT_LSN_TYPE_HYBRID_TIME:
-      LOG(INFO) << "VKVK inside PgCreateReplicationSlot for hybrid time";
       req_.set_lsn_type(tserver::LsnTypePB::HYBRID_TIME);
       break;
     default:
-      LOG(INFO) << "VKVK inside PgCreateReplicationSlot for sequence default";
       req_.set_lsn_type(tserver::LsnTypePB::SEQUENCE);
   }
 }

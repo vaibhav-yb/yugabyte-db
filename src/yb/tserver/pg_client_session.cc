@@ -30,6 +30,7 @@
 #include "yb/client/transaction.h"
 #include "yb/client/yb_op.h"
 
+#include "yb/common/common.pb.h"
 #include "yb/common/common_util.h"
 #include "yb/common/ql_type.h"
 #include "yb/common/pgsql_error.h"
@@ -871,10 +872,16 @@ Status PgClientSession::CreateReplicationSlot(
     }
   }
 
-  std::optional<LsnTypePB> lsn_type;
+  std::optional<yb::LsnTypePB> lsn_type;
   switch (req.lsn_type()) {
     case SEQUENCE:
-      lsn_type = SEQUENCE;
+      lsn_type = yb::SEQUENCE;
+      break;
+    case HYBRID_TIME:
+      lsn_type = yb::HYBRID_TIME;
+      break;
+    default:
+      return STATUS_FORMAT(InvalidArgument, "invalid lsn_type $0", req.lsn_type());
   }
 
   uint64_t consistent_snapshot_time;
@@ -885,7 +892,8 @@ Status PgClientSession::CreateReplicationSlot(
       req.output_plugin_name(), snapshot_option,
       context->GetClientDeadline(),
       CDCSDKDynamicTablesOption::DYNAMIC_TABLES_ENABLED,
-      &consistent_snapshot_time));
+      &consistent_snapshot_time,
+      lsn_type));
   *resp->mutable_stream_id() = stream_result.ToString();
   resp->set_cdcsdk_consistent_snapshot_time(consistent_snapshot_time);
   return Status::OK();

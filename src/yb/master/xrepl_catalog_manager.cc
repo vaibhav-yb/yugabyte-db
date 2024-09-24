@@ -1003,6 +1003,12 @@ Status CatalogManager::CreateNewCdcsdkStream(
         req.cdcsdk_ysql_replication_slot_plugin_name());
   }
 
+  if (req.has_lsn_type()) {
+    metadata->set_cdcsdk_ysql_replication_slot_lsn_type(req.lsn_type());
+  } else {
+    LOG(INFO) << "VKVK create request doesn't have lsn type while creating stream";
+  }
+
   {
     // Add the stream to the in-memory map.
     TRACE("Acquired catalog manager lock");

@@ -131,9 +131,9 @@ TEMPORARY			{ return K_TEMPORARY; }
 EXPORT_SNAPSHOT		{ return K_EXPORT_SNAPSHOT; }
 NOEXPORT_SNAPSHOT	{ return K_NOEXPORT_SNAPSHOT; }
 USE_SNAPSHOT		{ return K_USE_SNAPSHOT; }
-SEQUENCE			{ return K_SEQUENCE; }
-HYBRID_TIME			{ return K_HYBRID_TIME; }
 WAIT				{ return K_WAIT; }
+SEQUENCE			{ return K_YB_SEQUENCE; }
+HYBRID_TIME			{ return K_YB_HYBRID_TIME; }
 
 {space}+		{ /* do nothing */ }
 

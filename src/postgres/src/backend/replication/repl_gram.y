@@ -84,8 +84,9 @@ Node *replication_parse_result;
 %token K_EXPORT_SNAPSHOT
 %token K_NOEXPORT_SNAPSHOT
 %token K_USE_SNAPSHOT
-%token K_SEQUENCE
-%token K_HYBRID_TIME
+
+%token K_YB_SEQUENCE
+%token K_YB_HYBRID_TIME
 
 %type <node>	command
 %type <node>	base_backup start_replication start_logical_replication
@@ -268,12 +269,13 @@ create_slot_opt:
 				  $$ = makeDefElem("reserve_wal",
 								   (Node *)makeInteger(true), -1);
 				}
-			| K_SEQUENCE
+
+			| K_YB_SEQUENCE
 				{
 				  $$ = makeDefElem("SEQUENCE",
 								   (Node *)makeInteger(false), -1);
 				}
-			| K_HYBRID_TIME
+			| K_YB_HYBRID_TIME
 				{
 				  $$ = makeDefElem("HYBRID_TIME",
 								   (Node *)makeInteger(true), -1);

@@ -262,9 +262,6 @@ DEFINE_RUNTIME_AUTO_PG_FLAG(bool, yb_enable_replication_commands, kLocalPersiste
 DEFINE_RUNTIME_AUTO_PG_FLAG(bool, yb_enable_replica_identity, kLocalPersisted, false, true,
     "Enable replica identity command for Alter Table query");
 
-DEFINE_RUNTIME_AUTO_PG_FLAG(bool, yb_allow_replication_slot_lsn_types, kLocalPersisted,
-    false, true, "Allow specifying LSN type while creating replication slot");
-
 DEFINE_RUNTIME_PG_FLAG(
     string, yb_default_replica_identity, "CHANGE",
     "The default replica identity to be assigned to user defined tables at the time of creation. "

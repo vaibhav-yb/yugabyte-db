@@ -39,7 +39,6 @@
 #include "replication/origin.h"
 #include "replication/snapbuild.h"
 
-#include "replication/walsender.h"
 #include "storage/proc.h"
 #include "storage/procarray.h"
 
@@ -48,6 +47,7 @@
 /* YB includes. */
 #include "pg_yb_utils.h"
 #include "replication/yb_virtual_wal_client.h"
+#include "replication/walsender.h"
 
 /* data for errcontext callback */
 typedef struct LogicalErrorCallbackState

@@ -49,7 +49,6 @@
 #include "commands/ybccmds.h"
 
 #include "access/htup_details.h"
-#include "replication/walsender.h"
 #include "utils/builtins.h"
 #include "utils/lsyscache.h"
 #include "utils/relcache.h"
@@ -59,7 +58,6 @@
 #include "executor/tuptable.h"
 #include "executor/ybcExpr.h"
 
-#include "yb/yql/pggate/ybc_pg_typedefs.h"
 #include "yb/yql/pggate/ybc_pggate.h"
 #include "pg_yb_utils.h"
 

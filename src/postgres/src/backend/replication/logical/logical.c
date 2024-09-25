@@ -650,12 +650,12 @@ YBValidateReplicationSlotLsnType(char *lsn_type) {
 		elog(ERROR, "lsn type can only be SEQUENCE or HYBRID_TIME");
 }
 
-LsnType
+CRSLsnType
 YBParseLsnType(char *lsn_type) {
 	if (strcmp(lsn_type, "SEQUENCE") == 0)
-		return SEQUENCE;
+		return CRS_SEQUENCE;
 	else if (strcmp(lsn_type, "HYBRID_TIME") == 0)
-		return HYBRID_TIME;
+		return CRS_HYBRID_TIME;
 	else
 		elog(ERROR, "invalid lsn type provided");
 }

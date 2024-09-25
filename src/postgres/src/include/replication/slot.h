@@ -214,7 +214,7 @@ extern void ReplicationSlotCreate(const char *name, bool db_specific,
 					  char *yb_plugin_name,
 					  CRSSnapshotAction yb_snapshot_action,
 					  uint64_t *yb_consistent_snapshot_time,
-					  LsnType lsn_type);
+					  CRSLsnType lsn_type);
 extern void ReplicationSlotPersist(void);
 extern void ReplicationSlotDrop(const char *name, bool nowait);
 

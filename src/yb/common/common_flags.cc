@@ -123,6 +123,10 @@ DEFINE_RUNTIME_AUTO_PG_FLAG(
     "Enable consumption of changes via replication slots."
     "Requires yb_enable_replication_commands to be true.");
 
+DEFINE_RUNTIME_AUTO_PG_FLAG(
+    bool, yb_allow_replication_slot_lsn_types, kLocalPersisted, false, true,
+    "Enable LSN types to be specified while creating replication slots.");
+
 DEFINE_NON_RUNTIME_bool(TEST_ysql_hide_catalog_version_increment_log, false,
     "Hide catalog version increment log messages.");
 TAG_FLAG(TEST_ysql_hide_catalog_version_increment_log, hidden);

@@ -1972,7 +1972,7 @@ YBCCreateReplicationSlot(const char *slot_name,
 						 const char *plugin_name,
 						 CRSSnapshotAction snapshot_action,
 						 uint64_t *consistent_snapshot_time,
-						 LsnType lsn_type)
+						 CRSLsnType lsn_type)
 {
 	YBCPgStatement handle;
 
@@ -1992,10 +1992,10 @@ YBCCreateReplicationSlot(const char *slot_name,
 
 	YBCLsnType repl_slot_lsn_type;
 	switch (lsn_type) {
-		case SEQUENCE:
+		case CRS_SEQUENCE:
 			repl_slot_lsn_type = YB_REPLICATION_SLOT_LSN_TYPE_SEQUENCE;
 			break;
-		case HYBRID_TIME:
+		case CRS_HYBRID_TIME:
 			repl_slot_lsn_type = YB_REPLICATION_SLOT_LSN_TYPE_HYBRID_TIME;
 			break;
 	}

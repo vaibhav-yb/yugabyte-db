@@ -78,7 +78,7 @@ pg_create_physical_replication_slot(PG_FUNCTION_ARGS)
 	ReplicationSlotCreate(NameStr(*name), false,
 						  temporary ? RS_TEMPORARY : RS_PERSISTENT,
 						  NULL /* yb_plugin_name */, CRS_NOEXPORT_SNAPSHOT,
-						  NULL, SEQUENCE);
+						  NULL, CRS_SEQUENCE);
 
 	values[0] = NameGetDatum(&MyReplicationSlot->data.name);
 	nulls[0] = false;

@@ -122,7 +122,7 @@ extern void YBCCreateReplicationSlot(const char *slot_name,
 									 const char *plugin_name,
 									 CRSSnapshotAction snapshot_action,
 									 uint64_t *consistent_snapshot_time,
-									 LsnType lsn_type);
+									 CRSLsnType lsn_type);
 
 extern void
 YBCListReplicationSlots(YBCReplicationSlotDescriptor **replication_slots,

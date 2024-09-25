@@ -45,6 +45,7 @@
 #include "miscadmin.h"
 #include "pgstat.h"
 #include "replication/slot.h"
+#include "replication/walsender.h"
 #include "storage/fd.h"
 #include "storage/proc.h"
 #include "storage/procarray.h"
@@ -231,7 +232,7 @@ ReplicationSlotCreate(const char *name, bool db_specific,
 					  char *yb_plugin_name,
 					  CRSSnapshotAction yb_snapshot_action,
 					  uint64_t *yb_consistent_snapshot_time,
-					  LsnType lsn_type)
+					  CRSLsnType lsn_type)
 {
 	ReplicationSlot *slot = NULL;
 	int			i;

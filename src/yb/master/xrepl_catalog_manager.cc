@@ -138,6 +138,7 @@ DEFINE_test_flag(bool, cdcsdk_skip_table_removal_from_qualified_list, false,
 
 DECLARE_int32(master_rpc_timeout_ms);
 DECLARE_bool(ysql_yb_enable_replication_commands);
+DECLARE_bool(ysql_yb_allow_replication_slot_lsn_types);
 DECLARE_bool(yb_enable_cdc_consistent_snapshot_streams);
 DECLARE_bool(ysql_yb_enable_replica_identity);
 DECLARE_uint32(cdc_wal_retention_time_secs);
@@ -1965,6 +1966,14 @@ Status CatalogManager::ValidateCDCSDKRequestProperties(
     // Should never happen since the YSQL commands also check the flag.
     RETURN_INVALID_REQUEST_STATUS(
         "Creation of CDCSDK stream with a replication slot name is disallowed");
+  }
+
+  if (FLAGS_ysql_yb_enable_replication_commands &&
+      !FLAGS_ysql_yb_allow_replication_slot_lsn_types &&
+      req.has_lsn_type()) {
+    // Should not allow LSN types if specifying LSN types is disabled.
+    RETURN_INVALID_REQUEST_STATUS(
+        "Creation of CDCSDK stream with a replication slot having LSN type is disallowed");
   }
 
   // TODO: Validate that the replication slot output plugin name is provided if

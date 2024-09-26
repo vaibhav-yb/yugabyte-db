@@ -98,6 +98,7 @@
 #include "pg_yb_utils.h"
 #include "commands/ybccmds.h"
 #include "replication/yb_virtual_wal_client.h"
+#include "yb/yql/pggate/util/yb_guc.h"
 
 /*
  * Maximum data payload in a WAL data message.  Must be >= XLOG_BLCKSZ.
@@ -877,12 +878,14 @@ static void
 CreateReplicationSlot(CreateReplicationSlotCmd *cmd)
 {
 	if (IsYugaByteEnabled() &&
-		(!yb_enable_replication_commands || !yb_enable_replica_identity))
+		(!yb_enable_replication_commands || !yb_enable_replica_identity
+			|| !yb_allow_replication_slot_lsn_types))
 		ereport(ERROR,
 				(errcode(ERRCODE_INVALID_PARAMETER_VALUE),
 				 errmsg("CreateReplicationSlot is unavailable"),
 				 errdetail("Creation of replication slot is only allowed with "
-				 		   "ysql_yb_enable_replication_commands and "
+				 		   "ysql_yb_enable_replication_commands, "
+						   "ysql_yb_allow_replication_slot_lsn_types and "
 						   "ysql_yb_enable_replica_identity set to true.")));
 
 	const char *snapshot_name = NULL;

@@ -14,6 +14,7 @@
 //--------------------------------------------------------------------------------------------------
 
 #include "yb/yql/pggate/pg_ddl.h"
+#include <gflags/gflags_declare.h>
 
 #include "yb/client/yb_table_name.h"
 
@@ -34,6 +35,8 @@ DEFINE_test_flag(int32, user_ddl_operation_timeout_sec, 0,
 
 DECLARE_int32(max_num_tablets_for_table);
 DECLARE_int32(yb_client_admin_operation_timeout_sec);
+
+DECLARE_bool(ysql_yb_allow_replication_slot_lsn_types);
 
 namespace yb {
 namespace pggate {
@@ -520,15 +523,17 @@ PgCreateReplicationSlot::PgCreateReplicationSlot(PgSession::ScopedRefPtr pg_sess
       DCHECK(false) << "Unknown snapshot_action " << snapshot_action;
   }
 
-  switch (lsn_type) {
-    case YB_REPLICATION_SLOT_LSN_TYPE_SEQUENCE:
-      req_.set_lsn_type(tserver::LsnTypePB::SEQUENCE);
-      break;
-    case YB_REPLICATION_SLOT_LSN_TYPE_HYBRID_TIME:
-      req_.set_lsn_type(tserver::LsnTypePB::HYBRID_TIME);
-      break;
-    default:
-      req_.set_lsn_type(tserver::LsnTypePB::SEQUENCE);
+  if (FLAGS_ysql_yb_allow_replication_slot_lsn_types) {
+    switch (lsn_type) {
+      case YB_REPLICATION_SLOT_LSN_TYPE_SEQUENCE:
+        req_.set_lsn_type(tserver::LsnTypePB::SEQUENCE);
+        break;
+      case YB_REPLICATION_SLOT_LSN_TYPE_HYBRID_TIME:
+        req_.set_lsn_type(tserver::LsnTypePB::HYBRID_TIME);
+        break;
+      default:
+        req_.set_lsn_type(tserver::LsnTypePB::SEQUENCE);
+    }
   }
 }
 

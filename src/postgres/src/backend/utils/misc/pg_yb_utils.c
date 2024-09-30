@@ -387,6 +387,33 @@ Bitmapset *YBGetTableFullPrimaryKeyBms(Relation rel)
 	return rel->full_primary_key_bms;
 }
 
+bool
+YBIsOidCoveredByMainTable(Oid index_oid)
+{
+	Relation index = RelationIdGetRelation(index_oid);
+	bool     result = YBIsCoveredByMainTable(index);
+	RelationClose(index);
+	return result;
+}
+
+bool
+YBIsCoveredByMainTable(Relation index)
+{
+	if (!IsYBRelation(index))
+		return false;
+
+	if (index->rd_index == NULL)
+		return true;
+
+	if (index->rd_index->indisprimary)
+		return true;
+
+	if (index->rd_amroutine->yb_amiscoveredbymaintable)
+		return true;
+
+	return false;
+}
+
 extern bool YBRelHasOldRowTriggers(Relation rel, CmdType operation)
 {
 	TriggerDesc *trigdesc = rel->trigdesc;
@@ -1388,6 +1415,8 @@ bool yb_explain_hide_non_deterministic_fields = false;
 bool yb_enable_saop_pushdown = true;
 int yb_toast_catcache_threshold = -1;
 int yb_parallel_range_size = 1024 * 1024;
+bool yb_enable_fkey_catcache = true;
+int yb_insert_on_conflict_read_batch_size = 1024;
 
 YBUpdateOptimizationOptions yb_update_optimization_options = {
 	.is_enabled = false,

@@ -646,7 +646,7 @@ YBValidateOutputPlugin(char *plugin)
 
 void
 YBValidateReplicationSlotLsnType(char *lsn_type) {
-	if (strcmp(lsn_type, "SEQUENCE") != 0 || strcmp(lsn_type, "HYBRID_TIME") != 0)
+	if (!(strcmp(lsn_type, "SEQUENCE") == 0 || strcmp(lsn_type, "HYBRID_TIME") == 0))
 		elog(ERROR, "lsn type can only be SEQUENCE or HYBRID_TIME");
 }
 

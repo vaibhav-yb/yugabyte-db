@@ -16,6 +16,7 @@
 #include "yb/cdc/cdc_types.h"
 #include "yb/cdc/cdc_state_table.h"
 
+#include "yb/common/common.pb.h"
 #include "yb/common/entity_ids_types.h"
 
 #include "yb/integration-tests/cdcsdk_test_base.h"
@@ -26,6 +27,7 @@
 #include "yb/tserver/tablet_server.h"
 #include "yb/tserver/ts_tablet_manager.h"
 
+#include "yb/util/test_macros.h"
 #include "yb/util/tostring.h"
 #include "yb/util/metric_entity.h"
 
@@ -7789,6 +7791,62 @@ TEST_F(CDCSDKYsqlTest, TestPgReplicationSlotsWithoutCDCStateTable) {
   auto conn = ASSERT_RESULT(test_cluster_.ConnectToDB(kNamespaceName));
 
   ASSERT_OK(conn.Fetch("SELECT * FROM pg_replication_slots"));
+}
+
+TEST_F(CDCSDKYsqlTest, TestPgCreateReplicationSlotDefaultLsnType) {
+  ASSERT_OK(
+      SetUpWithParams(3 /* replication_factor */, 1 /* num_masters */, false));
+
+  auto conn = ASSERT_RESULT(test_cluster_.ConnectToDBWithReplication(kNamespaceName));
+
+  ASSERT_OK(conn.Execute(
+      "create table test_table (id int primary key, name text, l_name varchar, hours float);"));
+
+  ASSERT_OK(conn.Execute("create publication pub for all tables;"));
+
+  auto result = ASSERT_RESULT(conn.Fetch("CREATE_REPLICATION_SLOT rs LOGICAL yboutput;"));
+
+  auto list_cdc_streams_resp = ASSERT_RESULT(ListDBStreams());
+
+  ASSERT_EQ(
+      LsnTypePB::SEQUENCE,
+      list_cdc_streams_resp.streams().Get(0).cdcsdk_ysql_replication_slot_lsn_type());
+}
+
+void CDCSDKYsqlTest::TestCreateReplicationSlotWithLsnType(const std::string lsn_type) {
+  ANNOTATE_UNPROTECTED_WRITE(FLAGS_ysql_yb_allow_replication_slot_lsn_types) = true;
+  ASSERT_OK(
+      SetUpWithParams(3 /* replication_factor */, 1 /* num_masters */, false));
+
+  auto conn = ASSERT_RESULT(test_cluster_.ConnectToDBWithReplication(kNamespaceName));
+
+  ASSERT_OK(conn.Execute(
+      "create table test_table (id int primary key, name text, l_name varchar, hours float);"));
+
+  ASSERT_OK(conn.Execute("create publication pub for all tables;"));
+
+  auto result =
+      ASSERT_RESULT(conn.Fetch("CREATE_REPLICATION_SLOT rs LOGICAL yboutput " + lsn_type + ";"));
+
+  auto list_cdc_streams_resp = ASSERT_RESULT(ListDBStreams());
+
+  if (lsn_type == "SEQUENCE") {
+    ASSERT_EQ(
+        LsnTypePB::SEQUENCE,
+        list_cdc_streams_resp.streams().Get(0).cdcsdk_ysql_replication_slot_lsn_type());
+  } else {
+    ASSERT_EQ(
+        LsnTypePB::HYBRID_TIME,
+        list_cdc_streams_resp.streams().Get(0).cdcsdk_ysql_replication_slot_lsn_type());
+  }
+}
+
+TEST_F(CDCSDKYsqlTest, TestCreateReplicationSlotWithLsnTypeSequence) {
+  TestCreateReplicationSlotWithLsnType("SEQUENCE");
+}
+
+TEST_F(CDCSDKYsqlTest, TestCreateReplicationSlotWithLsnTypeHybridTime) {
+  TestCreateReplicationSlotWithLsnType("HYBRID_TIME");
 }
 
 TEST_F(CDCSDKYsqlTest, TestPgPublicationDisabled) {

@@ -929,10 +929,10 @@ Status PgClientSession::CreateReplicationSlot(
 
   std::optional<yb::LsnTypePB> lsn_type;
   switch (req.lsn_type()) {
-    case SEQUENCE:
+    case PG_SEQUENCE:
       lsn_type = yb::SEQUENCE;
       break;
-    case HYBRID_TIME:
+    case PG_HYBRID_TIME:
       lsn_type = yb::HYBRID_TIME;
       break;
     default:

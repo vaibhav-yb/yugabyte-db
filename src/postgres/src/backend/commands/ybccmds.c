@@ -1991,7 +1991,7 @@ YBCCreateReplicationSlot(const char *slot_name,
 	}
 
 	YBCLsnType repl_slot_lsn_type = YB_REPLICATION_SLOT_LSN_TYPE_SEQUENCE;
-	if (!yb_allow_replication_slot_lsn_types) {
+	if (yb_allow_replication_slot_lsn_types) {
 		switch (lsn_type) {
 			case CRS_SEQUENCE:
 				repl_slot_lsn_type = YB_REPLICATION_SLOT_LSN_TYPE_SEQUENCE;

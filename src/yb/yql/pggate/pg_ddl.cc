@@ -29,6 +29,7 @@
 #include "yb/util/tsan_util.h"
 
 #include "yb/yql/pggate/pg_client.h"
+#include "yb/yql/pggate/ybc_pg_typedefs.h"
 
 DEFINE_test_flag(int32, user_ddl_operation_timeout_sec, 0,
                  "Adjusts the timeout for a DDL operation from the YBClient default, if non-zero.");
@@ -523,16 +524,21 @@ PgCreateReplicationSlot::PgCreateReplicationSlot(PgSession::ScopedRefPtr pg_sess
       DCHECK(false) << "Unknown snapshot_action " << snapshot_action;
   }
 
+  LOG(INFO) << "FLAGS_ysql_yb_allow_replication_slot_lsn_types value is " << FLAGS_ysql_yb_allow_replication_slot_lsn_types;
   if (FLAGS_ysql_yb_allow_replication_slot_lsn_types) {
+    LOG(INFO) << "Value inside the block (pg_ddl.cc) is " << (lsn_type == YB_REPLICATION_SLOT_LSN_TYPE_SEQUENCE ? "SEQUENCE" : "HYBRID_TIME");
     switch (lsn_type) {
       case YB_REPLICATION_SLOT_LSN_TYPE_SEQUENCE:
-        req_.set_lsn_type(tserver::LsnTypePB::SEQUENCE);
+        LOG(INFO) << "Setting sequence lsn_type";
+        req_.set_lsn_type(tserver::PGLsnTypePB::PG_SEQUENCE);
         break;
       case YB_REPLICATION_SLOT_LSN_TYPE_HYBRID_TIME:
-        req_.set_lsn_type(tserver::LsnTypePB::HYBRID_TIME);
+        LOG(INFO) << "Setting hybrid_time lsn type";
+        req_.set_lsn_type(tserver::PGLsnTypePB::PG_HYBRID_TIME);
         break;
       default:
-        req_.set_lsn_type(tserver::LsnTypePB::SEQUENCE);
+        LOG(INFO) << "Setting default lsn_type";
+        req_.set_lsn_type(tserver::PGLsnTypePB::PG_SEQUENCE);
     }
   }
 }

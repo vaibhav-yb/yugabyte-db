@@ -862,8 +862,18 @@ parseCreateReplSlotOptions(CreateReplicationSlotCmd *cmd,
 			*reserve_wal = true;
 		}
 		else if (strcmp(defel->defname, "HYBRID_TIME") == 0) {
+			if (!yb_allow_replication_slot_lsn_types)
+				ereport(ERROR,
+						(errcode(ERRCODE_SYNTAX_ERROR),
+						 errmsg("LSN type parameter not allowed when "
+						 		"ysql_yb_allow_replication_slot_lsn_types is disabled")));
 			*lsn_type = CRS_HYBRID_TIME;
 		} else if (strcmp(defel->defname, "SEQUENCE") == 0) {
+			if (!yb_allow_replication_slot_lsn_types)
+				ereport(ERROR,
+						(errcode(ERRCODE_SYNTAX_ERROR),
+						 errmsg("LSN type parameter not allowed when "
+						 		"ysql_yb_allow_replication_slot_lsn_types is disabled")));
 			*lsn_type = CRS_SEQUENCE;
 		}
 		else
@@ -878,14 +888,12 @@ static void
 CreateReplicationSlot(CreateReplicationSlotCmd *cmd)
 {
 	if (IsYugaByteEnabled() &&
-		(!yb_enable_replication_commands || !yb_enable_replica_identity
-			|| !yb_allow_replication_slot_lsn_types))
+		(!yb_enable_replication_commands || !yb_enable_replica_identity))
 		ereport(ERROR,
 				(errcode(ERRCODE_INVALID_PARAMETER_VALUE),
 				 errmsg("CreateReplicationSlot is unavailable"),
 				 errdetail("Creation of replication slot is only allowed with "
-				 		   "ysql_yb_enable_replication_commands, "
-						   "ysql_yb_allow_replication_slot_lsn_types and "
+				 		   "ysql_yb_enable_replication_commands and "
 						   "ysql_yb_enable_replica_identity set to true.")));
 
 	const char *snapshot_name = NULL;

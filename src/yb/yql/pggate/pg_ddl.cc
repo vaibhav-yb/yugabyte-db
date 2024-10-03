@@ -524,9 +524,7 @@ PgCreateReplicationSlot::PgCreateReplicationSlot(PgSession::ScopedRefPtr pg_sess
       DCHECK(false) << "Unknown snapshot_action " << snapshot_action;
   }
 
-  LOG(INFO) << "FLAGS_ysql_yb_allow_replication_slot_lsn_types value is " << FLAGS_ysql_yb_allow_replication_slot_lsn_types;
   if (FLAGS_ysql_yb_allow_replication_slot_lsn_types) {
-    LOG(INFO) << "Value inside the block (pg_ddl.cc) is " << (lsn_type == YB_REPLICATION_SLOT_LSN_TYPE_SEQUENCE ? "SEQUENCE" : "HYBRID_TIME");
     switch (lsn_type) {
       case YB_REPLICATION_SLOT_LSN_TYPE_SEQUENCE:
         LOG(INFO) << "Setting sequence lsn_type";

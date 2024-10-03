@@ -203,7 +203,9 @@ class PgClientSession {
       ClampUncertaintyWindow clamp);
 
   client::YBClient& client();
-  client::YBSessionPtr& EnsureSession(PgClientSessionKind kind, CoarseTimePoint deadline);
+  client::YBSessionPtr& EnsureSession(
+      PgClientSessionKind kind, CoarseTimePoint deadline,
+      std::optional<uint64_t> read_time = std::nullopt);
 
   template <class T>
   static auto& DoSessionData(T* that, PgClientSessionKind kind) {
@@ -282,6 +284,9 @@ class PgClientSession {
 
   Status CheckPlainSessionPendingUsedReadTime(uint64_t txn_serial_no);
   Status CheckPlainSessionReadTimeIsSet() const;
+  Status DdlAtomicityFinishTransaction(
+      bool has_docdb_schema_changes, const TransactionMetadata* metadata,
+      std::optional<bool> commit);
 
   void ScheduleBigSharedMemExpirationCheck(std::chrono::steady_clock::duration delay);
 

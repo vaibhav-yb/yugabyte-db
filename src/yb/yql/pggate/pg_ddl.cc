@@ -526,16 +526,13 @@ PgCreateReplicationSlot::PgCreateReplicationSlot(PgSession::ScopedRefPtr pg_sess
   if (FLAGS_ysql_yb_allow_replication_slot_lsn_types) {
     switch (lsn_type) {
       case YB_REPLICATION_SLOT_LSN_TYPE_SEQUENCE:
-        LOG(INFO) << "Setting sequence lsn_type";
-        req_.set_lsn_type(tserver::PGLsnTypePB::PG_SEQUENCE);
+        req_.set_lsn_type(tserver::PGReplicationSlotLsnType::PG_SEQUENCE);
         break;
       case YB_REPLICATION_SLOT_LSN_TYPE_HYBRID_TIME:
-        LOG(INFO) << "Setting hybrid_time lsn type";
-        req_.set_lsn_type(tserver::PGLsnTypePB::PG_HYBRID_TIME);
+        req_.set_lsn_type(tserver::PGReplicationSlotLsnType::PG_HYBRID_TIME);
         break;
       default:
-        LOG(INFO) << "Setting default lsn_type";
-        req_.set_lsn_type(tserver::PGLsnTypePB::PG_SEQUENCE);
+        req_.set_lsn_type(tserver::PGReplicationSlotLsnType::PG_SEQUENCE);
     }
   }
 }

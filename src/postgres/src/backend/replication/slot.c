@@ -45,7 +45,6 @@
 #include "miscadmin.h"
 #include "pgstat.h"
 #include "replication/slot.h"
-#include "replication/walsender.h"
 #include "storage/fd.h"
 #include "storage/ipc.h"
 #include "storage/proc.h"
@@ -108,6 +107,10 @@ int			max_replication_slots = 0;	/* the maximum number of replication
 /* Constants for plugin names */
 const char* YB_OUTPUT_PLUGIN = "yboutput";
 const char* PG_OUTPUT_PLUGIN = "pgoutput";
+
+/* Constants for replication slot LSN types */
+const char* LSN_TYPE_SEQUENCE = "SEQUENCE";
+const char* LSN_TYPE_HYBRID_TIME = "HYBRID_TIME";
 
 static void ReplicationSlotShmemExit(int code, Datum arg);
 static void ReplicationSlotDropAcquired(void);

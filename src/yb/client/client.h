@@ -35,7 +35,6 @@
 
 #include <future>
 #include <memory>
-#include <optional>
 #include <string>
 #include <vector>
 #include <utility>
@@ -606,7 +605,7 @@ class YBClient {
       const CDCSDKDynamicTablesOption& dynamic_tables_option =
           CDCSDKDynamicTablesOption::DYNAMIC_TABLES_ENABLED,
       uint64_t* consistent_snapshot_time_out = nullptr,
-      const std::optional<LsnTypePB>& lsn_type = std::nullopt);
+      const std::optional<ReplicationSlotLsnType>& lsn_type = std::nullopt);
 
   // Delete multiple CDC streams.
   Status DeleteCDCStream(
@@ -649,7 +648,7 @@ class YBClient {
       std::unordered_map<std::string, PgReplicaIdentity>* replica_identity_map = nullptr,
       std::optional<std::string>* replication_slot_name = nullptr,
       std::vector<TableId>* unqualified_table_ids = nullptr,
-      std::optional<LsnTypePB>* lsn_type = nullptr);
+      std::optional<ReplicationSlotLsnType>* lsn_type = nullptr);
 
   Result<CDCSDKStreamInfo> GetCDCStream(
       const ReplicationSlotName& replication_slot_name,

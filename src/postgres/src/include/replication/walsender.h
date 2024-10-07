@@ -24,6 +24,9 @@ typedef enum
 	CRS_USE_SNAPSHOT
 } CRSSnapshotAction;
 
+/*
+ * The type of LSN type to use in create replication slot command.
+ */
 typedef enum
 {
 	CRS_SEQUENCE,

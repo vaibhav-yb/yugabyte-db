@@ -133,7 +133,7 @@ class StreamMetadata {
     DCHECK(loaded_);
     return replication_slot_name_;
   }
-  std::optional<LsnTypePB> GetReplicationSlotLsnType() const {
+  std::optional<ReplicationSlotLsnType> GetReplicationSlotLsnType() const {
     DCHECK(loaded_);
     return replication_slot_lsn_type_;
   }
@@ -160,7 +160,7 @@ class StreamMetadata {
   CDCRequestSource source_type_;
   CDCCheckpointType checkpoint_type_;
   std::optional<CDCSDKSnapshotOption> consistent_snapshot_option_;
-  std::optional<LsnTypePB> replication_slot_lsn_type_;
+  std::optional<ReplicationSlotLsnType> replication_slot_lsn_type_;
   std::atomic<master::SysCDCStreamEntryPB_State> state_;
   std::atomic<StreamModeTransactional> transactional_{StreamModeTransactional::kFalse};
   std::atomic<std::optional<uint64_t>> consistent_snapshot_time_;

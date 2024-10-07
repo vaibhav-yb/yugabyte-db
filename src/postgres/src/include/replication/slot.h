@@ -218,6 +218,9 @@ extern PGDLLIMPORT const char *PG_OUTPUT_PLUGIN;
 
 extern PGDLLIMPORT const char *PG_OUTPUT_PLUGIN;
 
+extern PGDLLIMPORT const char *LSN_TYPE_SEQUENCE;
+extern PGDLLIMPORT const char *LSN_TYPE_HYBRID_TIME;
+
 /* shmem initialization functions */
 extern Size ReplicationSlotsShmemSize(void);
 extern void ReplicationSlotsShmemInit(void);

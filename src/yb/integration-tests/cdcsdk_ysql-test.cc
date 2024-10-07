@@ -7811,7 +7811,7 @@ TEST_F(CDCSDKYsqlTest, TestPgCreateReplicationSlotDefaultLsnType) {
   auto list_cdc_streams_resp = ASSERT_RESULT(ListDBStreams());
 
   ASSERT_EQ(
-      LsnTypePB::SEQUENCE,
+      ReplicationSlotLsnType::SEQUENCE,
       list_cdc_streams_resp.streams().Get(0).cdcsdk_ysql_replication_slot_lsn_type());
 }
 
@@ -7834,11 +7834,11 @@ void CDCSDKYsqlTest::TestCreateReplicationSlotWithLsnType(const std::string lsn_
 
   if (lsn_type == "SEQUENCE") {
     ASSERT_EQ(
-        LsnTypePB::SEQUENCE,
+        ReplicationSlotLsnType::SEQUENCE,
         list_cdc_streams_resp.streams().Get(0).cdcsdk_ysql_replication_slot_lsn_type());
   } else {
     ASSERT_EQ(
-        LsnTypePB::HYBRID_TIME,
+        ReplicationSlotLsnType::HYBRID_TIME,
         list_cdc_streams_resp.streams().Get(0).cdcsdk_ysql_replication_slot_lsn_type());
   }
 }

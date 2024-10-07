@@ -968,13 +968,13 @@ Status PgClientSession::CreateReplicationSlot(
     }
   }
 
-  std::optional<yb::LsnTypePB> lsn_type;
+  std::optional<yb::ReplicationSlotLsnType> lsn_type;
   switch (req.lsn_type()) {
     case PG_SEQUENCE:
-      lsn_type = yb::SEQUENCE;
+      lsn_type = ReplicationSlotLsnType::SEQUENCE;
       break;
     case PG_HYBRID_TIME:
-      lsn_type = yb::HYBRID_TIME;
+      lsn_type = ReplicationSlotLsnType::HYBRID_TIME;
       break;
     default:
       return STATUS_FORMAT(InvalidArgument, "invalid lsn_type $0", req.lsn_type());

@@ -21,10 +21,8 @@
 #include "replication/decode.h"
 #include "replication/logical.h"
 #include "replication/slot.h"
-#include "replication/walsender.h"
 #include "utils/builtins.h"
 #include "utils/inval.h"
-#include "utils/palloc.h"
 #include "utils/pg_lsn.h"
 #include "utils/resowner.h"
 
@@ -238,7 +236,7 @@ pg_create_logical_replication_slot(PG_FUNCTION_ARGS)
 			elog(ERROR, "cannot initialize logical decoding without a specified plugin");
 
 		YBValidateOutputPlugin(NameStr(*plugin));
-		YBValidateReplicationSlotLsnType(yb_lsn_type);
+		YBValidateLsnType(yb_lsn_type);
 	}
 
 	CheckSlotPermissions();

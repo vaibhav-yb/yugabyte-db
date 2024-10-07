@@ -1968,10 +1968,8 @@ Status CatalogManager::ValidateCDCSDKRequestProperties(
         "Creation of CDCSDK stream with a replication slot name is disallowed");
   }
 
-  if (FLAGS_ysql_yb_enable_replication_commands &&
-      !FLAGS_ysql_yb_allow_replication_slot_lsn_types &&
+  if (!FLAGS_ysql_yb_allow_replication_slot_lsn_types &&
       req.has_lsn_type()) {
-    // Should not allow LSN types if specifying LSN types is disabled.
     RETURN_INVALID_REQUEST_STATUS(
         "Creation of CDCSDK stream with a replication slot having LSN type is disallowed");
   }

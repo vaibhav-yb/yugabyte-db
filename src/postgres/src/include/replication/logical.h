@@ -163,7 +163,8 @@ extern void ResetLogicalStreamingState(void);
 extern void UpdateDecodingStats(LogicalDecodingContext *ctx);
 
 extern void YBValidateOutputPlugin(char *plugin);
-extern void YBValidateReplicationSlotLsnType(char *lsn_type);
+
+extern void YBValidateLsnType(char *lsn_type);
 extern CRSLsnType YBParseLsnType(char *lsn_type);
 
 #endif

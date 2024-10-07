@@ -7849,6 +7849,69 @@ TEST_F(CDCSDKYsqlTest, TestCreateReplicationSlotWithLsnTypeHybridTime) {
   TestCreateReplicationSlotWithLsnType("HYBRID_TIME");
 }
 
+TEST_F(CDCSDKYsqlTest, TestPgCreateReplicationSlotDefaultLsnTypeParam) {
+  ASSERT_OK(
+      SetUpWithParams(3 /* replication_factor */, 1 /* num_masters */, false));
+
+  auto conn = ASSERT_RESULT(test_cluster_.ConnectToDBWithReplication(kNamespaceName));
+
+  ASSERT_OK(conn.Execute(
+      "create table test_table (id int primary key, name text, l_name varchar, hours float);"));
+
+  ASSERT_OK(conn.Execute("create publication pub for all tables;"));
+
+  auto result = ASSERT_RESULT(
+      conn.Fetch("select * from pg_create_logical_replication_slot('rs', 'yboutput');"));
+
+  auto list_cdc_streams_resp = ASSERT_RESULT(ListDBStreams());
+
+  ASSERT_EQ("rs", list_cdc_streams_resp.streams().Get(0).cdcsdk_ysql_replication_slot_name());
+
+  ASSERT_EQ(
+      LsnTypePB::SEQUENCE,
+      list_cdc_streams_resp.streams().Get(0).cdcsdk_ysql_replication_slot_lsn_type());
+}
+
+void CDCSDKYsqlTest::TestCreateReplicationSlotWithLsnTypeParam(const std::string lsn_type) {
+  ANNOTATE_UNPROTECTED_WRITE(FLAGS_ysql_yb_allow_replication_slot_lsn_types) = true;
+  ASSERT_OK(
+      SetUpWithParams(3 /* replication_factor */, 1 /* num_masters */, false));
+
+  auto conn = ASSERT_RESULT(test_cluster_.ConnectToDBWithReplication(kNamespaceName));
+
+  ASSERT_OK(conn.Execute(
+      "create table test_table (id int primary key, name text, l_name varchar, hours float);"));
+
+  ASSERT_OK(conn.Execute(
+      "select * from pg_create_logical_replication_slot('rs', 'yboutput', false, " + lsn_type +
+      ");"));
+
+  auto result =
+      ASSERT_RESULT(conn.Fetch("CREATE_REPLICATION_SLOT rs LOGICAL yboutput " + lsn_type + ";"));
+
+  auto list_cdc_streams_resp = ASSERT_RESULT(ListDBStreams());
+
+  ASSERT_EQ("rs", list_cdc_streams_resp.streams().Get(0).cdcsdk_ysql_replication_slot_name());
+
+  if (lsn_type == "SEQUENCE") {
+    ASSERT_EQ(
+        LsnTypePB::SEQUENCE,
+        list_cdc_streams_resp.streams().Get(0).cdcsdk_ysql_replication_slot_lsn_type());
+  } else {
+    ASSERT_EQ(
+        LsnTypePB::HYBRID_TIME,
+        list_cdc_streams_resp.streams().Get(0).cdcsdk_ysql_replication_slot_lsn_type());
+  }
+}
+
+TEST_F(CDCSDKYsqlTest, TestCreateReplicationSlotWithLsnTypeParamSequence) {
+  TestCreateReplicationSlotWithLsnTypeParam("SEQUENCE");
+}
+
+TEST_F(CDCSDKYsqlTest, TestCreateReplicationSlotWithLsnTypeParamHybridTime) {
+  TestCreateReplicationSlotWithLsnTypeParam("HYBRID_TIME");
+}
+
 TEST_F(CDCSDKYsqlTest, TestPgPublicationDisabled) {
   ASSERT_OK(
       SetUpWithParams(3 /* replication_factor */, 1 /* num_masters */, false /* colocated */));

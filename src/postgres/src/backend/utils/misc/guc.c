@@ -2527,7 +2527,7 @@ static struct config_bool ConfigureNamesBool[] =
 	},
 
 	{
-		{"yb_allow_replication_slot_lsn_types", PGC_SUSET, REPLICATION,
+		{"yb_allow_replication_slot_lsn_types", PGC_SUSET, DEVELOPER_OPTIONS,
 			gettext_noop("Allow specifying LSN type while creating replication slot"),
 			NULL,
 			GUC_NOT_IN_SAMPLE

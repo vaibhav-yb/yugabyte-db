@@ -14,12 +14,10 @@
 //--------------------------------------------------------------------------------------------------
 
 #include "yb/yql/pggate/pg_ddl.h"
-#include <gflags/gflags_declare.h>
 
 #include "yb/client/yb_table_name.h"
 
 #include "yb/common/common.pb.h"
-#include "yb/common/common_flags.h"
 #include "yb/common/constants.h"
 #include "yb/common/entity_ids.h"
 #include "yb/common/pg_system_attr.h"
@@ -30,7 +28,6 @@
 #include "yb/util/tsan_util.h"
 
 #include "yb/yql/pggate/pg_client.h"
-#include "yb/yql/pggate/ybc_pg_typedefs.h"
 
 DEFINE_test_flag(int32, user_ddl_operation_timeout_sec, 0,
                  "Adjusts the timeout for a DDL operation from the YBClient default, if non-zero.");

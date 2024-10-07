@@ -7816,7 +7816,7 @@ TEST_F(CDCSDKYsqlTest, TestPgCreateReplicationSlotDefaultLsnType) {
 }
 
 void CDCSDKYsqlTest::TestCreateReplicationSlotWithLsnType(const std::string lsn_type) {
-  ANNOTATE_UNPROTECTED_WRITE(FLAGS_ysql_yb_allow_replication_slot_lsn_types) = true;
+  ASSERT_OK(SET_FLAG(ysql_yb_allow_replication_slot_lsn_types, true));
   ASSERT_OK(
       SetUpWithParams(3 /* replication_factor */, 1 /* num_masters */, false));
 

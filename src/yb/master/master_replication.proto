@@ -83,7 +83,6 @@ message CreateCDCStreamRequestPB {
   // cdcsdk_stream_create_options field should be used for adding more stream creation options
   // related to CDCSDK in future.
   optional CDCSDKStreamCreateOptionsPB cdcsdk_stream_create_options = 11;
-  optional ReplicationSlotLsnType lsn_type = 12;
 }
 
 message CreateCDCStreamResponsePB {

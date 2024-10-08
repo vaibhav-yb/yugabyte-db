@@ -607,7 +607,7 @@ message SysCDCStreamEntryPB {
   repeated bytes unqualified_table_id = 12;
 
   optional ReplicationSlotLsnType cdcsdk_ysql_replication_slot_lsn_type =
-    13 [default = ReplicationSlotLsnType_UNSPECIFIED];
+      13 [default = ReplicationSlotLsnType_UNSPECIFIED];
 }
 
 

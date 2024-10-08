@@ -1005,8 +1005,10 @@ Status CatalogManager::CreateNewCdcsdkStream(
         req.cdcsdk_ysql_replication_slot_plugin_name());
   }
 
-  if (req.has_lsn_type()) {
-    metadata->set_cdcsdk_ysql_replication_slot_lsn_type(req.lsn_type());
+  if (req.has_cdcsdk_stream_create_options()
+        && req.cdcsdk_stream_create_options().has_lsn_type()) {
+    metadata->set_cdcsdk_ysql_replication_slot_lsn_type(
+        req.cdcsdk_stream_create_options().lsn_type());
   }
 
   {
@@ -1968,8 +1970,8 @@ Status CatalogManager::ValidateCDCSDKRequestProperties(
         "Creation of CDCSDK stream with a replication slot name is disallowed");
   }
 
-  if (!FLAGS_ysql_yb_allow_replication_slot_lsn_types &&
-      req.has_lsn_type()) {
+  if (!FLAGS_ysql_yb_allow_replication_slot_lsn_types && req.has_cdcsdk_stream_create_options() &&
+      req.cdcsdk_stream_create_options().has_lsn_type()) {
     RETURN_INVALID_REQUEST_STATUS(
         "Creation of CDCSDK stream with a replication slot having LSN type is disallowed");
   }

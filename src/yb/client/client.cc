@@ -1533,7 +1533,7 @@ Result<xrepl::StreamId> YBClient::CreateCDCSDKStreamForNamespace(
     req.set_cdcsdk_ysql_replication_slot_plugin_name(*replication_slot_plugin_name);
   }
   if (lsn_type.has_value()) {
-    req.set_lsn_type(lsn_type.value());
+    req.mutable_cdcsdk_stream_create_options()->set_lsn_type(lsn_type.value());
   }
   req.mutable_cdcsdk_stream_create_options()->set_cdcsdk_dynamic_tables_option(
       dynamic_tables_option);

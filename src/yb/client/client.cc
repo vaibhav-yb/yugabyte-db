@@ -37,7 +37,6 @@
 #include <map>
 #include <memory>
 #include <mutex>
-#include <optional>
 #include <set>
 #include <string>
 #include <unordered_map>
@@ -1509,7 +1508,7 @@ Result<xrepl::StreamId> YBClient::CreateCDCSDKStreamForNamespace(
     CoarseTimePoint deadline,
     const CDCSDKDynamicTablesOption& dynamic_tables_option,
     uint64_t *consistent_snapshot_time_out,
-    const std::optional<LsnTypePB>& lsn_type) {
+    const std::optional<ReplicationSlotLsnType>& lsn_type) {
   CreateCDCStreamRequestPB req;
 
   if (populate_namespace_id_as_table_id) {
@@ -1534,7 +1533,7 @@ Result<xrepl::StreamId> YBClient::CreateCDCSDKStreamForNamespace(
     req.set_cdcsdk_ysql_replication_slot_plugin_name(*replication_slot_plugin_name);
   }
   if (lsn_type.has_value()) {
-    req.set_lsn_type(lsn_type.value());
+    req.mutable_cdcsdk_stream_create_options()->set_lsn_type(lsn_type.value());
   }
   req.mutable_cdcsdk_stream_create_options()->set_cdcsdk_dynamic_tables_option(
       dynamic_tables_option);
@@ -1561,7 +1560,7 @@ Status YBClient::GetCDCStream(
     std::unordered_map<std::string, PgReplicaIdentity>* replica_identity_map,
     std::optional<std::string>* replication_slot_name,
     std::vector<TableId>* unqualified_table_ids,
-    std::optional<LsnTypePB>* lsn_type) {
+    std::optional<ReplicationSlotLsnType>* lsn_type) {
 
   // Setting up request.
   GetCDCStreamRequestPB req;

@@ -99,7 +99,6 @@
 #include "pg_yb_utils.h"
 #include "commands/ybccmds.h"
 #include "replication/yb_virtual_wal_client.h"
-#include "yb/yql/pggate/util/yb_guc.h"
 
 /*
  * Maximum data payload in a WAL data message.  Must be >= XLOG_BLCKSZ.

@@ -116,7 +116,7 @@ Status StreamMetadata::GetStreamInfoFromMaster(
   StreamModeTransactional transactional(false);
   std::optional<uint64> consistent_snapshot_time;
   std::optional<CDCSDKSnapshotOption> consistent_snapshot_option;
-  std::optional<LsnTypePB> replication_slot_lsn_type;
+  std::optional<ReplicationSlotLsnType> replication_slot_lsn_type;
   std::optional<uint64> stream_creation_time;
   std::unordered_map<std::string, PgReplicaIdentity> replica_identity_map;
   std::optional<std::string> replication_slot_name;

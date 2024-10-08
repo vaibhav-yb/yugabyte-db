@@ -61,8 +61,6 @@
 #include "executor/tuptable.h"
 #include "executor/ybcExpr.h"
 
-#include "yb/yql/pggate/util/yb_guc.h"
-#include "yb/yql/pggate/ybc_pg_typedefs.h"
 #include "yb/yql/pggate/ybc_pggate.h"
 #include "pg_yb_utils.h"
 
@@ -1986,16 +1984,17 @@ YBCCreateReplicationSlot(const char *slot_name,
 			pg_unreachable();
 	}
 
-	YBCLsnType repl_slot_lsn_type = YB_REPLICATION_SLOT_LSN_TYPE_SEQUENCE;
-	if (yb_allow_replication_slot_lsn_types) {
-		switch (lsn_type) {
-			case CRS_SEQUENCE:
-				repl_slot_lsn_type = YB_REPLICATION_SLOT_LSN_TYPE_SEQUENCE;
-				break;
-			case CRS_HYBRID_TIME:
-				repl_slot_lsn_type = YB_REPLICATION_SLOT_LSN_TYPE_HYBRID_TIME;
-				break;
-		}
+	YBCLsnType repl_slot_lsn_type;
+	switch (lsn_type)
+	{
+		case CRS_SEQUENCE:
+			repl_slot_lsn_type = YB_REPLICATION_SLOT_LSN_TYPE_SEQUENCE;
+			break;
+		case CRS_HYBRID_TIME:
+			repl_slot_lsn_type = YB_REPLICATION_SLOT_LSN_TYPE_HYBRID_TIME;
+			break;
+		default:
+			repl_slot_lsn_type = YB_REPLICATION_SLOT_LSN_TYPE_SEQUENCE;
 	}
 
 	HandleYBStatus(YBCPgNewCreateReplicationSlot(slot_name,

@@ -14,7 +14,6 @@
 //--------------------------------------------------------------------------------------------------
 
 #include "yb/yql/pggate/pg_ddl.h"
-#include <gflags/gflags_declare.h>
 
 #include "yb/client/yb_table_name.h"
 
@@ -23,13 +22,13 @@
 #include "yb/common/entity_ids.h"
 #include "yb/common/pg_system_attr.h"
 
+#include "yb/util/atomic.h"
 #include "yb/util/flags.h"
 #include "yb/util/status_format.h"
 #include "yb/util/status_log.h"
 #include "yb/util/tsan_util.h"
 
 #include "yb/yql/pggate/pg_client.h"
-#include "yb/yql/pggate/ybc_pg_typedefs.h"
 
 DEFINE_test_flag(int32, user_ddl_operation_timeout_sec, 0,
                  "Adjusts the timeout for a DDL operation from the YBClient default, if non-zero.");
@@ -528,16 +527,13 @@ PgCreateReplicationSlot::PgCreateReplicationSlot(PgSession::ScopedRefPtr pg_sess
   if (FLAGS_ysql_yb_allow_replication_slot_lsn_types) {
     switch (lsn_type) {
       case YB_REPLICATION_SLOT_LSN_TYPE_SEQUENCE:
-        LOG(INFO) << "Setting sequence lsn_type";
-        req_.set_lsn_type(tserver::PGLsnTypePB::PG_SEQUENCE);
+        req_.set_lsn_type(tserver::PGReplicationSlotLsnType::PG_SEQUENCE);
         break;
       case YB_REPLICATION_SLOT_LSN_TYPE_HYBRID_TIME:
-        LOG(INFO) << "Setting hybrid_time lsn type";
-        req_.set_lsn_type(tserver::PGLsnTypePB::PG_HYBRID_TIME);
+        req_.set_lsn_type(tserver::PGReplicationSlotLsnType::PG_HYBRID_TIME);
         break;
       default:
-        LOG(INFO) << "Setting default lsn_type";
-        req_.set_lsn_type(tserver::PGLsnTypePB::PG_SEQUENCE);
+        req_.set_lsn_type(tserver::PGReplicationSlotLsnType::PG_SEQUENCE);
     }
   }
 }

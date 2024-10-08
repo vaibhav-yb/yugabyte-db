@@ -782,16 +782,19 @@ YBValidateOutputPlugin(char *plugin)
 }
 
 void
-YBValidateReplicationSlotLsnType(char *lsn_type) {
-	if (!(strcmp(lsn_type, "SEQUENCE") == 0 || strcmp(lsn_type, "HYBRID_TIME") == 0))
+YBValidateLsnType(char *lsn_type)
+{
+	if (!(strcmp(lsn_type, LSN_TYPE_SEQUENCE) == 0
+		|| strcmp(lsn_type, LSN_TYPE_HYBRID_TIME) == 0))
 		elog(ERROR, "lsn type can only be SEQUENCE or HYBRID_TIME");
 }
 
 CRSLsnType
-YBParseLsnType(char *lsn_type) {
-	if (strcmp(lsn_type, "SEQUENCE") == 0)
+YBParseLsnType(char *lsn_type)
+{
+	if (strcmp(lsn_type, LSN_TYPE_SEQUENCE) == 0)
 		return CRS_SEQUENCE;
-	else if (strcmp(lsn_type, "HYBRID_TIME") == 0)
+	else if (strcmp(lsn_type, LSN_TYPE_HYBRID_TIME) == 0)
 		return CRS_HYBRID_TIME;
 	else
 		elog(ERROR, "invalid lsn type provided");

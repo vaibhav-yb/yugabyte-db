@@ -20,3 +20,8 @@
 // Changing the value after setup is not recommended.
 DEFINE_NON_RUNTIME_string(cluster_uuid, "", "Cluster UUID to be used by this cluster");
 TAG_FLAG(cluster_uuid, hidden);
+
+DEFINE_RUNTIME_AUTO_PG_FLAG(
+    bool, yb_enable_replication_slot_consumption, kLocalPersisted, false, true,
+    "Enable consumption of changes via replication slots."
+    "Requires yb_enable_replication_commands to be true.");

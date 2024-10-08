@@ -1066,14 +1066,16 @@ parseCreateReplSlotOptions(CreateReplicationSlotCmd *cmd,
 			two_phase_given = true;
 			*two_phase = defGetBoolean(defel);
 		}
-		else if (strcmp(defel->defname, "HYBRID_TIME") == 0) {
+		else if (strcmp(defel->defname, "HYBRID_TIME") == 0)
+		{
 			if (!yb_allow_replication_slot_lsn_types)
 				ereport(ERROR,
 						(errcode(ERRCODE_SYNTAX_ERROR),
 						 errmsg("LSN type parameter not allowed when "
 						 		"ysql_yb_allow_replication_slot_lsn_types is disabled")));
 			*lsn_type = CRS_HYBRID_TIME;
-		} else if (strcmp(defel->defname, "SEQUENCE") == 0) {
+		} else if (strcmp(defel->defname, "SEQUENCE") == 0)
+		{
 			if (!yb_allow_replication_slot_lsn_types)
 				ereport(ERROR,
 						(errcode(ERRCODE_SYNTAX_ERROR),

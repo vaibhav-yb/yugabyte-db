@@ -126,6 +126,7 @@ struct CDCSDKStreamInfo {
     uint32_t database_oid;
     ReplicationSlotName cdcsdk_ysql_replication_slot_name;
     std::string cdcsdk_ysql_replication_slot_plugin_name;
+    tserver::PGReplicationSlotLsnType replication_slot_lsn_type;
     std::unordered_map<std::string, std::string> options;
 
     template <class PB>
@@ -137,6 +138,9 @@ struct CDCSDKStreamInfo {
       }
       if (!cdcsdk_ysql_replication_slot_plugin_name.empty()) {
         pb->set_output_plugin_name(cdcsdk_ysql_replication_slot_plugin_name);
+      }
+      if (replication_slot_lsn_type) {
+        pb->set_lsn_type(replication_slot_lsn_type);
       }
     }
 
@@ -155,9 +159,23 @@ struct CDCSDKStreamInfo {
           .cdcsdk_ysql_replication_slot_name =
               ReplicationSlotName(pb.cdcsdk_ysql_replication_slot_name()),
           .cdcsdk_ysql_replication_slot_plugin_name = pb.cdcsdk_ysql_replication_slot_plugin_name(),
+          .replication_slot_lsn_type =
+              GetPGReplicationSlotLsnType(pb.cdcsdk_ysql_replication_slot_lsn_type()),
           .options = std::move(options)};
 
       return stream_info;
+    }
+
+    static tserver::PGReplicationSlotLsnType GetPGReplicationSlotLsnType(
+        ReplicationSlotLsnType lsn_type) {
+      switch (lsn_type) {
+        case SEQUENCE:
+          return tserver::PG_SEQUENCE;
+        case HYBRID_TIME:
+          return tserver::PG_HYBRID_TIME;
+        default:
+          LOG(FATAL) << "Invalid LSN type specified " << lsn_type;
+      }
     }
 };
 

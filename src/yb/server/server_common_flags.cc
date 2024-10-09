@@ -22,6 +22,5 @@ DEFINE_NON_RUNTIME_string(cluster_uuid, "", "Cluster UUID to be used by this clu
 TAG_FLAG(cluster_uuid, hidden);
 
 DEFINE_RUNTIME_AUTO_PG_FLAG(
-    bool, yb_enable_replication_slot_consumption, kLocalPersisted, false, true,
-    "Enable consumption of changes via replication slots."
-    "Requires yb_enable_replication_commands to be true.");
+    bool, yb_allow_replication_slot_lsn_types, kLocalPersisted, false, true,
+    "Enable LSN types to be specified while creating replication slots.");

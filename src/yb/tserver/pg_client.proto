@@ -251,8 +251,9 @@ enum PgReplicationSlotSnapshotActionPB {
 
 // proto2 version of the ReplicationSlotLsnType enum from yb/common/common_types.proto
 enum PGReplicationSlotLsnType {
-  PG_SEQUENCE = 0;
-  PG_HYBRID_TIME = 1;
+  ReplicationSlotLsnTypePg_UNDEFINED = 0;
+  ReplicationSlotLsnTypePg_SEQUENCE = 1;
+  ReplicationSlotLsnTypePg_HYBRID_TIME = 2;
 }
 
 message PgCreateReplicationSlotRequestPB {

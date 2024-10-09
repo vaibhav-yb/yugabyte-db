@@ -654,8 +654,8 @@ message PgDatumPB {
 // The type of LSN type which will be used with the replication slot and stream metadata.
 enum ReplicationSlotLsnType {
   ReplicationSlotLsnType_UNSPECIFIED = 0;
-  SEQUENCE = 1;
-  HYBRID_TIME = 2;
+  ReplicationSlotLsnType_SEQUENCE = 1;
+  ReplicationSlotLsnType_HYBRID_TIME = 2;
 }
 
 message AshMetadataPB {

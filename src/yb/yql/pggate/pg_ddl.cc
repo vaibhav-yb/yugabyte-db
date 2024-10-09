@@ -36,8 +36,6 @@ DEFINE_test_flag(int32, user_ddl_operation_timeout_sec, 0,
 DECLARE_int32(max_num_tablets_for_table);
 DECLARE_int32(yb_client_admin_operation_timeout_sec);
 
-DECLARE_bool(ysql_yb_allow_replication_slot_lsn_types);
-
 namespace yb {
 namespace pggate {
 
@@ -523,17 +521,16 @@ PgCreateReplicationSlot::PgCreateReplicationSlot(PgSession::ScopedRefPtr pg_sess
       DCHECK(false) << "Unknown snapshot_action " << snapshot_action;
   }
 
-  LOG(INFO) << "VKVK value of flag is " << FLAGS_ysql_yb_allow_replication_slot_lsn_types;
-  if (FLAGS_ysql_yb_allow_replication_slot_lsn_types) {
+  if (yb_allow_replication_slot_lsn_types) {
     switch (lsn_type) {
       case YB_REPLICATION_SLOT_LSN_TYPE_SEQUENCE:
-        req_.set_lsn_type(tserver::PGReplicationSlotLsnType::PG_SEQUENCE);
+        req_.set_lsn_type(tserver::PGReplicationSlotLsnType::ReplicationSlotLsnTypePg_SEQUENCE);
         break;
       case YB_REPLICATION_SLOT_LSN_TYPE_HYBRID_TIME:
-        req_.set_lsn_type(tserver::PGReplicationSlotLsnType::PG_HYBRID_TIME);
+        req_.set_lsn_type(tserver::PGReplicationSlotLsnType::ReplicationSlotLsnTypePg_HYBRID_TIME);
         break;
       default:
-        req_.set_lsn_type(tserver::PGReplicationSlotLsnType::PG_SEQUENCE);
+        req_.set_lsn_type(tserver::PGReplicationSlotLsnType::ReplicationSlotLsnTypePg_SEQUENCE);
     }
   }
 }

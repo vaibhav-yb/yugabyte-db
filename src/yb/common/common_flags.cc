@@ -119,8 +119,9 @@ DEFINE_RUNTIME_AUTO_bool(
     "Enable support for CDC Consistent Snapshot Streams");
 
 DEFINE_RUNTIME_AUTO_PG_FLAG(
-    bool, yb_allow_replication_slot_lsn_types, kLocalPersisted, false, true,
-    "Enable LSN types to be specified while creating replication slots.");
+    bool, yb_enable_replication_slot_consumption, kLocalPersisted, false, true,
+    "Enable consumption of changes via replication slots."
+    "Requires yb_enable_replication_commands to be true.");
 
 DEFINE_NON_RUNTIME_bool(TEST_ysql_hide_catalog_version_increment_log, false,
     "Hide catalog version increment log messages.");

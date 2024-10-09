@@ -7811,7 +7811,7 @@ TEST_F(CDCSDKYsqlTest, TestPgCreateReplicationSlotDefaultLsnType) {
   auto list_cdc_streams_resp = ASSERT_RESULT(ListDBStreams());
 
   ASSERT_EQ(
-      ReplicationSlotLsnType::SEQUENCE,
+      ReplicationSlotLsnType::ReplicationSlotLsnType_SEQUENCE,
       list_cdc_streams_resp.streams().Get(0).cdcsdk_ysql_replication_slot_lsn_type());
 }
 
@@ -7834,11 +7834,11 @@ void CDCSDKYsqlTest::TestCreateReplicationSlotWithLsnType(const std::string lsn_
 
   if (lsn_type == "SEQUENCE") {
     ASSERT_EQ(
-        ReplicationSlotLsnType::SEQUENCE,
+        ReplicationSlotLsnType::ReplicationSlotLsnType_SEQUENCE,
         list_cdc_streams_resp.streams().Get(0).cdcsdk_ysql_replication_slot_lsn_type());
   } else {
     ASSERT_EQ(
-        ReplicationSlotLsnType::HYBRID_TIME,
+        ReplicationSlotLsnType::ReplicationSlotLsnType_HYBRID_TIME,
         list_cdc_streams_resp.streams().Get(0).cdcsdk_ysql_replication_slot_lsn_type());
   }
 }
@@ -7849,6 +7849,51 @@ TEST_F(CDCSDKYsqlTest, TestCreateReplicationSlotWithLsnTypeSequence) {
 
 TEST_F(CDCSDKYsqlTest, TestCreateReplicationSlotWithLsnTypeHybridTime) {
   TestCreateReplicationSlotWithLsnType("HYBRID_TIME");
+}
+
+TEST_F(CDCSDKYsqlTest, TestReplicationSlotLsnTypePresentAfterRestart) {
+  ASSERT_OK(
+      SetUpWithParams(3 /* replication_factor */, 1 /* num_masters */, false));
+
+  auto conn = ASSERT_RESULT(test_cluster_.ConnectToDBWithReplication(kNamespaceName));
+
+  ASSERT_OK(conn.Execute(
+      "create table test_table (id int primary key, name text, l_name varchar, hours float);"));
+
+  ASSERT_OK(conn.Execute("create publication pub for all tables;"));
+
+  auto result =
+      ASSERT_RESULT(conn.Fetch("CREATE_REPLICATION_SLOT rs LOGICAL yboutput HYBRID_TIME;"));
+  
+  auto list_cdc_streams_resp = ASSERT_RESULT(ListDBStreams());
+
+  ASSERT_EQ(
+      ReplicationSlotLsnType::ReplicationSlotLsnType_HYBRID_TIME,
+      list_cdc_streams_resp.streams().Get(0).cdcsdk_ysql_replication_slot_lsn_type());
+  
+  for (int idx = 0; idx < 3; idx++) {
+    test_cluster()->mini_tablet_server(idx)->Shutdown();
+    ASSERT_OK(test_cluster()->mini_tablet_server(idx)->Start());
+    ASSERT_OK(test_cluster()->mini_tablet_server(idx)->WaitStarted());
+  }
+
+  LOG(INFO) << "All tservers restarted";
+
+  list_cdc_streams_resp = ASSERT_RESULT(ListDBStreams());
+
+  ASSERT_EQ(
+      ReplicationSlotLsnType::ReplicationSlotLsnType_HYBRID_TIME,
+      list_cdc_streams_resp.streams().Get(0).cdcsdk_ysql_replication_slot_lsn_type());
+  
+  // Restart master now.
+  test_cluster_.mini_cluster_->mini_master()->Shutdown();
+  ASSERT_OK(test_cluster_.mini_cluster_->StartMasters());
+
+  list_cdc_streams_resp = ASSERT_RESULT(ListDBStreams());
+
+  ASSERT_EQ(
+      ReplicationSlotLsnType::ReplicationSlotLsnType_HYBRID_TIME,
+      list_cdc_streams_resp.streams().Get(0).cdcsdk_ysql_replication_slot_lsn_type());
 }
 
 TEST_F(CDCSDKYsqlTest, TestPgPublicationDisabled) {

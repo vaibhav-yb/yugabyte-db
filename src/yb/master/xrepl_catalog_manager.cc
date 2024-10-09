@@ -143,6 +143,7 @@ DECLARE_bool(yb_enable_cdc_consistent_snapshot_streams);
 DECLARE_bool(ysql_yb_enable_replica_identity);
 DECLARE_uint32(cdc_wal_retention_time_secs);
 DECLARE_bool(cdcsdk_enable_dynamic_table_addition_with_table_cleanup);
+DECLARE_bool(ysql_yb_allow_replication_slot_lsn_types);
 
 
 
@@ -1005,8 +1006,11 @@ Status CatalogManager::CreateNewCdcsdkStream(
         req.cdcsdk_ysql_replication_slot_plugin_name());
   }
 
-  if (req.has_cdcsdk_stream_create_options()
-        && req.cdcsdk_stream_create_options().has_lsn_type()) {
+  if (FLAGS_ysql_yb_allow_replication_slot_lsn_types) {
+    RSTATUS_DCHECK(
+      req.has_cdcsdk_stream_create_options() && req.cdcsdk_stream_create_options().has_lsn_type(),
+      InvalidArgument, "LSN type not present CDC stream creation request");
+
     metadata->set_cdcsdk_ysql_replication_slot_lsn_type(
         req.cdcsdk_stream_create_options().lsn_type());
   }

@@ -46,6 +46,7 @@
 
 #include "yb/gutil/casts.h"
 
+#include "yb/server/clockbound_clock.h"
 #include "yb/server/skewed_clock.h"
 
 #include "yb/tserver/pg_client.pb.h"
@@ -85,6 +86,8 @@ DECLARE_int32(delay_alter_sequence_sec);
 DECLARE_int32(client_read_write_timeout_ms);
 
 DECLARE_bool(ysql_enable_colocated_tables_with_tablespaces);
+
+DECLARE_bool(TEST_ysql_enable_db_logical_client_version_mode);
 
 DEFINE_UNKNOWN_bool(ysql_enable_reindex, false,
             "Enable REINDEX INDEX statement.");
@@ -470,6 +473,7 @@ void YBCInitPgGateEx(const YBCPgTypeEntity *data_type_table, int count, PgCallba
   // However, this is added to allow simulating and testing of some known bugs until we remove
   // HybridClock usage.
   server::SkewedClock::Register();
+  server::RegisterClockboundClockProvider();
 
   InitThreading();
 
@@ -1996,6 +2000,8 @@ const YBCPgGFlagsAccessor* YBCGetGFlags() {
       .ysql_use_fast_backward_scan = &FLAGS_use_fast_backward_scan,
       .TEST_ysql_conn_mgr_dowarmup_all_pools_mode =
           FLAGS_TEST_ysql_conn_mgr_dowarmup_all_pools_mode.c_str(),
+      .TEST_ysql_enable_db_logical_client_version_mode =
+          &FLAGS_TEST_ysql_enable_db_logical_client_version_mode,
   };
   // clang-format on
   return &accessor;

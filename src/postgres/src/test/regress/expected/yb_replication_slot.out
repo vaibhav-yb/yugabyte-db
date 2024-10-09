@@ -25,14 +25,14 @@ SELECT * FROM pg_create_logical_replication_slot('testslot_test_decoding', 'test
 
 -- Cannot do SELECT * since yb_stream_id, yb_restart_commit_ht changes across runs.
 SELECT slot_name, plugin, slot_type, database, temporary, active,
-    active_pid, xmin, catalog_xmin, restart_lsn, confirmed_flush_lsn
+    active_pid, xmin, catalog_xmin, restart_lsn, confirmed_flush_lsn, lsn_type
 FROM pg_replication_slots
 ORDER BY slot_name;
-       slot_name        |    plugin     | slot_type | database | temporary | active | active_pid | xmin | catalog_xmin | restart_lsn | confirmed_flush_lsn
-------------------------+---------------+-----------+----------+-----------+--------+------------+------+--------------+-------------+---------------------
- testslot1              | pgoutput      | logical   | yugabyte | f         | f      |            |    1 |            1 | 0/1         | 0/2
- testslot2              | pgoutput      | logical   | yugabyte | f         | f      |            |    1 |            1 | 0/1         | 0/2
- testslot_test_decoding | test_decoding | logical   | yugabyte | f         | f      |            |    1 |            1 | 0/1         | 0/2
+       slot_name        |    plugin     | slot_type | database | temporary | active | active_pid | xmin | catalog_xmin | restart_lsn | confirmed_flush_lsn | lsn_type
+------------------------+---------------+-----------+----------+-----------+--------+------------+------+--------------+-------------+---------------------+----------
+ testslot1              | pgoutput      | logical   | yugabyte | f         | f      |            |    1 |            1 | 0/1         | 0/2                 | SEQUENCE
+ testslot2              | pgoutput      | logical   | yugabyte | f         | f      |            |    1 |            1 | 0/1         | 0/2                 | SEQUENCE
+ testslot_test_decoding | test_decoding | logical   | yugabyte | f         | f      |            |    1 |            1 | 0/1         | 0/2                 | SEQUENCE
 (3 rows)
 
 -- drop the replication slot and create with same name again.

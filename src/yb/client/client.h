@@ -169,10 +169,10 @@ struct CDCSDKStreamInfo {
     static tserver::PGReplicationSlotLsnType GetPGReplicationSlotLsnType(
         ReplicationSlotLsnType lsn_type) {
       switch (lsn_type) {
-        case SEQUENCE:
-          return tserver::PG_SEQUENCE;
-        case HYBRID_TIME:
-          return tserver::PG_HYBRID_TIME;
+        case ReplicationSlotLsnType_SEQUENCE:
+          return tserver::PGReplicationSlotLsnType::ReplicationSlotLsnTypePg_SEQUENCE;
+        case ReplicationSlotLsnType_HYBRID_TIME:
+          return tserver::PGReplicationSlotLsnType::ReplicationSlotLsnTypePg_HYBRID_TIME;
         default:
           LOG(FATAL) << "Invalid LSN type specified " << lsn_type;
       }

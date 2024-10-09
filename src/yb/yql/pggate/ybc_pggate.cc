@@ -2271,10 +2271,10 @@ YBCStatus YBCPgListReplicationSlots(
 
       const char* slot_lsn_type;
       switch (info.lsn_type()) {
-        case tserver::PG_SEQUENCE:
+        case tserver::PGReplicationSlotLsnType::ReplicationSlotLsnTypePg_SEQUENCE:
           slot_lsn_type = YBCPAllocStdString("SEQUENCE");
           break;
-        case tserver::PG_HYBRID_TIME:
+        case tserver::PGReplicationSlotLsnType::ReplicationSlotLsnTypePg_HYBRID_TIME:
           slot_lsn_type = YBCPAllocStdString("HYBRID_TIME");
           break;
         default:
@@ -2332,10 +2332,10 @@ YBCStatus YBCPgGetReplicationSlot(
 
   const char* slot_lsn_type;
   switch (slot_info.lsn_type()) {
-    case tserver::PG_SEQUENCE:
+    case tserver::PGReplicationSlotLsnType::ReplicationSlotLsnTypePg_SEQUENCE:
       slot_lsn_type = YBCPAllocStdString("SEQUENCE");
       break;
-    case tserver::PG_HYBRID_TIME:
+    case tserver::PGReplicationSlotLsnType::ReplicationSlotLsnTypePg_HYBRID_TIME:
       slot_lsn_type = YBCPAllocStdString("HYBRID_TIME");
       break;
     default:

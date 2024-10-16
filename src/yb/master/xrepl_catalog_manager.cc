@@ -1011,7 +1011,8 @@ Status CatalogManager::CreateNewCdcsdkStream(
         req.cdcsdk_ysql_replication_slot_plugin_name());
   }
 
-  if (FLAGS_ysql_yb_allow_replication_slot_lsn_types) {
+  if (FLAGS_ysql_yb_allow_replication_slot_lsn_types &&
+      req.has_cdcsdk_ysql_replication_slot_name()) {
     RSTATUS_DCHECK(
       req.has_cdcsdk_stream_create_options() && req.cdcsdk_stream_create_options().has_lsn_type(),
       InvalidArgument, "LSN type not present CDC stream creation request");

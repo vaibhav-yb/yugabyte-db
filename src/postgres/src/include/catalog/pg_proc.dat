@@ -10885,7 +10885,7 @@
   proargtypes => 'name name bool bool name',
   proallargtypes => '{name,name,bool,bool,name,name,pg_lsn}',
   proargmodes => '{i,i,i,i,i,o,o}',
-  proargnames => '{slot_name,plugin,temporary,twophase,lsn_type,slot_name,lsn}',
+  proargnames => '{slot_name,plugin,temporary,twophase,yb_lsn_type,slot_name,lsn}',
   prosrc => 'pg_create_logical_replication_slot' },
 { oid => '4222',
   descr => 'copy a logical replication slot, changing temporality and plugin',

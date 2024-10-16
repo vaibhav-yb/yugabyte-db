@@ -781,8 +781,13 @@ Status CatalogManager::CreateCDCStream(
     if (req->has_initial_state()) {
       initial_state = req->initial_state();
     }
+
+    Synchronizer sync;
     auto stream_id = VERIFY_RESULT(xcluster_manager_->CreateNewXClusterStreamForTable(
-        req->table_id(), cdc::StreamModeTransactional(req->transactional()), initial_state, epoch));
+        req->table_id(), cdc::StreamModeTransactional(req->transactional()), initial_state, epoch,
+        [&sync](const Status& status) { sync.AsStdStatusCallback()(status); }));
+    RETURN_NOT_OK(sync.Wait());
+
     resp->set_stream_id(stream_id.ToString());
     return Status::OK();
   }
@@ -1006,7 +1011,8 @@ Status CatalogManager::CreateNewCdcsdkStream(
         req.cdcsdk_ysql_replication_slot_plugin_name());
   }
 
-  if (FLAGS_ysql_yb_allow_replication_slot_lsn_types) {
+  if (FLAGS_ysql_yb_allow_replication_slot_lsn_types &&
+      req.has_cdcsdk_ysql_replication_slot_name()) {
     RSTATUS_DCHECK(
       req.has_cdcsdk_stream_create_options() && req.cdcsdk_stream_create_options().has_lsn_type(),
       InvalidArgument, "LSN type not present CDC stream creation request");

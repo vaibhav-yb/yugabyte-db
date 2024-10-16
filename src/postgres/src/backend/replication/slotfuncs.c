@@ -91,14 +91,12 @@ pg_create_physical_replication_slot(PG_FUNCTION_ARGS)
 
 	CheckSlotPermissions();
 
-	// todo Vaibhav: see if this is required
-	// CheckSlotRequirements();
+	CheckSlotRequirements();
 
-	/* acquire replication slot, this will check for conflicting names */
-	ReplicationSlotCreate(NameStr(*name), false,
-						  temporary ? RS_TEMPORARY : RS_PERSISTENT, false,
-						  NULL /* yb_plugin_name */, CRS_NOEXPORT_SNAPSHOT,
-						  NULL, CRS_SEQUENCE);
+	create_physical_replication_slot(NameStr(*name),
+									 immediately_reserve,
+									 temporary,
+									 InvalidXLogRecPtr);
 
 	values[0] = NameGetDatum(&MyReplicationSlot->data.name);
 	nulls[0] = false;

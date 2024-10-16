@@ -14,7 +14,7 @@ BEGIN;
   ) VALUES (
     3786, 'pg_create_logical_replication_slot', 11, 10, 12, 1, 0, 0, '-', 'f', false, false, true,
     false, 'v', 'u', 4, 2, 2249, '19 19 16 16 19', '{19,19,16,16,19,19,3220}',
-    '{i,i,i,i,i,o,o}', '{slot_name,plugin,temporary,twophase,lsn_type,slot_name,lsn}',
+    '{i,i,i,i,i,o,o}', '{slot_name,plugin,temporary,twophase,yb_lsn_type,slot_name,lsn}',
     NULL, NULL, 'pg_create_logical_replication_slot', NULL, NULL, NULL)
   ON CONFLICT DO NOTHING;
 COMMIT;

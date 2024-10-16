@@ -28,7 +28,7 @@ SELECT slot_name, plugin, slot_type, database, temporary, active,
     active_pid, xmin, catalog_xmin, restart_lsn, confirmed_flush_lsn, lsn_type
 FROM pg_replication_slots
 ORDER BY slot_name;
-       slot_name        |    plugin     | slot_type | database | temporary | active | active_pid | xmin | catalog_xmin | restart_lsn | confirmed_flush_lsn | lsn_type
+       slot_name        |    plugin     | slot_type | database | temporary | active | active_pid | xmin | catalog_xmin | restart_lsn | confirmed_flush_lsn | yb_lsn_type
 ------------------------+---------------+-----------+----------+-----------+--------+------------+------+--------------+-------------+---------------------+----------
  testslot1              | pgoutput      | logical   | yugabyte | f         | f      |            |    1 |            1 | 0/1         | 0/2                 | SEQUENCE
  testslot2              | pgoutput      | logical   | yugabyte | f         | f      |            |    1 |            1 | 0/1         | 0/2                 | SEQUENCE

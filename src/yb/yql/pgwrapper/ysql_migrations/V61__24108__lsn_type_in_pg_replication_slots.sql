@@ -48,7 +48,7 @@ BEGIN
             L.confirmed_flush_lsn,
             L.yb_stream_id,
             L.yb_restart_commit_ht,
-            L.lsn_type
+            L.yb_lsn_type
         FROM pg_get_replication_slots() AS L
             LEFT JOIN pg_database D ON (L.datoid = D.oid);
   END IF;

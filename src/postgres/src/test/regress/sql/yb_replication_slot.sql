@@ -46,7 +46,7 @@ SELECT * FROM pg_drop_replication_slot('testslot2');
 SELECT * FROM pg_drop_replication_slot('testslot3');
 SELECT * FROM pg_drop_replication_slot('testslot_test_decoding');
 SELECT slot_name, plugin, slot_type, database, temporary, active,
-    active_pid, xmin, catalog_xmin, restart_lsn, confirmed_flush_lsn, lsn_type
+    active_pid, xmin, catalog_xmin, restart_lsn, confirmed_flush_lsn, yb_lsn_type
 FROM pg_replication_slots;
 
 -- drop non-existent replication slot

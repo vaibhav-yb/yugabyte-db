@@ -712,7 +712,7 @@ message WaitStateInfoPB {
 message CDCSDKStreamCreateOptionsPB {
   optional
       CDCSDKDynamicTablesOption cdcsdk_dynamic_tables_option = 1 [default = DYNAMIC_TABLES_ENABLED];
-  optional ReplicationSlotLsnType lsn_type = 12;
+  optional ReplicationSlotLsnType lsn_type = 12 [default = ReplicationSlotLsnType_SEQUENCE];
 }
 
 message TserverMetricsInfoPB {

@@ -1004,6 +1004,19 @@ logical_read_xlog_page(XLogReaderState *state, XLogRecPtr targetPagePtr, int req
 }
 
 /*
+ * Throw an error if replication slot doesn't allow LSN types.
+ */
+static void
+reportErrorIfLsnTypeNotEnabled()
+{
+	if (!yb_allow_replication_slot_lsn_types)
+		ereport(ERROR,
+				(errcode(ERRCODE_SYNTAX_ERROR),
+				 errmsg("LSN type parameter not allowed when "
+					"ysql_yb_allow_replication_slot_lsn_types is disabled")));
+}
+
+/*
  * Process extra options given to CREATE_REPLICATION_SLOT.
  */
 static void
@@ -1068,19 +1081,11 @@ parseCreateReplSlotOptions(CreateReplicationSlotCmd *cmd,
 		}
 		else if (strcmp(defel->defname, "HYBRID_TIME") == 0)
 		{
-			if (!yb_allow_replication_slot_lsn_types)
-				ereport(ERROR,
-						(errcode(ERRCODE_SYNTAX_ERROR),
-						 errmsg("LSN type parameter not allowed when "
-						 		"ysql_yb_allow_replication_slot_lsn_types is disabled")));
+			reportErrorIfLsnTypeNotEnabled();
 			*lsn_type = CRS_HYBRID_TIME;
 		} else if (strcmp(defel->defname, "SEQUENCE") == 0)
 		{
-			if (!yb_allow_replication_slot_lsn_types)
-				ereport(ERROR,
-						(errcode(ERRCODE_SYNTAX_ERROR),
-						 errmsg("LSN type parameter not allowed when "
-						 		"ysql_yb_allow_replication_slot_lsn_types is disabled")));
+			reportErrorIfLsnTypeNotEnabled();
 			*lsn_type = CRS_SEQUENCE;
 		}
 		else

@@ -2942,6 +2942,12 @@ Status CatalogManager::GetCDCStream(
         stream_lock->pb.cdcsdk_disable_dynamic_table_addition());
   }
 
+  if (FLAGS_ysql_yb_allow_replication_slot_lsn_types &&
+      stream_lock->pb.has_cdcsdk_ysql_replication_slot_lsn_type()) {
+    stream_info->set_cdcsdk_ysql_replication_slot_lsn_type(
+        stream_lock->pb.cdcsdk_ysql_replication_slot_lsn_type());
+  }
+
   auto replica_identity_map = stream_lock->pb.replica_identity_map();
   stream_info->mutable_replica_identity_map()->swap(replica_identity_map);
 

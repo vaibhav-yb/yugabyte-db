@@ -1624,8 +1624,9 @@ Status YBClient::GetCDCStream(
     *replication_slot_name = resp.stream().cdcsdk_ysql_replication_slot_name();
   }
 
-  if (lsn_type && resp.stream().has_cdcsdk_ysql_replication_slot_lsn_type()) {
-    *lsn_type = resp.stream().cdcsdk_ysql_replication_slot_lsn_type();
+  if (lsn_type && resp.stream().has_cdc_stream_info_options() &&
+      resp.stream().cdc_stream_info_options().has_cdcsdk_ysql_replication_slot_lsn_type()) {
+    *lsn_type = resp.stream().cdc_stream_info_options().cdcsdk_ysql_replication_slot_lsn_type();
   }
 
   return Status::OK();

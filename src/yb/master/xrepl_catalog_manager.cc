@@ -2944,7 +2944,8 @@ Status CatalogManager::GetCDCStream(
 
   if (FLAGS_ysql_yb_allow_replication_slot_lsn_types &&
       stream_lock->pb.has_cdcsdk_ysql_replication_slot_lsn_type()) {
-    stream_info->set_cdcsdk_ysql_replication_slot_lsn_type(
+    auto cdc_stream_info_options = stream_info->mutable_cdc_stream_info_options();
+    cdc_stream_info_options->set_cdcsdk_ysql_replication_slot_lsn_type(
         stream_lock->pb.cdcsdk_ysql_replication_slot_lsn_type());
   }
 
@@ -3082,9 +3083,12 @@ Status CatalogManager::ListCDCStreams(
           ltm->pb.cdcsdk_ysql_replication_slot_plugin_name());
     }
 
-    if (ltm->pb.has_cdcsdk_ysql_replication_slot_lsn_type()) {
-      stream->set_cdcsdk_ysql_replication_slot_lsn_type(
-          ltm->pb.cdcsdk_ysql_replication_slot_lsn_type());
+    if (FLAGS_ysql_yb_allow_replication_slot_lsn_types) {
+      if (ltm->pb.has_cdcsdk_ysql_replication_slot_lsn_type()) {
+        auto cdc_stream_info_options = stream->mutable_cdc_stream_info_options();
+        cdc_stream_info_options->set_cdcsdk_ysql_replication_slot_lsn_type(
+            ltm->pb.cdcsdk_ysql_replication_slot_lsn_type());
+      }
     }
 
     if (ltm->pb.has_cdcsdk_stream_metadata()) {

@@ -7794,7 +7794,10 @@ TEST_F(CDCSDKYsqlTest, TestPgCreateReplicationSlotDefaultLsnType) {
 
   ASSERT_EQ(
       ReplicationSlotLsnType::ReplicationSlotLsnType_SEQUENCE,
-      list_cdc_streams_resp.streams().Get(0).cdcsdk_ysql_replication_slot_lsn_type());
+      list_cdc_streams_resp.streams()
+          .Get(0)
+          .cdc_stream_info_options()
+          .cdcsdk_ysql_replication_slot_lsn_type());
 }
 
 void CDCSDKYsqlTest::TestCreateReplicationSlotWithLsnType(const std::string lsn_type) {
@@ -7817,11 +7820,17 @@ void CDCSDKYsqlTest::TestCreateReplicationSlotWithLsnType(const std::string lsn_
   if (lsn_type == "SEQUENCE") {
     ASSERT_EQ(
         ReplicationSlotLsnType::ReplicationSlotLsnType_SEQUENCE,
-        list_cdc_streams_resp.streams().Get(0).cdcsdk_ysql_replication_slot_lsn_type());
+        list_cdc_streams_resp.streams()
+            .Get(0)
+            .cdc_stream_info_options()
+            .cdcsdk_ysql_replication_slot_lsn_type());
   } else {
     ASSERT_EQ(
         ReplicationSlotLsnType::ReplicationSlotLsnType_HYBRID_TIME,
-        list_cdc_streams_resp.streams().Get(0).cdcsdk_ysql_replication_slot_lsn_type());
+        list_cdc_streams_resp.streams()
+            .Get(0)
+            .cdc_stream_info_options()
+            .cdcsdk_ysql_replication_slot_lsn_type());
   }
 }
 
@@ -7851,7 +7860,10 @@ TEST_F(CDCSDKYsqlTest, TestReplicationSlotLsnTypePresentAfterRestart) {
 
   ASSERT_EQ(
       ReplicationSlotLsnType::ReplicationSlotLsnType_HYBRID_TIME,
-      list_cdc_streams_resp.streams().Get(0).cdcsdk_ysql_replication_slot_lsn_type());
+      list_cdc_streams_resp.streams()
+          .Get(0)
+          .cdc_stream_info_options()
+          .cdcsdk_ysql_replication_slot_lsn_type());
 
   for (int idx = 0; idx < 3; idx++) {
     test_cluster()->mini_tablet_server(idx)->Shutdown();
@@ -7865,7 +7877,10 @@ TEST_F(CDCSDKYsqlTest, TestReplicationSlotLsnTypePresentAfterRestart) {
 
   ASSERT_EQ(
       ReplicationSlotLsnType::ReplicationSlotLsnType_HYBRID_TIME,
-      list_cdc_streams_resp.streams().Get(0).cdcsdk_ysql_replication_slot_lsn_type());
+      list_cdc_streams_resp.streams()
+          .Get(0)
+          .cdc_stream_info_options()
+          .cdcsdk_ysql_replication_slot_lsn_type());
 
   // Restart master now.
   test_cluster_.mini_cluster_->mini_master()->Shutdown();
@@ -7875,7 +7890,10 @@ TEST_F(CDCSDKYsqlTest, TestReplicationSlotLsnTypePresentAfterRestart) {
 
   ASSERT_EQ(
       ReplicationSlotLsnType::ReplicationSlotLsnType_HYBRID_TIME,
-      list_cdc_streams_resp.streams().Get(0).cdcsdk_ysql_replication_slot_lsn_type());
+      list_cdc_streams_resp.streams()
+          .Get(0)
+          .cdc_stream_info_options()
+          .cdcsdk_ysql_replication_slot_lsn_type());
 }
 
 TEST_F(CDCSDKYsqlTest, TestPgPublicationDisabled) {

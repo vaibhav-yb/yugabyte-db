@@ -159,8 +159,8 @@ struct CDCSDKStreamInfo {
           .cdcsdk_ysql_replication_slot_name =
               ReplicationSlotName(pb.cdcsdk_ysql_replication_slot_name()),
           .cdcsdk_ysql_replication_slot_plugin_name = pb.cdcsdk_ysql_replication_slot_plugin_name(),
-          .replication_slot_lsn_type =
-              GetPGReplicationSlotLsnType(pb.cdcsdk_ysql_replication_slot_lsn_type()),
+          .replication_slot_lsn_type = GetPGReplicationSlotLsnType(
+              pb.cdc_stream_info_options().cdcsdk_ysql_replication_slot_lsn_type()),
           .options = std::move(options)};
 
       return stream_info;

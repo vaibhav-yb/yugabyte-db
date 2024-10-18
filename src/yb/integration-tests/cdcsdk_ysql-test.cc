@@ -7863,7 +7863,10 @@ TEST_F(CDCSDKYsqlTest, TestPgCreateReplicationSlotDefaultLsnTypeParam) {
 
   ASSERT_EQ(
       ReplicationSlotLsnType::ReplicationSlotLsnType_SEQUENCE,
-      list_cdc_streams_resp.streams().Get(0).cdcsdk_ysql_replication_slot_lsn_type());
+      list_cdc_streams_resp.streams()
+          .Get(0)
+          .cdc_stream_info_options()
+          .cdcsdk_ysql_replication_slot_lsn_type());
 }
 
 void CDCSDKYsqlTest::TestCreateReplicationSlotWithLsnTypeParam(const std::string lsn_type) {
@@ -7887,11 +7890,17 @@ void CDCSDKYsqlTest::TestCreateReplicationSlotWithLsnTypeParam(const std::string
   if (lsn_type == "SEQUENCE") {
     ASSERT_EQ(
         ReplicationSlotLsnType::ReplicationSlotLsnType_SEQUENCE,
-        list_cdc_streams_resp.streams().Get(0).cdcsdk_ysql_replication_slot_lsn_type());
+        list_cdc_streams_resp.streams()
+            .Get(0)
+            .cdc_stream_info_options()
+            .cdcsdk_ysql_replication_slot_lsn_type());
   } else {
     ASSERT_EQ(
         ReplicationSlotLsnType::ReplicationSlotLsnType_HYBRID_TIME,
-        list_cdc_streams_resp.streams().Get(0).cdcsdk_ysql_replication_slot_lsn_type());
+        list_cdc_streams_resp.streams()
+            .Get(0)
+            .cdc_stream_info_options()
+            .cdcsdk_ysql_replication_slot_lsn_type());
   }
 }
 

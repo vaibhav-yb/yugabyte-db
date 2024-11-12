@@ -172,6 +172,7 @@ import com.yugabyte.yw.common.XClusterUniverseService;
 import com.yugabyte.yw.common.backuprestore.BackupUtil;
 import com.yugabyte.yw.common.backuprestore.ybc.YbcBackupNodeRetriever;
 import com.yugabyte.yw.common.backuprestore.ybc.YbcBackupUtil;
+import com.yugabyte.yw.common.backuprestore.ybc.YbcManager;
 import com.yugabyte.yw.common.config.CustomerConfKeys;
 import com.yugabyte.yw.common.config.GlobalConfKeys;
 import com.yugabyte.yw.common.config.UniverseConfKeys;
@@ -192,10 +193,13 @@ import com.yugabyte.yw.forms.RestoreSnapshotScheduleParams;
 import com.yugabyte.yw.forms.TableInfoForm.NamespaceInfoResp;
 import com.yugabyte.yw.forms.UniverseDefinitionTaskParams;
 import com.yugabyte.yw.forms.UniverseDefinitionTaskParams.Cluster;
+import com.yugabyte.yw.forms.UniverseDefinitionTaskParams.ClusterType;
 import com.yugabyte.yw.forms.UniverseDefinitionTaskParams.SoftwareUpgradeState;
 import com.yugabyte.yw.forms.UniverseDefinitionTaskParams.UserIntent;
 import com.yugabyte.yw.forms.UniverseTaskParams;
 import com.yugabyte.yw.forms.UpgradeTaskParams;
+import com.yugabyte.yw.forms.UpgradeTaskParams.UpgradeTaskSubType;
+import com.yugabyte.yw.forms.UpgradeTaskParams.UpgradeTaskType;
 import com.yugabyte.yw.forms.XClusterConfigCreateFormData;
 import com.yugabyte.yw.forms.XClusterConfigTaskParams;
 import com.yugabyte.yw.metrics.MetricQueryHelper;
@@ -418,6 +422,7 @@ public abstract class UniverseTaskBase extends AbstractTaskBase {
           TaskType.EditBackupSchedule,
           TaskType.EditBackupScheduleKubernetes,
           TaskType.MultiTableBackup,
+          TaskType.ResumeKubernetesUniverse,
           TaskType.ReadOnlyClusterDelete,
           TaskType.ResumeUniverse);
 
@@ -774,6 +779,7 @@ public abstract class UniverseTaskBase extends AbstractTaskBase {
     UniverseDefinitionTaskParams universeDetails = universe.getUniverseDetails();
     boolean isResumeOrDelete =
         (taskType == TaskType.ResumeUniverse
+            || taskType == TaskType.ResumeKubernetesUniverse
             || taskType == TaskType.DestroyUniverse
             || taskType == TaskType.ResumeXClusterUniverses);
     if (universeDetails.universePaused && !isResumeOrDelete) {
@@ -865,6 +871,7 @@ public abstract class UniverseTaskBase extends AbstractTaskBase {
         UniverseDefinitionTaskParams universeDetails = universe.getUniverseDetails();
         boolean isResumeOrDelete =
             (owner == TaskType.ResumeUniverse
+                || owner == TaskType.ResumeKubernetesUniverse
                 || owner == TaskType.DestroyUniverse
                 || owner == TaskType.ResumeXClusterUniverses);
         if (universeDetails.universePaused && !isResumeOrDelete) {
@@ -1266,12 +1273,12 @@ public abstract class UniverseTaskBase extends AbstractTaskBase {
       if (isFirstTry()) {
         createFreezeUniverseTask(universeUuid, firstRunTxnCallback)
             .setSubTaskGroupType(SubTaskGroupType.ValidateConfigurations);
-        // Run to apply the change first before adding the rest of the subtasks.
-        getRunnableTask().runSubTasks();
       } else {
         createFreezeUniverseTask(universeUuid)
             .setSubTaskGroupType(SubTaskGroupType.ValidateConfigurations);
       }
+      // Run to apply the change first before adding the rest of the subtasks.
+      getRunnableTask().runSubTasks();
       return Universe.getOrBadRequest(universeUuid);
     } catch (RuntimeException e) {
       unlockUniverseForUpdate(universeUuid);
@@ -1909,9 +1916,15 @@ public abstract class UniverseTaskBase extends AbstractTaskBase {
     return subTaskGroup;
   }
 
-  /** Create a task to ping yb-controller servers on each node */
   public SubTaskGroup createWaitForYbcServerTask(Collection<NodeDetails> nodeDetailsSet) {
-    SubTaskGroup subTaskGroup = createSubTaskGroup("WaitForYbcServer");
+    return createWaitForYbcServerTask(
+        nodeDetailsSet, false /* ignoreErrors */, 20 /* numRetries */);
+  }
+
+  /** Create a task to ping yb-controller servers on each node */
+  public SubTaskGroup createWaitForYbcServerTask(
+      Collection<NodeDetails> nodeDetailsSet, boolean ignoreErrors, int numRetries) {
+    SubTaskGroup subTaskGroup = createSubTaskGroup("WaitForYbcServer", ignoreErrors);
     WaitForYbcServer task = createTask(WaitForYbcServer.class);
     WaitForYbcServer.Params params = new WaitForYbcServer.Params();
     params.setUniverseUUID(taskParams().getUniverseUUID());
@@ -1920,6 +1933,7 @@ public abstract class UniverseTaskBase extends AbstractTaskBase {
         nodeDetailsSet == null
             ? null
             : nodeDetailsSet.stream().map(node -> node.nodeName).collect(Collectors.toSet());
+    params.numRetries = numRetries;
     task.initialize(params);
     subTaskGroup.addSubTask(task);
     getRunnableTask().addSubTaskGroup(subTaskGroup);
@@ -4197,9 +4211,9 @@ public abstract class UniverseTaskBase extends AbstractTaskBase {
       BackupTableParams backupParams, int parallelDBBackups) {
     SubTaskGroup subTaskGroup = createSubTaskGroup("BackupTableYbc");
     Universe universe = Universe.getOrBadRequest(backupParams.getUniverseUUID());
-    YbcBackupNodeRetriever nodeRetriever = new YbcBackupNodeRetriever(universe, parallelDBBackups);
+    YbcBackupNodeRetriever nodeRetriever =
+        new YbcBackupNodeRetriever(universe, parallelDBBackups, backupParams.backupDBStates);
     Duration scheduleRetention = ScheduleUtil.getScheduleRetention(backupParams.baseBackupUUID);
-    nodeRetriever.initializeNodePoolForBackups(backupParams.backupDBStates);
     Backup previousBackup =
         (!backupParams.baseBackupUUID.equals(backupParams.backupUuid))
             ? Backup.getLastSuccessfulBackupInChain(
@@ -4392,6 +4406,144 @@ public abstract class UniverseTaskBase extends AbstractTaskBase {
     subTaskGroup.addSubTask(task);
     getRunnableTask().addSubTaskGroup(subTaskGroup);
     return subTaskGroup;
+  }
+
+  /**
+   * Create subtask for copying YBC package on K8s pod and add to subtask group.
+   *
+   * @param subTaskGroup
+   * @param node
+   * @param providerUUID
+   * @param ybcSoftwareVersion
+   * @param ybcGflags
+   */
+  public void createKubernetesYbcCopyPackageSubTask(
+      SubTaskGroup subTaskGroup,
+      NodeDetails node,
+      UUID providerUUID,
+      String ybcSoftwareVersion,
+      Map<String, String> ybcGflags) {
+    KubernetesCommandExecutor.Params params = new KubernetesCommandExecutor.Params();
+    params.commandType = KubernetesCommandExecutor.CommandType.COPY_PACKAGE;
+    params.setUniverseUUID(taskParams().getUniverseUUID());
+    params.ybcServerName = node.nodeName;
+    params.setYbcSoftwareVersion(ybcSoftwareVersion);
+    params.ybcGflags = ybcGflags;
+    params.providerUUID = providerUUID;
+    KubernetesCommandExecutor task = createTask(KubernetesCommandExecutor.class);
+    task.initialize(params);
+    task.setUserTaskUUID(getUserTaskUUID());
+    subTaskGroup.addSubTask(task);
+  }
+
+  /**
+   * Create subtask for running YBC action and add to subtask group.
+   *
+   * @param subTaskGroup
+   * @param node
+   * @param providerUUID
+   * @param isReadOnlyCluster
+   * @param command
+   */
+  public void createKubernetesYbcActionSubTask(
+      SubTaskGroup subTaskGroup,
+      NodeDetails node,
+      UUID providerUUID,
+      boolean isReadOnlyCluster,
+      String command) {
+    KubernetesCommandExecutor.Params params = new KubernetesCommandExecutor.Params();
+    params.commandType = KubernetesCommandExecutor.CommandType.YBC_ACTION;
+    params.setUniverseUUID(taskParams().getUniverseUUID());
+    params.ybcServerName = node.nodeName;
+    params.isReadOnlyCluster = isReadOnlyCluster;
+    params.providerUUID = providerUUID;
+    params.command = command;
+    KubernetesCommandExecutor task = createTask(KubernetesCommandExecutor.class);
+    task.initialize(params);
+    task.setUserTaskUUID(getUserTaskUUID());
+    subTaskGroup.addSubTask(task);
+  }
+
+  public void handleUnavailableYbcServers(Universe universe, YbcManager ybcManager) {
+    String cert = universe.getCertificateNodetoNode();
+    int ybcPort = universe.getUniverseDetails().communicationPorts.ybControllerrRpcPort;
+    Map<String, String> ybcGflags =
+        universe.getUniverseDetails().getPrimaryCluster().userIntent.ybcFlags;
+    String ybcSoftwareVersion = ybcManager.getStableYbcVersion();
+    Consumer<AnsibleClusterServerCtl.Params> paramsCustomizer = params -> {};
+
+    String configureSubTaskDescription =
+        String.format("ConfigureYbcServer on Universe %s", universe.getUniverseUUID());
+    SubTaskGroup configureYbcGroup =
+        createSubTaskGroup(
+            configureSubTaskDescription,
+            SubTaskGroupType.ConfigureUniverse,
+            true /* ignoreErrors */);
+    SubTaskGroup stopYbcActionGroup =
+        createSubTaskGroup(
+            "StopYbcAction", SubTaskGroupType.StoppingNodeProcesses, true /* ignoreErrors */);
+    SubTaskGroup startYbcActionGroup =
+        createSubTaskGroup(
+            "StartYbcAction", SubTaskGroupType.StartingNodeProcesses, true /* ignoreErrors */);
+
+    List<NodeDetails> reinstallNodes = new ArrayList<>();
+    for (Cluster cluster : universe.getUniverseDetails().clusters) {
+      boolean isK8s = cluster.userIntent.providerType == CloudType.kubernetes;
+      universe.getTserversInCluster(cluster.uuid).stream()
+          .filter(NodeDetails::isConsideredRunning)
+          .filter(node -> !ybcManager.ybcPingCheck(node.cloudInfo.private_ip, cert, ybcPort))
+          .forEach(
+              node -> {
+                if (isK8s) {
+                  createKubernetesYbcCopyPackageSubTask(
+                      configureYbcGroup,
+                      node,
+                      UUID.fromString(cluster.userIntent.provider),
+                      ybcSoftwareVersion,
+                      ybcGflags);
+                  createKubernetesYbcActionSubTask(
+                      stopYbcActionGroup,
+                      node,
+                      UUID.fromString(cluster.userIntent.provider),
+                      cluster.clusterType == ClusterType.ASYNC,
+                      "stop" /* command */);
+                } else {
+                  AnsibleConfigureServers.Params params =
+                      ybcManager.getAnsibleConfigureYbcServerTaskParams(
+                          universe,
+                          node,
+                          ybcGflags,
+                          UpgradeTaskType.YbcGFlags,
+                          UpgradeTaskSubType.YbcGflagsUpdate);
+                  AnsibleConfigureServers task = createTask(AnsibleConfigureServers.class);
+                  task.initialize(params);
+                  task.setUserTaskUUID(getUserTaskUUID());
+                  configureYbcGroup.addSubTask(task);
+                  stopYbcActionGroup.addSubTask(
+                      getServerControlTask(
+                          node,
+                          ServerType.CONTROLLER,
+                          "stop" /* command */,
+                          0 /* sleepAfterCmdMillis */,
+                          paramsCustomizer));
+                  startYbcActionGroup.addSubTask(
+                      getServerControlTask(
+                          node,
+                          ServerType.CONTROLLER,
+                          "start" /* command */,
+                          0 /* sleepAfterCmdMillis */,
+                          paramsCustomizer));
+                }
+                reinstallNodes.add(node);
+              });
+    }
+    if (reinstallNodes.size() > 0) {
+      getRunnableTask().addSubTaskGroup(configureYbcGroup);
+      getRunnableTask().addSubTaskGroup(stopYbcActionGroup);
+      getRunnableTask().addSubTaskGroup(startYbcActionGroup);
+      createWaitForYbcServerTask(reinstallNodes, true /* ignoreErrors */, 10 /* numRetries */)
+          .setSubTaskGroupType(SubTaskGroupType.StartingNodeProcesses);
+    }
   }
 
   /**
@@ -5841,7 +5993,8 @@ public abstract class UniverseTaskBase extends AbstractTaskBase {
       XClusterConfig xClusterConfig,
       boolean keepEntry,
       boolean forceDelete,
-      boolean deletePitrConfigs) {
+      boolean deleteSourcePitrConfigs,
+      boolean deleteTargetPitrConfigs) {
 
     // If target universe is destroyed, ignore creating this subtask.
     if (xClusterConfig.getTargetUniverseUUID() != null
@@ -5870,15 +6023,25 @@ public abstract class UniverseTaskBase extends AbstractTaskBase {
           .setSubTaskGroupType(UserTaskDetails.SubTaskGroupType.DeleteXClusterReplication);
     }
 
-    if (deletePitrConfigs
-        && (xClusterConfig.getType() == ConfigType.Txn || xClusterConfig.getType() == ConfigType.Db)
+    if ((xClusterConfig.getType() == ConfigType.Txn || xClusterConfig.getType() == ConfigType.Db)
         && xClusterConfig.getTargetUniverseUUID() != null) {
-      List<PitrConfig> pitrConfigs = xClusterConfig.getPitrConfigs();
-      for (PitrConfig pitrConfig : pitrConfigs) {
-        // Only delete PITR config which were specifically created for DR.
-        if (!pitrConfig.isCreatedForDr()) {
-          continue;
-        }
+      List<PitrConfig> pitrConfigsToDelete =
+          xClusterConfig.getPitrConfigs().stream()
+              .filter(pitrConfig -> pitrConfig.isCreatedForDr())
+              .filter(
+                  pitrConfig ->
+                      (deleteSourcePitrConfigs
+                              && pitrConfig
+                                  .getUniverse()
+                                  .getUniverseUUID()
+                                  .equals(xClusterConfig.getSourceUniverseUUID()))
+                          || (deleteTargetPitrConfigs
+                              && pitrConfig
+                                  .getUniverse()
+                                  .getUniverseUUID()
+                                  .equals(xClusterConfig.getTargetUniverseUUID())))
+              .collect(Collectors.toList());
+      for (PitrConfig pitrConfig : pitrConfigsToDelete) {
         createDeletePitrConfigTask(
             pitrConfig.getUuid(),
             pitrConfig.getUniverse().getUniverseUUID(),

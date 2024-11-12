@@ -37,6 +37,7 @@
 #include "parser/scansup.h"
 #include "pgstat.h"
 #include "postmaster/bgworker.h"
+#include "postmaster/interrupt.h"
 #include "storage/ipc.h"
 #include "storage/latch.h"
 #include "storage/lwlock.h"
@@ -80,10 +81,6 @@ static ExecutorRun_hook_type prev_ExecutorRun = NULL;
 static ExecutorFinish_hook_type prev_ExecutorFinish = NULL;
 static ExecutorEnd_hook_type prev_ExecutorEnd = NULL;
 static ProcessUtility_hook_type prev_ProcessUtility = NULL;
-
-/* Flags set by interrupt handlers for later service in the main loop. */
-static volatile sig_atomic_t got_sigterm = false;
-static volatile sig_atomic_t got_sighup = false;
 
 YbAshTrackNestedQueries yb_ash_track_nested_queries = NULL;
 
@@ -133,6 +130,7 @@ static void yb_ash_ProcessUtility(PlannedStmt *pstmt, const char *queryString,
 static const unsigned char *get_top_level_node_id();
 static void YbAshMaybeReplaceSample(PGPROC *proc, int num_procs, TimestampTz sample_time,
 									int samples_considered);
+static YBCWaitEventInfo YbGetWaitEventInfo(const PGPROC *proc);
 static void copy_pgproc_sample_fields(PGPROC *proc, int index);
 static void copy_non_pgproc_sample_fields(TimestampTz sample_time, int index);
 static void YbAshIncrementCircularBufferIndex(void);
@@ -329,7 +327,7 @@ yb_ash_ExecutorStart(QueryDesc *queryDesc, int eflags)
 		query_id = queryDesc->plannedstmt->queryId != 0
 				   ? queryDesc->plannedstmt->queryId
 				   : yb_ash_utility_query_id(queryDesc->sourceText,
-					   						 queryDesc->plannedstmt->stmt_len,
+											 queryDesc->plannedstmt->stmt_len,
 											 queryDesc->plannedstmt->stmt_location);
 		YbAshSetQueryId(query_id);
 	}
@@ -675,28 +673,6 @@ YbAshReleaseBufferLock()
 	LWLockRelease(&yb_ash->lock);
 }
 
-static void
-yb_ash_sigterm(SIGNAL_ARGS)
-{
-	int			save_errno = errno;
-
-	got_sigterm = true;
-	SetLatch(MyLatch);
-
-	errno = save_errno;
-}
-
-static void
-yb_ash_sighup(SIGNAL_ARGS)
-{
-	int			save_errno = errno;
-
-	got_sighup = true;
-	SetLatch(MyLatch);
-
-	errno = save_errno;
-}
-
 void
 YbAshMain(Datum main_arg)
 {
@@ -706,8 +682,10 @@ YbAshMain(Datum main_arg)
 					yb_ash_circular_buffer_size * 1024)));
 
 	/* Register functions for SIGTERM/SIGHUP management */
-	pqsignal(SIGHUP, yb_ash_sighup);
-	pqsignal(SIGTERM, yb_ash_sigterm);
+	pqsignal(SIGHUP, SignalHandlerForConfigReload);
+	pqsignal(SIGTERM, SignalHandlerForShutdownRequest);
+	pqsignal(SIGINT, SignalHandlerForShutdownRequest);
+	pqsignal(SIGQUIT, SignalHandlerForCrashExit);
 
 	/* We're now ready to receive signals */
 	BackgroundWorkerUnblockSignals();
@@ -716,7 +694,7 @@ YbAshMain(Datum main_arg)
 
 	pgstat_report_appname("yb_ash collector");
 
-	while (!got_sigterm)
+	while (true)
 	{
 		TimestampTz	sample_time;
 		int 		rc;
@@ -729,15 +707,7 @@ YbAshMain(Datum main_arg)
 		if (rc & WL_POSTMASTER_DEATH)
 			proc_exit(1);
 
-		/* Process signals */
-		if (got_sighup)
-		{
-			/* Process config file */
-			got_sighup = false;
-			ProcessConfigFile(PGC_SIGHUP);
-			ereport(LOG,
-					(errmsg("bgworker yb_ash signal: processed SIGHUP")));
-		}
+		HandleMainLoopInterrupts();
 
 		if (yb_enable_ash && yb_ash_sample_size > 0)
 		{
@@ -820,6 +790,37 @@ YbAshStoreSample(PGPROC *proc, int num_procs, TimestampTz sample_time, int index
 	YbAshIncrementCircularBufferIndex();
 }
 
+static YBCWaitEventInfo
+YbGetWaitEventInfo(const PGPROC *proc)
+{
+	static uint32 waiting_on_tserver_code = -1;
+
+	if (waiting_on_tserver_code == -1)
+		waiting_on_tserver_code = YBCWaitEventForWaitingOnTServer();
+
+	YBCWaitEventInfo info = {waiting_on_tserver_code, 0};
+
+	for (size_t attempt = 0; attempt < 32; ++attempt)
+	{
+		const uint32 wait_event = proc->wait_event_info;
+		const uint16 rpc_code = proc->yb_rpc_code;
+
+		if (wait_event != waiting_on_tserver_code)
+		{
+			info.wait_event = wait_event;
+			break;
+		}
+
+		if (rpc_code != 0)
+		{
+			info.rpc_code = rpc_code;
+			break;
+		}
+	}
+
+	return info;
+}
+
 static void
 copy_pgproc_sample_fields(PGPROC *proc, int index)
 {
@@ -829,7 +830,10 @@ copy_pgproc_sample_fields(PGPROC *proc, int index)
 	memcpy(&cb_sample->metadata, &proc->yb_ash_metadata, sizeof(YBCAshMetadata));
 	LWLockRelease(&proc->yb_ash_metadata_lock);
 
-	cb_sample->encoded_wait_event_code = proc->wait_event_info;
+	YBCWaitEventInfo info = YbGetWaitEventInfo(proc);
+	cb_sample->encoded_wait_event_code = info.wait_event;
+	cb_sample->aux_info[0] = info.rpc_code;
+	cb_sample->aux_info[1] = '\0';
 }
 
 /* We don't fill the sample weight here. Check YbAshFillSampleWeight */
@@ -846,8 +850,6 @@ copy_non_pgproc_sample_fields(TimestampTz sample_time, int index)
 
 	/* rpc_request_id is 0 for PG samples */
 	cb_sample->rpc_request_id = 0;
-	/* TODO(asaha): Add aux info to circular buffer once it's available */
-	cb_sample->aux_info[0] = '\0';
 	cb_sample->sample_time = sample_time;
 }
 
@@ -997,7 +999,15 @@ yb_active_session_history(PG_FUNCTION_ARGS)
 		}
 
 		if (sample->aux_info[0] != '\0')
-			values[j++] = CStringGetTextDatum(sample->aux_info);
+		{
+			/*
+			 * In PG samples, the wait event aux buffer will be [ash::PggateRPC, 0, ...],
+			 * the 0-th index contains the rpc enum value, the 1-st and subsequent indexes contains 0.
+			 */
+			values[j++] = sample->aux_info[0] != 0 && sample->aux_info[1] == 0
+				? CStringGetTextDatum(YBCGetPggateRPCName(sample->aux_info[0]))
+				: CStringGetTextDatum(sample->aux_info);
+		}
 		else
 			nulls[j++] = true;
 

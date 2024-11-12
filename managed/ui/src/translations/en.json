@@ -42,6 +42,7 @@
       "learnMore": "Learn more",
       "clear": "Clear",
       "reminder": "Reminder",
+      "reset": "Reset",
       "duration": {
         "seconds": "Seconds",
         "minutes": "Minutes",
@@ -170,16 +171,16 @@
       "masterFailover": {
         "warning": {
           "title": "Potential master failure detected",
-          "threshold": "Auto master failover threshold will be attempted to remediate in {{duration}} unless user fixes it manually",
+          "threshold": "Auto master failover will attempt to remediate in {{duration}}. ",
           "snoozeBtnText": "Snooze for 1 hour",
-          "disable": "To disable auto master failover schedule temporarily, click 'Snooze for 1 hour'",
-          "runtimeConfigMsg": "Auto master failover can be permanently disabled by setting the universe scoped runtime config yb.auto_master_failover.enabled to false"
+          "runtimeConfigMsg": "Auto master failover can be permanently disabled through the runtime config yb.auto_master_failover.enabled. "
         }
       },
       "postFailover": {
         "warning": {
-          "title": "Post auto master failover actions will be attempted in {{duration}}",
-          "disable": "To disable post failover actions temporarily, click 'Snooze for 1 hour'",
+          "title": "Post auto master failover actions pending",
+          "threshold": "Post auto master failover actions will be attempted in {{duration}}. ",
+          "manualCleanup": "Any underlying node failures need to be addressed manually through the Replace Node action.",
           "snoozeBtnText": "Snooze for 1 hour"
         }
       },
@@ -610,7 +611,11 @@
         "modalTitle": "Confirm Full Move Update",
         "submitLabel": "Do full move",
         "modalDescription": "This operation will migrate this universe and all its data to a completely new set of nodes.",
-        "likeToProceed": "Would you like to proceed?"
+        "likeToProceed": "Would you like to proceed?",
+        "assignPublicIP": "Assign Public IP",
+        "instanceProfileARN": "Instance Profile ARN",
+        "enabled": "Enabled",
+        "disabled": "Disabled"
       },
       "validation": {
         "confirmPassword": "Passwords should match",
@@ -1934,7 +1939,7 @@
           "search": "Search by user email",
           "table": {
             "email": "Username/Email",
-            "role": "Role",
+            "role": "Roles as of last login",
             "moreRoles": "+ {{count}} More",
             "connectOnly": "Connect Only (Default)",
             "createdAt": "Created At",
@@ -2491,15 +2496,18 @@
         "scope": "Scope",
         "emailAttribute": "Email Attribute",
         "refreshTokenURL": "Refresh Token URL",
+        "groupClaim": "Groups Claim",
         "displayJWTToken": "Display JWT token on login",
         "oidcProviderConfig": "Add OIDC Provider configuration ",
+        "oidcUseRoleMapping": "Use OIDC Groups for authentication and authorization",
         "roles": {
           "title": "Role Settings",
-          "userRoleSettings": "User Role Settings",
-          "userDefaultRole": "User Default Role",
+          "userRoleSettings": "Advanced Settings",
+          "userDefaultRole": "Default Role",
           "connectOnly": "Connect Only",
           "readOnly": "Read Only",
-          "alertText": "Assign roles to groups under <a>Groups tab</a>."
+          "alertText": "To map OIDC groups to YugabyteDB Anywhere roles, go to the <a>Groups tab</a>",
+          "groupOverrideWarning": "<b>Note:</b> Turning this ON will override roles previously assigned to individual users"
         },
         "messages": {
           "oidcEnabled": "OIDC authentication is enabled",
@@ -2522,7 +2530,11 @@
           "scope": "Identity provider scope",
           "emailAttribute": "Scope containing email ID of the user",
           "refreshTokenURL": "Provide the endpoint that will be used for re-fetching the access token",
-          "connectOnly": "Users with ConnectOnly role cannot see any information other than their own profile information",
+          "defaultRole": "The \"Default Role\" sets privileges for users who are not explicitly registered in YugabyteDB Anywhere",
+          "defaultRoleHelpText": "When off, OIDC individual users are used for role authentication",
+          "readOnly": "The \"Read Only\" role allows users to log in and provides read-only privileges",
+          "connectOnly": "The \"Connect Only\" role allows users to log in and edit their own profile",
+          "groupClaim": "Provide the claim keyword in a user's OIDC ID token that contains the list of the user's OIDC groups",
           "jwtTokenURL": "Option to display button to retrieve the JWT token"
         }
       },
@@ -2613,7 +2625,7 @@
         "empty": {
           "createSchduledPolicy": "Create Scheduled Backup Policy",
           "subText": "Currently there are no Scheduled Backup Policies to show",
-          "noTablesOrPermission":"This universe does not have any tables to backup or backup/universe is disabled"
+          "noTablesOrPermission": "This universe does not have any tables to backup or backup/universe is disabled"
         },
         "create": {
           "title": "Create Scheduled Backup Policy",
@@ -2706,7 +2718,7 @@
             "wontExpire": "Won't expire",
             "backupWillStart": "<b>Note:</b> The next scheduled backup will start shortly following the creation of this policy",
             "helpText": "We recommend performing an on-demand backup prior to executing any DDL changes between backup intervals to prevent data loss.<br/><a>Learn more</a>",
-            "successMsg": "Scheduled backup policy created. A backup will begin shortly.",
+            "successMsg": "Scheduled backup policy is being created. A backup will begin shortly.",
             "errorMsg": "Unable to created scheduled backup policy"
           },
           "loadingMsg": {
@@ -2740,12 +2752,13 @@
           "deletePolicy": "Delete Policy",
           "enabled": "Enabled",
           "disabled": "Disabled",
+          "creating": "Policy creation is in progress...",
           "deleteMsg": "scheduled backup policy is being deleted",
           "editModal": {
             "title": "Edit Scheduled Backup Policy",
             "backupStrategy": "Backup Strategy",
             "success": "Scheduled backup policy is being updated",
-              "noFieldsChanged": "No values changed"
+            "noFieldsChanged": "No values changed"
           },
           "deleteModal": {
             "deleteMsg": "Are you sure you want to delete this schedule policy?"
@@ -2767,7 +2780,6 @@
           "selectUniverse": "Target",
           "renameKeyspaces": "Rename Keyspaces"
         },
-
         "backupSummary": {
           "SOURCE": "Source",
           "TARGET": "Target",

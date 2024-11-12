@@ -282,7 +282,7 @@ DECLARE_uint64(rocksdb_max_file_size_for_compaction);
 DECLARE_int64(apply_intents_task_injected_delay_ms);
 DECLARE_string(regular_tablets_data_block_key_value_encoding);
 DECLARE_bool(cdc_immediate_transaction_cleanup);
-DECLARE_int64(cdc_intent_retention_ms);
+DECLARE_uint64(cdc_intent_retention_ms);
 
 DEFINE_test_flag(uint64, inject_sleep_before_applying_write_batch_ms, 0,
                  "Sleep before applying write batches");
@@ -1107,33 +1107,61 @@ void Tablet::CleanupIntentFiles() {
       "Submit cleanup intent files failed");
 }
 
-// Calls GetMinStartTimeAmongAllRunningTransactions() on transaction participant. If the result
-// obtained is invalid then returns leader safe time.
-HybridTime Tablet::GetMinStartHTRunningTxnsOrLeaderSafeTime() {
+HybridTime Tablet::GetMinStartHTRunningTxnsForCDCProducer() const {
   HybridTime min_start_ht_running_txns = HybridTime::kInvalid;
   if (transaction_participant()) {
-    min_start_ht_running_txns =
-        transaction_participant()->GetMinStartTimeAmongAllRunningTransactions();
+    min_start_ht_running_txns = transaction_participant()->MinRunningHybridTime();
     VLOG_WITH_PREFIX(2) << "min_start_ht_running_txns from txn participant: "
                         << min_start_ht_running_txns;
   }
 
-  if (min_start_ht_running_txns != HybridTime::kInvalid) {
+  if (min_start_ht_running_txns.is_valid() && min_start_ht_running_txns != HybridTime::kMax) {
+    VLOG_WITH_PREFIX(2) << "min_start_ht_running_txns after parsing: " << min_start_ht_running_txns;
     return min_start_ht_running_txns;
   }
 
-  auto safe_time_result = SafeTime();
-  if (safe_time_result.ok() && *safe_time_result != HybridTime::kInvalid) {
-    min_start_ht_running_txns = *safe_time_result;
-    VLOG_WITH_PREFIX(2) << "min_start_ht_running_txns from tablet leader safe time: "
+  // For the following two cases, return kInvalid so that CDC Producer uses leader safe time for
+  // streaming.
+  // 1. If loading of transactions is not yet completed, identified by start_ht being kInvalid.
+  // 2. If there are no running transactions, identified by start_ht being kMax.
+  min_start_ht_running_txns = HybridTime::kInvalid;
+  VLOG_WITH_PREFIX(2) << "min_start_ht_running_txns after parsing: " << min_start_ht_running_txns;
+  return min_start_ht_running_txns;
+}
+
+HybridTime Tablet::GetMinStartHTRunningTxnsForCDCLogCallback() const {
+  HybridTime min_start_ht_running_txns = HybridTime::kMax;
+  if (transaction_participant()) {
+    min_start_ht_running_txns = transaction_participant()->MinRunningHybridTime();
+    VLOG_WITH_PREFIX(2) << "min_start_ht_running_txns from txn participant: "
                         << min_start_ht_running_txns;
+  }
+
+  // Indicates loading of transactions is not yet completed.
+  if (!min_start_ht_running_txns.is_valid()) {
+    min_start_ht_running_txns = HybridTime::kInitial;
+    VLOG_WITH_PREFIX(2) << "min_start_ht_running_txns after parsing: " << min_start_ht_running_txns;
     return min_start_ht_running_txns;
   }
 
-  LOG_WITH_PREFIX(WARNING) << "Could not retrive a valid safe time so setting minimum start time "
-                              "of running txns to kInitial.";
+  // Indicates no running transactions.
+  if (min_start_ht_running_txns == HybridTime::kMax) {
+    auto safe_time_result = SafeTime();
+    if (safe_time_result.ok() && *safe_time_result != HybridTime::kInvalid) {
+      min_start_ht_running_txns = *safe_time_result;
+      VLOG_WITH_PREFIX(2)
+          << "No running transactions. min_start_ht_running_txns from tablet leader safe time: "
+          << min_start_ht_running_txns;
+      return min_start_ht_running_txns;
+    }
 
-  return HybridTime::kInitial;
+    LOG_WITH_PREFIX(WARNING) << "Could not retrive a valid safe time so setting minimum start time "
+                                "of running txns to kInitial.";
+    return HybridTime::kInitial;
+  }
+
+  VLOG_WITH_PREFIX(2) << "min_start_ht_running_txns after parsing: " << min_start_ht_running_txns;
+  return min_start_ht_running_txns;
 }
 
 void Tablet::DoCleanupIntentFiles() {
@@ -1349,7 +1377,7 @@ void Tablet::CompleteShutdown(
   CompleteShutdownRocksDBs(op_pauses);
 
   {
-    std::lock_guard lock(full_compaction_token_mutex_);
+    std::lock_guard compaction_lock(full_compaction_token_mutex_);
     if (full_compaction_task_pool_token_) {
       full_compaction_task_pool_token_->Shutdown();
     }
@@ -1701,7 +1729,7 @@ void Tablet::WriteToRocksDB(
   auto rocksdb_write_status = dest_db->Write(write_options, write_batch);
   if (!rocksdb_write_status.ok()) {
     LOG_WITH_PREFIX(FATAL) << "Failed to write a batch with " << write_batch->Count()
-                           << " operations into RocksDB: " << rocksdb_write_status;
+                           << " indirect operations into RocksDB: " << rocksdb_write_status;
   }
 
   if (FLAGS_TEST_docdb_log_write_batches) {
@@ -1864,13 +1892,11 @@ Status Tablet::HandlePgsqlReadRequest(
       *metrics_, *regulardb_statistics_, *intentsdb_statistics_,
       pgsql_read_request.metrics_capture(), result->response);
 
-  auto status = DoHandlePgsqlReadRequest(
+  return DoHandlePgsqlReadRequest(
       &scoped_read_operation, metrics_scope.metrics(),
       read_operation_data.WithStatistics(metrics_scope.statistics()),
       is_explicit_request_read_time, pgsql_read_request, transaction_metadata,
       subtransaction_metadata, result);
-
-  return status;
 }
 
 Status Tablet::DoHandlePgsqlReadRequest(
@@ -1894,15 +1920,19 @@ Status Tablet::DoHandlePgsqlReadRequest(
   if (pgsql_read_request.has_get_tablet_key_ranges_request()) {
     status = ProcessPgsqlGetTableKeyRangesRequest(pgsql_read_request, result);
   } else {
-    Result<TransactionOperationContext> txn_op_ctx =
-        CreateTransactionOperationContext(
-            transaction_metadata,
-            table_info->schema().table_properties().is_ysql_catalog_table(),
-            &subtransaction_metadata);
-    RETURN_NOT_OK(txn_op_ctx);
-    status = ProcessPgsqlReadRequest(
-        read_operation_data, is_explicit_request_read_time, pgsql_read_request, table_info,
-        *txn_op_ctx, storage, *scoped_read_operation, result);
+    auto txn_op_ctx = VERIFY_RESULT(CreateTransactionOperationContext(
+        transaction_metadata,
+        table_info->schema().table_properties().is_ysql_catalog_table(),
+        &subtransaction_metadata));
+    docdb::PgsqlReadOperationData data = {
+      .read_operation_data = read_operation_data,
+      .is_explicit_request_read_time = is_explicit_request_read_time,
+      .request = pgsql_read_request,
+      .txn_op_context = txn_op_ctx,
+      .ql_storage = storage,
+      .pending_op = *scoped_read_operation,
+    };
+    status = ProcessPgsqlReadRequest(data, table_info, result);
   }
 
   // Assert the table is a Postgres table.
@@ -2167,7 +2197,7 @@ Result<docdb::ApplyTransactionState> Tablet::ApplyIntents(const TransactionApply
   // are still in intents db and not yet in regular db.
   AtomicFlagSleepMs(&FLAGS_TEST_inject_sleep_before_applying_intents_ms);
   docdb::ApplyIntentsContext context(
-      data.transaction_id, data.apply_state, data.aborted, data.commit_ht, data.log_ht,
+      tablet_id(), data.transaction_id, data.apply_state, data.aborted, data.commit_ht, data.log_ht,
       min_running_ht, &key_bounds_, metadata_.get(), intents_db_.get());
   docdb::IntentsWriter intents_writer(
       data.apply_state ? data.apply_state->key : Slice(), min_running_ht,
@@ -2468,13 +2498,16 @@ Status Tablet::AddTableInMemory(const TableInfoPB& table_info, const OpId& op_id
   RETURN_NOT_OK(dockv::PartitionSchema::FromPB(
       table_info.partition_schema(), schema, &partition_schema));
 
-  metadata_->AddTable(
+  std::optional<qlexpr::IndexInfo> index_info;
+  if (table_info.has_index_info()) {
+    index_info.emplace(table_info.index_info());
+  }
+
+  return metadata_->AddTable(
       table_info.table_id(), table_info.namespace_name(), table_info.table_name(),
-      table_info.table_type(), schema, qlexpr::IndexMap(), partition_schema, boost::none,
+      table_info.table_type(), schema, qlexpr::IndexMap(), partition_schema, index_info,
       table_info.schema_version(), op_id, table_info.pg_table_id(),
       SkipTableTombstoneCheck(table_info.skip_table_tombstone_check()));
-
-  return Status::OK();
 }
 
 Status Tablet::AddTable(const TableInfoPB& table_info, const OpId& op_id) {
@@ -2534,6 +2567,11 @@ Status Tablet::AlterSchema(ChangeMetadataOperation *operation) {
     return Status::OK();
   }
 
+  // Handle insert_packed_schema separately.
+  if (operation->request()->insert_packed_schema()) {
+    return InsertPackedSchemaForXClusterTarget(operation, current_table_info);
+  }
+
   LOG_WITH_PREFIX(INFO) << "Alter schema from " << current_table_info->schema().ToString()
                         << " version " << current_table_info->schema_version
                         << " to " << operation->schema()->ToString()
@@ -2587,6 +2625,22 @@ Status Tablet::AlterSchema(ChangeMetadataOperation *operation) {
       }
     }
   }
+
+  // Flush the updated schema metadata to disk.
+  return metadata_->Flush();
+}
+
+Status Tablet::InsertPackedSchemaForXClusterTarget(
+    ChangeMetadataOperation* operation, std::shared_ptr<yb::tablet::TableInfo> current_table_info) {
+  SCHECK(operation->schema()->has_column_ids(), IllegalState, "Schema must have column ids");
+  // TODO(#22318) handle colocated tables later.
+  SCHECK(
+      !metadata_->colocated(), IllegalState,
+      "Colocated tables are not supported for automatic DDL replication.");
+
+  metadata_->InsertPackedSchemaForXClusterTarget(
+      *operation->schema(), operation->index_map(), operation->schema_version(), operation->op_id(),
+      current_table_info->table_id);
 
   // Flush the updated schema metadata to disk.
   return metadata_->Flush();
@@ -4049,8 +4103,7 @@ Status Tablet::CreateReadIntents(
     if (table_info == nullptr || table_info->table_id != pgsql_read.table_id()) {
       table_info = VERIFY_RESULT(metadata_->GetTableInfo(pgsql_read.table_id()));
     }
-    docdb::PgsqlReadOperation doc_op(pgsql_read, txn_op_ctx);
-    RETURN_NOT_OK(doc_op.GetIntents(table_info->schema(), level, write_batch));
+    RETURN_NOT_OK(docdb::GetIntents(pgsql_read, table_info->schema(), level, write_batch));
   }
 
   return Status::OK();
@@ -4637,7 +4690,7 @@ Status PopulateLockInfoFromIntent(
     Slice key, Slice val, const TableInfoProvider& table_info_provider,
     const std::map<TransactionId, SubtxnSet>& aborted_subtxn_info,
     TransactionLockInfoManager* lock_info_manager, uint32_t max_txn_locks) {
-  auto parsed_intent = VERIFY_RESULT(docdb::ParseIntentKey(key, val));
+  auto parsed_intent = VERIFY_RESULT(dockv::ParseIntentKey(key, val));
   auto decoded_value = VERIFY_RESULT(dockv::DecodeIntentValue(
       val, nullptr /* verify_transaction_id_slice */, HasStrong(parsed_intent.types)));
 

@@ -99,7 +99,7 @@ DEFINE_UNKNOWN_bool(ysql_disable_server_file_access, false,
 
 DEFINE_NON_RUNTIME_bool(ysql_enable_profile, false, "Enable PROFILE feature.");
 
-DEFINE_test_flag(string, ysql_conn_mgr_dowarmup_all_pools_mode, "random",
+DEFINE_test_flag(string, ysql_conn_mgr_dowarmup_all_pools_mode, "none",
   "Enable precreation of server connections in every pool in Ysql Connection Manager and "
   "choose the mode of attachment of idle server connections to clients to serve their queries. "
   "ysql_conn_mgr_dowarmup is responsible for creating server connections only in "
@@ -231,8 +231,8 @@ Status InitPgGateImpl(const YBCPgTypeEntity* data_type_table,
   auto opt_session_id = session_id ? std::optional(*session_id) : std::nullopt;
   return WithMaskedYsqlSignals(
     [data_type_table, count, &pg_callbacks, opt_session_id, &ash_config] {
-    YBCInitPgGateEx(data_type_table, count, pg_callbacks, nullptr /* context */, opt_session_id,
-                    ash_config);
+    YBCInitPgGateEx(
+        data_type_table, count, pg_callbacks, nullptr /* context */, opt_session_id, ash_config);
     return static_cast<Status>(Status::OK());
   });
 }
@@ -490,10 +490,10 @@ void YBCInitPgGateEx(const YBCPgTypeEntity *data_type_table, int count, PgCallba
   pgapi_shutdown_done.exchange(false);
   if (context) {
     pgapi = new pggate::PgApiImpl(
-      std::move(*context), data_type_table, count, pg_callbacks, session_id, ash_config);
+        std::move(*context), data_type_table, count, pg_callbacks, session_id, *ash_config);
   } else {
-    pgapi = new pggate::PgApiImpl(PgApiContext(), data_type_table, count, pg_callbacks, session_id,
-                                  ash_config);
+    pgapi = new pggate::PgApiImpl(
+        PgApiContext(), data_type_table, count, pg_callbacks, session_id, *ash_config);
   }
 
   VLOG(1) << "PgGate open";
@@ -1112,7 +1112,7 @@ YBCStatus YBCPgSetDBCatalogCacheVersion(
 }
 
 YBCStatus YBCPgDmlModifiesRow(YBCPgStatement handle, bool *modifies_row) {
-  return ToYBCStatus(pgapi->DmlModifiesRow(handle, modifies_row));
+  return ExtractValueFromResult(pgapi->DmlModifiesRow(handle), modifies_row);
 }
 
 YBCStatus YBCPgSetIsSysCatalogVersionChange(YBCPgStatement handle) {
@@ -1346,8 +1346,7 @@ YBCStatus YBCPgDmlBindHashCodes(
   const auto start = MakeBound(start_type, start_value);
   const auto end = MakeBound(end_type, end_value);
   DCHECK(start || end);
-  pgapi->DmlBindHashCode(handle, start, end);
-  return YBCStatusOK();
+  return ToYBCStatus(pgapi->DmlBindHashCode(handle, start, end));
 }
 
 YBCStatus YBCPgDmlBindRange(YBCPgStatement handle,
@@ -1904,6 +1903,53 @@ YBCPgExplicitRowLockStatus YBCFlushExplicitRowLockIntents() {
   result.ybc_status = ToYBCStatus(pgapi->FlushExplicitRowLockIntents(result.error_info));
   return result;
 }
+
+// INSERT ... ON CONFLICT batching -----------------------------------------------------------------
+YBCStatus YBCPgAddInsertOnConflictKey(const YBCPgYBTupleIdDescriptor* tupleid,
+                                      YBCPgInsertOnConflictKeyInfo* info) {
+  return ProcessYbctid(*tupleid, [info](auto table_id, const auto& ybctid) {
+    return pgapi->AddInsertOnConflictKey(
+        table_id, ybctid, info ? *info : YBCPgInsertOnConflictKeyInfo());
+  });
+}
+
+YBCStatus YBCPgInsertOnConflictKeyExists(const YBCPgYBTupleIdDescriptor* tupleid,
+                                         YBCPgInsertOnConflictKeyState* res) {
+  return ProcessYbctid(*tupleid, [res](auto table_id, const auto& ybctid) {
+    *res = pgapi->InsertOnConflictKeyExists(table_id, ybctid);
+    return Status::OK();
+  });
+}
+
+YBCStatus YBCPgDeleteInsertOnConflictKey(const YBCPgYBTupleIdDescriptor* tupleid,
+                                         YBCPgInsertOnConflictKeyInfo* info) {
+  return ProcessYbctid(*tupleid, [info](auto table_id, const auto& ybctid) {
+    auto result = VERIFY_RESULT(pgapi->DeleteInsertOnConflictKey(table_id, ybctid));
+    *info = result;
+    return (Status) Status::OK();
+  });
+}
+
+YBCStatus YBCPgDeleteNextInsertOnConflictKey(YBCPgInsertOnConflictKeyInfo* info) {
+  return ExtractValueFromResult(pgapi->DeleteNextInsertOnConflictKey(), info);
+}
+
+YBCStatus YBCPgAddInsertOnConflictKeyIntent(const YBCPgYBTupleIdDescriptor* tupleid) {
+  return ProcessYbctid(*tupleid, [](auto table_id, const auto& ybctid) {
+    pgapi->AddInsertOnConflictKeyIntent(table_id, ybctid);
+    return Status::OK();
+  });
+}
+
+void YBCPgClearInsertOnConflictCache() {
+  pgapi->ClearInsertOnConflictCache();
+}
+
+uint64_t YBCPgGetInsertOnConflictKeyCount() {
+  return pgapi->GetInsertOnConflictKeyCount();
+}
+
+//--------------------------------------------------------------------------------------------------
 
 bool YBCIsInitDbModeEnvVarSet() {
   static bool cached_value = false;

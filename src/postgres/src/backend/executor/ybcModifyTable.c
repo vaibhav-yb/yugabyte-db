@@ -517,9 +517,16 @@ YbIsInsertOnConflictReadBatchingEnabled(ResultRelInfo *resultRelInfo)
 {
 	/*
 	 * TODO(jason): figure out how to enable triggers.
-	 * TODO(jason): disable (or handle) NULLS NOT DISTINCT indexes once that is
-	 * officially allowed.
 	 */
+	/*
+	 * TODO(GH#24834): Enable INSERT ON CONFLICT batching for null-not-distinct
+	 * indexes.
+	 */
+	for (int i = 0; i < resultRelInfo->ri_NumIndices; i++)
+	{
+		if (resultRelInfo->ri_IndexRelationInfo[i]->ii_NullsNotDistinct)
+			return false;
+	}
 	return (IsYBRelation(resultRelInfo->ri_RelationDesc) &&
 			!IsCatalogRelation(resultRelInfo->ri_RelationDesc) &&
 			resultRelInfo->ri_BatchSize > 1 &&
@@ -536,26 +543,64 @@ YbIsInsertOnConflictReadBatchingEnabled(ResultRelInfo *resultRelInfo)
 			   resultRelInfo->ri_TrigDesc->trig_update_instead_row)));
 }
 
-static YBCPgYBTupleIdDescriptor*
+/*
+ * Utility method to build a ybctid descriptor for a unique index.
+ * This method is invoked in conjunction with storing ybctids in pggate, and
+ * building a descriptor rather the ybctid itself saves us a copy.
+ *
+ * Note that the unique index may refer to either the primary key or a unique,
+ * secondary index.
+ */
+YBCPgYBTupleIdDescriptor *
 YBCBuildNonNullUniqueIndexYBTupleId(Relation unique_index, Datum *values)
 {
+	Assert(IsYBRelation(unique_index));
+
+	const bool is_pkey = unique_index->rd_index->indisprimary;
 	Oid dboid = YBCGetDatabaseOid(unique_index);
-	Oid relfileNodeId = YbGetRelfileNodeId(unique_index);
+	Oid relfileNodeId;
 	YBCPgTableDesc ybc_table_desc = NULL;
-	HandleYBStatus(YBCPgGetTableDesc(dboid, relfileNodeId,
-		&ybc_table_desc));
-	TupleDesc tupdesc = RelationGetDescr(unique_index);
+	TupleDesc tupdesc;
+	Bitmapset *pkey;
+	AttrNumber minattr = YBSystemFirstLowInvalidAttributeNumber + 1;
+
+	if (is_pkey)
+	{
+		Relation main_table = RelationIdGetRelation(unique_index->rd_index->indrelid);
+		relfileNodeId = YbGetRelfileNodeId(main_table);
+		tupdesc = RelationGetDescr(main_table);
+		RelationClose(main_table);
+		pkey = YBGetTableFullPrimaryKeyBms(main_table);
+	}
+	else
+	{
+		relfileNodeId = YbGetRelfileNodeId(unique_index);
+		tupdesc = RelationGetDescr(unique_index);
+	}
+
+	HandleYBStatus(YBCPgGetTableDesc(dboid, relfileNodeId, &ybc_table_desc));
 	const int nattrs = IndexRelationGetNumberOfKeyAttributes(unique_index);
 	YBCPgYBTupleIdDescriptor* result = YBCCreateYBTupleIdDescriptor(dboid,
-		relfileNodeId, nattrs + 1);
+		relfileNodeId, nattrs + (is_pkey ? 0 : 1));
 	YBCPgAttrValueDescriptor *next_attr = result->attrs;
-	for (AttrNumber attnum = 1; attnum <= nattrs; ++attnum)
+	for (int i = 0, col = -1; i < nattrs; ++i)
 	{
+		AttrNumber attnum;
+		if (is_pkey)
+		{
+			/* Primary keys can have out of order attribute numbers */
+			col = bms_next_member(pkey, col);
+			Assert(col >= 0);
+			attnum = col + minattr;
+		}
+		else
+			attnum = i + 1;
+
 		Oid type_id = GetTypeId(attnum, tupdesc);
 		next_attr->type_entity = YbDataTypeFromOidMod(attnum, type_id);
 		next_attr->collation_id = ybc_get_attcollation(tupdesc, attnum);
 		next_attr->attr_num = attnum;
-		next_attr->datum = values[attnum - 1];
+		next_attr->datum = values[i];
 		next_attr->is_null = false;
 		YBCPgColumnInfo column_info = {0};
 		HandleYBTableDescStatus(YBCPgGetColumnInfo(ybc_table_desc,
@@ -564,7 +609,11 @@ YBCBuildNonNullUniqueIndexYBTupleId(Relation unique_index, Datum *values)
 		YBSetupAttrCollationInfo(next_attr, &column_info);
 		++next_attr;
 	}
-	YBCFillUniqueIndexNullAttribute(result);
+
+	/* Primary keys do not have the YBUniqueIdxKeySuffix attribute */
+	if (!is_pkey)
+		YBCFillUniqueIndexNullAttribute(result);
+
 	return result;
 }
 

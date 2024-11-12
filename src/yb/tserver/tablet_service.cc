@@ -1522,6 +1522,8 @@ void TabletServiceImpl::GetCompatibleSchemaVersion(
     if (result.ok()) {
       schema_version = *result;
     } else {
+      // Also set the latest schema version.
+      resp->set_latest_schema_version(schema_version);
       SetupErrorAndRespond(
           resp->mutable_error(), result.status(), TabletServerErrorPB::MISMATCHED_SCHEMA, &context);
       return;
@@ -1591,7 +1593,7 @@ Status TabletServiceAdminImpl::DoCreateTablet(const CreateTabletRequestPB* req,
       consensus::MakeTabletLogPrefix(req->tablet_id(), server_->permanent_uuid()),
       tablet::Primary::kTrue, req->table_id(), req->namespace_name(), req->table_name(),
       req->table_type(), schema, qlexpr::IndexMap(),
-      req->has_index_info() ? boost::optional<qlexpr::IndexInfo>(req->index_info()) : boost::none,
+      req->has_index_info() ? std::optional<qlexpr::IndexInfo>(req->index_info()) : std::nullopt,
       0 /* schema_version */, partition_schema, req->pg_table_id(),
       tablet::SkipTableTombstoneCheck(FLAGS_ysql_yb_enable_alter_table_rewrite));
 

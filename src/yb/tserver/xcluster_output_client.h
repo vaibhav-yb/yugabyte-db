@@ -42,7 +42,6 @@ struct XClusterOutputClientResponse {
 };
 
 class XClusterPoller;
-struct XClusterClient;
 
 class XClusterOutputClient : public XClusterAsyncExecutor {
  public:
@@ -82,6 +81,8 @@ class XClusterOutputClient : public XClusterAsyncExecutor {
   // record, then we process the current changes first, wait for those to complete, then process
   // the ddl + other changes after.
   Status ProcessChangesStartingFromIndex(int start);
+
+  Result<cdc::CDCRecordPB> TransformSequencesDataRecord(const cdc::CDCRecordPB& record);
 
   Status ProcessRecordForTablet(
       const cdc::CDCRecordPB& record, const Result<client::internal::RemoteTabletPtr>& tablet);
@@ -124,6 +125,8 @@ class XClusterOutputClient : public XClusterAsyncExecutor {
 
   bool UseLocalTserver();
 
+  bool IsSequencesDataTablet();
+
   // Even though this is a const we guard it with a lock, since it is unsafe to use after shutdown.
   // TODO: Once we move the async execution logic to the Poller, it will guarantee that our lifetime
   // is less than the pollers lifetime, making this always safe to use.
@@ -165,6 +168,10 @@ class XClusterOutputClient : public XClusterAsyncExecutor {
   std::unique_ptr<XClusterWriteInterface> write_strategy_ GUARDED_BY(lock_);
 
   rocksdb::RateLimiter* rate_limiter_;
+
+  // Only non-optional for sequences_data tablets, in which case it is
+  // the OID of the DB to write incoming sequence information to.
+  std::optional<uint32_t> db_oid_write_sequences_to_{std::nullopt};
 };
 
 std::shared_ptr<XClusterOutputClient> CreateXClusterOutputClient(

@@ -48,14 +48,18 @@ class Pg15UpgradeTestBase : public UpgradeTestBase {
   // Connects to a random tserver and executes ysql statements.
   Status ExecuteStatements(const std::vector<std::string>& sql_statements);
   Status ExecuteStatement(const std::string& sql_statement);
+  Status ExecuteStatementsInFile(const std::string& file_name);
+  Status ExecuteStatementsInFiles(const std::vector<std::string>& file_names);
 
   Result<pgwrapper::PGConn> CreateConnToTs(size_t ts_id);
 
   // Run a ysql statement via ysqlsh against a given tserver.
-  Result<std::string> ExecuteViaYsqlshOnTs(const std::string& sql_statement, size_t ts_id);
+  Result<std::string> ExecuteViaYsqlshOnTs(const std::string& sql_statement, size_t ts_id,
+                                           const std::string &db_name = "yugabyte");
 
   // Run a ysql statement via ysqlsh against a random tserver.
-  Result<std::string> ExecuteViaYsqlsh(const std::string& sql_statement);
+  Result<std::string> ExecuteViaYsqlsh(const std::string& sql_statement,
+                                       const std::string &db_name = "yugabyte");
 };
 
 }  // namespace yb

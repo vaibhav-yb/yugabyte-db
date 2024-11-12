@@ -38,6 +38,10 @@ class XClusterDDLReplicationTestBase : public XClusterYsqlTestBase {
     return XClusterYsqlTestBase::CheckpointReplicationGroup(replication_group_id);
   }
 
+  // Unlike the previous method, this one does not fail if bootstrap is required.
+  Status CheckpointReplicationGroupWithoutRequiringNoBootstrapNeeded(
+      const std::vector<NamespaceName>& namespace_names);
+
   Result<std::shared_ptr<client::YBTable>> GetProducerTable(
       const client::YBTableName& producer_table_name);
 
@@ -45,6 +49,8 @@ class XClusterDDLReplicationTestBase : public XClusterYsqlTestBase {
       const client::YBTableName& producer_table_name);
 
   void InsertRowsIntoProducerTableAndVerifyConsumer(const client::YBTableName& producer_table_name);
+
+  Status WaitForSafeTimeToAdvanceToNowWithoutDDLQueue();
 
   Status PrintDDLQueue(Cluster& cluster);
 };

@@ -450,7 +450,6 @@ public class EditKubernetesUniverse extends KubernetesTaskBase {
 
       if (universe.isYbcEnabled()) {
         installYbcOnThePods(
-            universe.getName(),
             tserversToAdd,
             isReadOnlyCluster,
             ybcManager.getStableYbcVersion(),
@@ -799,6 +798,8 @@ public class EditKubernetesUniverse extends KubernetesTaskBase {
 
     createWaitForServersTasks(podsToAdd, serverType)
         .setSubTaskGroupType(SubTaskGroupType.ConfigureUniverse);
+
+    createSwamperTargetUpdateTask(false /* removeFile */);
   }
 
   /**
@@ -1048,9 +1049,12 @@ public class EditKubernetesUniverse extends KubernetesTaskBase {
         taskParams().getPrimaryCluster().getPerAZServerTypeGflagsChecksumMap())) {
       return;
     }
+    UUID universeUUID = taskParams().getUniverseUUID();
+    Universe universe = Universe.getOrBadRequest(universeUUID);
     for (Cluster newCluster : taskParams().clusters) {
+      // Use existing cluster AZs to persist here.
       Map<UUID, Map<ServerType, String>> perAZGflagsChecksumMap =
-          getPerAZGflagsChecksumMap(universeName, newCluster);
+          getPerAZGflagsChecksumMap(universeName, universe.getCluster(newCluster.uuid));
       if (MapUtils.isNotEmpty(perAZGflagsChecksumMap)) {
         newCluster.setPerAZServerTypeGflagsChecksumMap(perAZGflagsChecksumMap);
         log.debug("Persisting gflags checksum");

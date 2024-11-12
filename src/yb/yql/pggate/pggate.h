@@ -122,7 +122,7 @@ class PgApiImpl {
  public:
   PgApiImpl(PgApiContext context, const YBCPgTypeEntity *YBCDataTypeTable, int count,
             YBCPgCallbacks pg_callbacks, std::optional<uint64_t> session_id,
-            const YBCPgAshConfig* ash_config);
+            const YBCPgAshConfig& ash_config);
   ~PgApiImpl();
 
   const YBCPgCallbacks* pg_callbacks() {
@@ -368,7 +368,7 @@ class PgApiImpl {
   Result<YBCPgColumnInfo> GetColumnInfo(YBCPgTableDesc table_desc,
                                         int16_t attr_number);
 
-  Status DmlModifiesRow(PgStatement *handle, bool *modifies_row);
+  Result<bool> DmlModifiesRow(PgStatement* handle);
 
   Status SetIsSysCatalogVersionChange(PgStatement *handle);
 
@@ -473,7 +473,7 @@ class PgApiImpl {
   Status DmlBindColumnCondIsNotNull(PgStatement *handle, int attr_num);
   Status DmlBindRow(YBCPgStatement handle, uint64_t ybctid, YBCBindColumn* columns, int count);
 
-  void DmlBindHashCode(
+  Status DmlBindHashCode(
       PgStatement* handle, const std::optional<Bound>& start, const std::optional<Bound>& end);
 
   Status DmlBindRange(YBCPgStatement handle,
@@ -720,6 +720,18 @@ class PgApiImpl {
       PgExplicitRowLockErrorInfo& error_info);
   Status FlushExplicitRowLockIntents(PgExplicitRowLockErrorInfo& error_info);
 
+  // INSERT ... ON CONFLICT batching ---------------------------------------------------------------
+  Status AddInsertOnConflictKey(
+      PgOid table_id, const Slice& ybctid, const YBCPgInsertOnConflictKeyInfo& info);
+  YBCPgInsertOnConflictKeyState InsertOnConflictKeyExists(PgOid table_id, const Slice& ybctid);
+  Result<YBCPgInsertOnConflictKeyInfo> DeleteInsertOnConflictKey(
+      PgOid table_id, const Slice& ybctid);
+  Result<YBCPgInsertOnConflictKeyInfo> DeleteNextInsertOnConflictKey();
+  uint64_t GetInsertOnConflictKeyCount();
+  void AddInsertOnConflictKeyIntent(PgOid table_id, const Slice& ybctid);
+  void ClearInsertOnConflictCache();
+  //------------------------------------------------------------------------------------------------
+
   // Sets the specified timeout in the rpc service.
   void SetTimeout(int timeout_ms);
 
@@ -837,6 +849,10 @@ class PgApiImpl {
 
   std::unique_ptr<rpc::ProxyCache> proxy_cache_;
 
+  YBCPgCallbacks pg_callbacks_;
+
+  const WaitEventWatcher wait_event_watcher_;
+
   // TODO Rename to client_ when YBClient is removed.
   PgClient pg_client_;
 
@@ -844,8 +860,6 @@ class PgApiImpl {
 
   // Local tablet-server shared memory segment handle.
   tserver::TServerSharedObject tserver_shared_object_;
-
-  YBCPgCallbacks pg_callbacks_;
 
   scoped_refptr<PgTxnManager> pg_txn_manager_;
 

@@ -765,7 +765,7 @@ DefineRelation(CreateStmt *stmt, char relkind, Oid ownerId,
 		/* UNLOGGED persistence is NO-OP in YugabyteDB. */
 		ereport(NOTICE,
 				(errmsg("unlogged option is currently ignored in YugabyteDB, "
-								"all non-temp tables will be logged")));
+								"all non-temp relations will be logged")));
 		stmt->relation->relpersistence = RELPERSISTENCE_PERMANENT;
 	}
 
@@ -1211,16 +1211,6 @@ DefineRelation(CreateStmt *stmt, char relkind, Oid ownerId,
 	 */
 	CommandCounterIncrement();
 
-	if (IsYugaByteEnabled())
-	{
-		CheckIsYBSupportedRelationByKind(relkind);
-		YBCCreateTable(stmt, relname, relkind, descriptor, relationId,
-					   namespaceId, tablegroupId, colocation_id, tablespaceId,
-					   InvalidOid /* pgTableId */,
-					   InvalidOid /* oldRelfileNodeId */,
-					   false /* isTruncate */);
-	}
-
 	/*
 	 * Open the new relation and acquire exclusive lock on it.  This isn't
 	 * really necessary for locking out other backends (since they can't see
@@ -1228,6 +1218,17 @@ DefineRelation(CreateStmt *stmt, char relkind, Oid ownerId,
 	 * complaining about deadlock risks.
 	 */
 	rel = relation_open(relationId, AccessExclusiveLock);
+
+	if (IsYugaByteEnabled())
+	{
+		CheckIsYBSupportedRelationByKind(relkind);
+		YBCCreateTable(stmt, relname, relkind, descriptor,
+					   relationId,
+					   namespaceId, tablegroupId, colocation_id, tablespaceId,
+					   YbGetRelfileNodeId(rel),
+					   InvalidOid /* oldRelfileNodeId */,
+					   false /* isTruncate */);
+	}
 
 	/*
 	 * Now add any newly specified column default and generation expressions
@@ -5040,6 +5041,16 @@ ATPrepCmd(List **wqueue, Relation rel, AlterTableCmd *cmd,
 						(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
 						 errmsg("cannot change persistence setting twice")));
 			tab->chgPersistence = ATPrepChangePersistence(rel, false);
+
+			if (IsYugaByteEnabled())
+			{
+				/* UNLOGGED persistence is NO-OP in YB. */
+				tab->chgPersistence = false;
+				ereport(NOTICE,
+						(errmsg("unlogged option is currently ignored in YugabyteDB, "
+										"all non-temp relations will be logged")));
+			}
+
 			/* force rewrite if necessary; see comment in ATRewriteTables */
 			if (tab->chgPersistence)
 			{

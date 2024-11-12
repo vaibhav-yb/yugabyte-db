@@ -274,6 +274,7 @@ export const EditConnectionPoolModal: FC<ConnectionPoolProps> = ({
                     inputProps={{
                       'data-testid': 'EditConnectionPoolModal-OverridePorts'
                     }}
+                    disabled={isItKubernetesUniverse}
                   />
                 </Box>
                 {YSQL_PORTS_LIST.map((item) => (
@@ -314,6 +315,7 @@ export const EditConnectionPoolModal: FC<ConnectionPoolProps> = ({
                               inputProps={{
                                 'data-testid': `EditConnectionPoolModal-Input-${item.id}}`
                               }}
+                              trimWhitespace={false}
                             />
                           </Box>
                         </Box>

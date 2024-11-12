@@ -27,6 +27,8 @@
   {{ $startNow = .Site.Menus.start_now }}
 {{- end -}}
 
+{{- partial "topbar.html" . -}}
+
 <nav id="nav_bar" class="js-navbar-scroll navbar navbar-expand navbar-dark flex-column td-navbar">
   <div class="container-fluid top-nav">
     {{- if .Site.Params.ui.navbar_logo -}}
@@ -122,15 +124,6 @@
         </li>
       {{- end -}}
     </ul>
-    {{- if and .Site.Params.versions (not .Params.unversioned) -}}
-      <div class="header-version-dropdown dropdown-list">
-        <ul class="mt-2 mt-lg-0">
-          <li class="nav-item dropdown d-none d-lg-block">
-            {{- partial "navbar-version-selector.html" . -}}
-          </li>
-        </ul>
-      </div>
-    {{- end -}}
   </div>
 </nav>
 

@@ -15,10 +15,16 @@
 
 #include "yb/cdc/xcluster_types.h"
 #include "yb/client/table.h"
+#include "yb/client/xcluster_client.h"
 #include "yb/client/yb_table_name.h"
 #include "yb/common/common_types.pb.h"
 #include "yb/integration-tests/xcluster/xcluster_test_base.h"
 #include "yb/integration-tests/xcluster/xcluster_ysql_test_base.h"
+#include "yb/master/master.h"
+#include "yb/master/mini_master.h"
+#include "yb/tserver/mini_tablet_server.h"
+#include "yb/tserver/tablet_server.h"
+#include "yb/util/backoff_waiter.h"
 
 DECLARE_bool(enable_xcluster_api_v2);
 
@@ -50,6 +56,25 @@ Status XClusterDDLReplicationTestBase::SetUpClusters(bool is_colocated) {
       .is_colocated = is_colocated,
   };
   return XClusterYsqlTestBase::SetUpClusters(kDefaultParams);
+}
+
+Status XClusterDDLReplicationTestBase::CheckpointReplicationGroupWithoutRequiringNoBootstrapNeeded(
+    const std::vector<NamespaceName>& namespace_names) {
+  std::vector<NamespaceId> namespace_ids;
+  for (const auto& namespace_name : namespace_names) {
+    namespace_ids.push_back(VERIFY_RESULT(GetNamespaceId(producer_client(), namespace_name)));
+  }
+  RETURN_NOT_OK(client::XClusterClient(*producer_client())
+                .CreateOutboundReplicationGroup(
+                    kReplicationGroupId, namespace_ids, UseAutomaticMode()));
+
+  for (const auto& namespace_id : namespace_ids) {
+    auto bootstrap_required =
+        VERIFY_RESULT(IsXClusterBootstrapRequired(kReplicationGroupId, namespace_id));
+    LOG(INFO) << "bootstrap_required for namespace ID " << namespace_id << ": "
+              << bootstrap_required;
+  }
+  return Status::OK();
 }
 
 Result<std::shared_ptr<client::YBTable>> XClusterDDLReplicationTestBase::GetProducerTable(
@@ -90,6 +115,29 @@ void XClusterDDLReplicationTestBase::InsertRowsIntoProducerTableAndVerifyConsume
       [&](const std::string& table) { return table == producer_table_name.table_id(); }));
 
   ASSERT_OK(VerifyWrittenRecords(producer_table, consumer_table));
+}
+
+Status XClusterDDLReplicationTestBase::WaitForSafeTimeToAdvanceToNowWithoutDDLQueue() {
+  auto producer_master = VERIFY_RESULT(producer_cluster()->GetLeaderMiniMaster())->master();
+  HybridTime now = producer_master->clock()->Now();
+  for (auto ts : producer_cluster()->mini_tablet_servers()) {
+    now.MakeAtLeast(ts->server()->clock()->Now());
+  }
+  auto namespace_id = VERIFY_RESULT(GetNamespaceId(consumer_client()));
+
+  return WaitFor(
+      [&]() -> Result<bool> {
+        auto safe_time_result = consumer_client()->GetXClusterSafeTimeForNamespace(
+            namespace_id, master::XClusterSafeTimeFilter::DDL_QUEUE);
+        if (!safe_time_result) {
+          CHECK(safe_time_result.status().IsTryAgain());
+
+          return false;
+        }
+        auto safe_time = safe_time_result.get();
+        return safe_time && safe_time.is_valid() && safe_time > now;
+      },
+      propagation_timeout_, Format("Wait for safe_time to move above $0", now.ToDebugString()));
 }
 
 Status XClusterDDLReplicationTestBase::PrintDDLQueue(Cluster& cluster) {

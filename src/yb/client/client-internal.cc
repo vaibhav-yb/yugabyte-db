@@ -312,6 +312,7 @@ YB_CLIENT_SPECIALIZE_SIMPLE_EX(Replication, GetUDTypeMetadata);
 YB_CLIENT_SPECIALIZE_SIMPLE_EX(Replication, GetTableSchemaFromSysCatalog);
 YB_CLIENT_SPECIALIZE_SIMPLE_EX(Replication, UpdateConsumerOnProducerSplit);
 YB_CLIENT_SPECIALIZE_SIMPLE_EX(Replication, UpdateConsumerOnProducerMetadata);
+YB_CLIENT_SPECIALIZE_SIMPLE_EX(Replication, InsertPackedSchemaForXClusterTarget);
 YB_CLIENT_SPECIALIZE_SIMPLE_EX(Replication, GetXClusterSafeTime);
 YB_CLIENT_SPECIALIZE_SIMPLE_EX(Replication, BootstrapProducer);
 YB_CLIENT_SPECIALIZE_SIMPLE_EX(Replication, XClusterReportNewAutoFlagConfigVersion);
@@ -2616,7 +2617,7 @@ void YBClient::Data::SetMasterServerProxyAsync(CoarseTimePoint deadline,
         &Data::DoSetMasterServerProxy, this, deadline, skip_resolution, wait_for_leader_election);
     auto submit_status = threadpool_->SubmitFunc(functor);
     if (!submit_status.ok()) {
-      callback(submit_status);
+      LeaderMasterDetermined(submit_status, HostPort());
     }
   }
 }
@@ -3046,8 +3047,35 @@ void YBClient::Data::UpdateLatestObservedHybridTime(uint64_t hybrid_time) {
   latest_observed_hybrid_time_.StoreMax(hybrid_time);
 }
 
-void YBClient::Data::StartShutdown() {
+void YBClient::Data::Shutdown() {
   closing_.store(true, std::memory_order_release);
+
+  if (messenger_holder_) {
+    messenger_holder_->Shutdown();
+  }
+  if (threadpool_) {
+    threadpool_->Shutdown();
+    // Abort all in-progress rpcs using handle leader_master_rpc_.
+    rpc::RpcCommandPtr rpc_to_abort = nullptr;
+    {
+      std::lock_guard l(leader_master_lock_);
+      if (leader_master_rpc_ != rpcs_.InvalidHandle()) {
+        rpc_to_abort = *leader_master_rpc_;
+      }
+    }
+    if (rpc_to_abort) {
+      rpc_to_abort->Abort();
+    }
+    // The tasks submitted to the threadpool_ in SetMasterServerProxyAsync would expect the
+    // callbacks to be triggered at some point. Since threadpool_->Shutdown() destroys the
+    // enqueued (but not currently running) tasks, invoke the callbacks inline.
+    LeaderMasterDetermined(STATUS_FORMAT(ShutdownInProgress, "YBClient shutting down"), HostPort());
+  }
+
+  while (running_sync_requests_.load(std::memory_order_acquire)) {
+    YB_LOG_EVERY_N_SECS(INFO, 5) << "Waiting sync requests to finish";
+    std::this_thread::sleep_for(100ms);
+  }
 }
 
 bool YBClient::Data::IsMultiMaster() {
@@ -3075,13 +3103,6 @@ bool YBClient::Data::IsMultiMaster() {
   std::vector<Endpoint> addrs;
   status = host_ports[0].ResolveAddresses(&addrs);
   return status.ok() && (addrs.size() > 1);
-}
-
-void YBClient::Data::CompleteShutdown() {
-  while (running_sync_requests_.load(std::memory_order_acquire)) {
-    YB_LOG_EVERY_N_SECS(INFO, 5) << "Waiting sync requests to finish";
-    std::this_thread::sleep_for(100ms);
-  }
 }
 
 } // namespace client

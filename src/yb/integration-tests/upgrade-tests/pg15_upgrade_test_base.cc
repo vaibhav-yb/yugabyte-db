@@ -13,6 +13,7 @@
 
 #include "yb/integration-tests/upgrade-tests/pg15_upgrade_test_base.h"
 #include "yb/yql/pgwrapper/libpq_utils.h"
+#include "yb/util/env_util.h"
 
 namespace yb {
 
@@ -87,6 +88,43 @@ Status Pg15UpgradeTestBase::ExecuteStatements(const std::vector<std::string>& sq
   return Status::OK();
 }
 
+Status Pg15UpgradeTestBase::ExecuteStatementsInFile(const std::string& file_name) {
+  const auto sub_dir = "postgres_build/src/test/regress/sql";
+  const auto test_sql_dir = JoinPathSegments(env_util::GetRootDir(sub_dir), sub_dir);
+  const auto file_path = JoinPathSegments(test_sql_dir, file_name);
+  RETURN_NOT_OK(CreateConnToTs(0));
+  auto tserver = cluster_->tablet_server(0);
+  std::vector<std::string> args;
+  args.push_back(GetPgToolPath("ysqlsh"));
+  args.push_back("--host");
+  args.push_back(tserver->bind_host());
+  args.push_back("--port");
+  args.push_back(AsString(tserver->pgsql_rpc_port()));
+  args.push_back("-f");
+  args.push_back(file_path);
+  args.push_back("-v");
+  // YSQL regress test files often include statements that are expected to error out, so don't stop
+  // execution on error.
+  args.push_back("ON_ERROR_STOP=0");
+  std::string output, error;
+  auto status = Subprocess::Call(args, &output, &error);
+  if (!status.ok()) {
+    LOG(ERROR) << "Failed to execute statements in file " << file_name << ": "
+        << "output - " << output << ", error - " << error;
+    return status.CloneAndAppend(error);
+  }
+  LOG(INFO) << "Finished executing statements in file " << file_name;
+  return Status::OK();
+}
+
+Status Pg15UpgradeTestBase::ExecuteStatementsInFiles(
+    const std::vector<std::string>& file_names) {
+  for (const auto& file_name : file_names) {
+    RETURN_NOT_OK(ExecuteStatementsInFile(file_name));
+  }
+  return Status::OK();
+}
+
 Result<pgwrapper::PGConn> Pg15UpgradeTestBase::CreateConnToTs(size_t ts_id) {
   return cluster_->ConnectToDB("yugabyte", ts_id);
 }
@@ -96,7 +134,7 @@ Status Pg15UpgradeTestBase::ExecuteStatement(const std::string& sql_statement) {
 }
 
 Result<std::string> Pg15UpgradeTestBase::ExecuteViaYsqlshOnTs(
-    const std::string& sql_statement, size_t ts_id) {
+    const std::string& sql_statement, size_t ts_id, const std::string &db_name) {
   // tserver could have restarted recently. Create a connection which will wait till the pg process
   // is up.
   RETURN_NOT_OK(CreateConnToTs(ts_id));
@@ -104,6 +142,7 @@ Result<std::string> Pg15UpgradeTestBase::ExecuteViaYsqlshOnTs(
   auto tserver = cluster_->tablet_server(ts_id);
   std::vector<std::string> args;
   args.push_back(GetPgToolPath("ysqlsh"));
+  args.push_back(db_name);
   args.push_back("--host");
   args.push_back(tserver->bind_host());
   args.push_back("--port");
@@ -121,9 +160,10 @@ Result<std::string> Pg15UpgradeTestBase::ExecuteViaYsqlshOnTs(
   return output;
 }
 
-Result<std::string> Pg15UpgradeTestBase::ExecuteViaYsqlsh(const std::string& sql_statement) {
+Result<std::string> Pg15UpgradeTestBase::ExecuteViaYsqlsh(const std::string& sql_statement,
+                                                          const std::string &db_name) {
   auto node_index = RandomUniformInt<size_t>(0, cluster_->num_tablet_servers() - 1);
-  return ExecuteViaYsqlshOnTs(sql_statement, node_index);
+  return ExecuteViaYsqlshOnTs(sql_statement, node_index, db_name);
 }
 
 }  // namespace yb

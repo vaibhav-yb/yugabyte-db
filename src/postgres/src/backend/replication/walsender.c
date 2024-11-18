@@ -1086,7 +1086,7 @@ parseCreateReplSlotOptions(CreateReplicationSlotCmd *cmd,
 
 			reportErrorIfLsnTypeNotEnabled();
 
-			if (lsn_type_given || cmd->REPLICATION_KIND_LOGICAL)
+			if (lsn_type_given || cmd->kind != REPLICATION_KIND_LOGICAL)
 				ereport(ERROR,
 						(errcode(ERRCODE_SYNTAX_ERROR),
 						errmsg("conflicting or redundant lsn_type options")));

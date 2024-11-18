@@ -30,6 +30,7 @@
 #include "yb/master/xcluster/xcluster_outbound_replication_group.h"
 #include "yb/master/xcluster/xcluster_outbound_replication_group_tasks.h"
 #include "yb/master/xcluster/xcluster_status.h"
+#include "yb/master/ysql_sequence_util.h"
 
 #include "yb/tserver/pg_create_table.h"
 
@@ -40,7 +41,10 @@ DEFINE_RUNTIME_bool(enable_tablet_split_of_xcluster_bootstrapping_tables, false,
     "When set, it enables automatic tablet splitting for tables that are part of an "
     "xCluster replication setup and are currently being bootstrapped for xCluster.");
 
-DECLARE_bool(auto_add_new_index_to_bidirectional_xcluster);
+DEFINE_test_flag(
+    bool, simulate_EnsureSequenceUpdatesAreInWal_failure, false,
+    "Simulate failure during EnsureSequenceUpdatesAreInWal RPC.");
+
 DECLARE_int32(master_yb_client_default_timeout_ms);
 DECLARE_uint32(cdc_wal_retention_time_secs);
 DECLARE_bool(TEST_disable_cdc_state_insert_on_setup);
@@ -273,24 +277,29 @@ XClusterSourceManager::GetPostTabletCreateTasks(
     }
   }
 
-  if (FLAGS_auto_add_new_index_to_bidirectional_xcluster && table_info->is_index() &&
-      master_.xcluster_manager()->IsTableBiDirectionallyReplicated(
-          table_info->indexed_table_id())) {
-    DCHECK(tasks.empty()) << "BiDirectional table should not have any DB Scoped table tasks";
-    if (!tasks.empty()) {
-      // During a switch over we will have Bi-directional xCluster with DB scoped replication
-      // groups. But we do not expect to receive any DDLs at this time.
-      table_info->SetCreateTableErrorStatus(STATUS_FORMAT(
-          IllegalState,
-          "Index $0 created while its base table $1 is under bi-directional xCluster replication, "
-          "and has DB scoped replication groups",
-          table_info->id(), table_info->indexed_table_id()));
+  if (table_info->is_index() && !table_info->colocated()) {
+    auto indexed_table = catalog_manager_.GetTableById(table_info->indexed_table_id());
+    if (!indexed_table) {
+      table_info->SetCreateTableErrorStatus(indexed_table.status());
       return {};
     }
+    if (master_.xcluster_manager()->ShouldAutoAddIndexesToBiDirectionalXCluster(**indexed_table)) {
+      DCHECK(tasks.empty()) << "BiDirectional table should not have any DB Scoped table tasks";
+      if (!tasks.empty()) {
+        // During a switch over we will have Bi-directional xCluster with DB scoped replication
+        // groups. But we do not expect to receive any DDLs at this time.
+        table_info->SetCreateTableErrorStatus(STATUS_FORMAT(
+            IllegalState,
+            "Index $0 created while its base table $1 is under bi-directional xCluster "
+            "replication, and has DB scoped replication groups",
+            table_info->id(), table_info->indexed_table_id()));
+        return {};
+      }
 
-    tasks.emplace_back(std::make_shared<CreateXClusterStreamForBiDirectionalIndexTask>(
-        std::bind(&XClusterSourceManager::CreateNonTxnStreamForNewTable, this, _1, _2, _3),
-        catalog_manager_, *master_.messenger(), table_info, epoch));
+      tasks.emplace_back(std::make_shared<CreateXClusterStreamForBiDirectionalIndexTask>(
+          std::bind(&XClusterSourceManager::CreateNonTxnStreamForNewTable, this, _1, _2, _3),
+          catalog_manager_, *master_.messenger(), table_info, epoch));
+    }
   }
 
   return tasks;
@@ -391,6 +400,26 @@ Result<std::optional<bool>> XClusterSourceManager::IsBootstrapRequired(
       VERIFY_RESULT(GetOutboundReplicationGroup(replication_group_id));
 
   return outbound_replication_group->IsBootstrapRequired(namespace_id);
+}
+
+Status XClusterSourceManager::EnsureSequenceUpdatesAreInWal(
+    const xcluster::ReplicationGroupId& replication_group_id,
+    const std::vector<NamespaceId>& namespace_ids) const {
+  if (FLAGS_TEST_simulate_EnsureSequenceUpdatesAreInWal_failure) {
+    return STATUS(
+        RuntimeError,
+        "EnsureSequenceUpdatesAreInWal call failed due to test flag "
+        "simulate_EnsureSequenceUpdatesAreInWal_failure");
+  }
+  auto client = master_.client_future().get();
+  for (const auto& namespace_id : namespace_ids) {
+    uint32_t db_oid = VERIFY_RESULT(GetPgsqlDatabaseOid(namespace_id));
+    auto sequence_info = VERIFY_RESULT(ScanSequencesDataTable(*client, db_oid));
+    VLOG(1) << "Found " << sequence_info.size() << " sequences in namespace " << namespace_id;
+    RETURN_NOT_OK(::yb::master::EnsureSequenceUpdatesAreInWal(*client, db_oid, sequence_info));
+    VLOG(1) << "Successfully ensured new updates for their values in the WALs";
+  }
+  return Status::OK();
 }
 
 Result<std::optional<NamespaceCheckpointInfo>> XClusterSourceManager::GetXClusterStreams(
@@ -755,7 +784,7 @@ Status XClusterSourceManager::DoProcessHiddenTablets() {
                                        const TableId& table_id,
                                        const TabletId& tablet_id) -> Result<const TableHideInfo&> {
     if (table_hide_infos.contains(table_id)) {
-      return &table_hide_infos[table_id];
+      return table_hide_infos[table_id];
     }
 
     TableHideInfo table_hide_info;
@@ -800,7 +829,7 @@ Status XClusterSourceManager::DoProcessHiddenTablets() {
 
     table_hide_infos[table_id] = std::move(table_hide_info);
 
-    return &table_hide_infos[table_id];
+    return table_hide_infos[table_id];
   };
 
   for (auto& [tablet_id, hidden_tablet] : hidden_tablets) {

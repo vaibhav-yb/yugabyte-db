@@ -18,55 +18,80 @@
 #include "yb/tablet/tablet.h"
 #include "yb/tablet/tablet_peer.h"
 
+#include "yb/util/backoff_waiter.h"
+
+DECLARE_bool(TEST_skip_process_apply);
+DECLARE_bool(ysql_enable_packed_row);
+
 namespace yb::pgwrapper {
 
-class PgVectorIndexTest : public PgMiniTestBase {
+class PgVectorIndexTest : public PgMiniTestBase, public testing::WithParamInterface<bool> {
  protected:
-  void TestSimple(bool colocated);
+  void SetUp() override {
+    PgMiniTestBase::SetUp();
+  }
+
+  void TestSimple();
 };
 
-void PgVectorIndexTest::TestSimple(bool colocated) {
+void PgVectorIndexTest::TestSimple() {
+  auto colocated = GetParam();
   auto conn = ASSERT_RESULT(Connect());
   std::string create_suffix;
   if (colocated) {
     create_suffix = " WITH (COLOCATED = 1)";
     ASSERT_OK(conn.ExecuteFormat("CREATE DATABASE colocated_db COLOCATION = true"));
     conn = ASSERT_RESULT(ConnectToDB("colocated_db"));
+  } else {
+    // TODO(vector_index) Remove it when multi-tablet vector indexes will be supported
+    create_suffix = " SPLIT INTO 1 TABLETS";
   }
   ASSERT_OK(conn.Execute("CREATE EXTENSION vector VERSION '0.4.4-yb-1.2'"));
   ASSERT_OK(conn.Execute(
       "CREATE TABLE test (id bigserial PRIMARY KEY, embedding vector(3))" + create_suffix));
 
-  ASSERT_OK(conn.Execute("CREATE INDEX ON test USING ybdummyann (embedding vector_l2_ops)"));
+  // TODO(vector_index) Support colocated tables.
+  ASSERT_OK(conn.ExecuteFormat(
+      "CREATE INDEX ON test USING $0 (embedding vector_l2_ops)",
+      colocated ? "ybdummyann" : "ybhnsw"));
 
   size_t num_found_peers = 0;
-  auto peers = ListTabletPeers(cluster_.get(), ListPeersFilter::kAll);
-  for (const auto& peer : peers) {
-    auto tablet = ASSERT_RESULT(peer->shared_tablet_safe());
-    if (tablet->table_type() != TableType::PGSQL_TABLE_TYPE) {
-      continue;
-    }
-    auto& metadata = *tablet->metadata();
-    auto tables = metadata.GetAllColocatedTables();
-    tablet::TableInfoPtr main_table_info;
-    tablet::TableInfoPtr index_table_info;
-    for (const auto& table_id : tables) {
-      auto table_info = ASSERT_RESULT(metadata.GetTableInfo(table_id));
-      LOG(INFO) << "Table: " << table_info->ToString();
-      if (table_info->table_name == "test") {
-        main_table_info = table_info;
-      } else if (table_info->index_info) {
-        index_table_info = table_info;
+  auto check_tablets = [this, &num_found_peers]() -> Result<bool> {
+    num_found_peers = 0;
+    auto peers = ListTabletPeers(cluster_.get(), ListPeersFilter::kAll);
+    for (const auto& peer : peers) {
+      auto tablet = VERIFY_RESULT(peer->shared_tablet_safe());
+      if (tablet->table_type() != TableType::PGSQL_TABLE_TYPE) {
+        continue;
       }
+      auto& metadata = *tablet->metadata();
+      auto tables = metadata.GetAllColocatedTables();
+      tablet::TableInfoPtr main_table_info;
+      tablet::TableInfoPtr index_table_info;
+      for (const auto& table_id : tables) {
+        auto table_info = VERIFY_RESULT(metadata.GetTableInfo(table_id));
+        LOG(INFO) << "Table: " << table_info->ToString();
+        if (table_info->table_name == "test") {
+          main_table_info = table_info;
+        } else if (table_info->index_info) {
+          index_table_info = table_info;
+        }
+      }
+      if (!main_table_info) {
+        continue;
+      }
+      ++num_found_peers;
+      if (!index_table_info) {
+        return false;
+      }
+      SCHECK_EQ(
+        index_table_info->index_info->indexed_table_id(), main_table_info->table_id,
+        IllegalState, "Wrong indexed table");
     }
-    if (!main_table_info) {
-      continue;
-    }
-    ++num_found_peers;
-    ASSERT_ONLY_NOTNULL(index_table_info);
-    ASSERT_EQ(index_table_info->index_info->indexed_table_id(), main_table_info->table_id);
-  }
+    return true;
+  };
 
+  ASSERT_OK(WaitFor(check_tablets, 10s * kTimeMultiplier, "Index created on all tablets"));
   ASSERT_NE(num_found_peers, 0);
 
   ASSERT_OK(conn.Execute("INSERT INTO test VALUES (1, '[1.0, 0.5, 0.25]')"));
@@ -77,12 +102,14 @@ void PgVectorIndexTest::TestSimple(bool colocated) {
   ASSERT_EQ(result, "1, [1, 0.5, 0.25]; 2, [0.125, 0.375, 0.25]");
 }
 
-TEST_F(PgVectorIndexTest, Simple) {
-  TestSimple(/* colocated= */ false);
+TEST_P(PgVectorIndexTest, Simple) {
+  TestSimple();
 }
 
-TEST_F(PgVectorIndexTest, SimpleColocated) {
-  TestSimple(/* colocated= */ true);
+std::string ColocatedToString(const testing::TestParamInfo<bool>& param_info) {
+  return param_info.param ? "Colocated" : "Distributed";
 }
+
+INSTANTIATE_TEST_SUITE_P(, PgVectorIndexTest, ::testing::Bool(), ColocatedToString);
 
 }  // namespace yb::pgwrapper

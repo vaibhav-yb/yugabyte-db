@@ -3363,6 +3363,7 @@
       "type" : "object"
     },
     "CertificateParams" : {
+      "description" : "Certificate Params is used to validate constraints for the custom certificate Data",
       "properties" : {
         "certContent" : {
           "type" : "string"
@@ -3395,7 +3396,7 @@
           "type" : "string"
         }
       },
-      "required" : [ "certContent", "certExpiry", "certStart", "certType", "customCertInfo", "customServerCertData", "hcVaultCertParams", "keyContent", "label" ],
+      "required" : [ "certContent", "certExpiry", "certStart", "certType", "label" ],
       "type" : "object"
     },
     "CertsRotateParams" : {
@@ -4021,7 +4022,7 @@
         },
         "tags" : {
           "items" : {
-            "enum" : [ "PUBLIC", "INTERNAL", "BETA", "FEATURE_FLAG" ],
+            "enum" : [ "PUBLIC", "INTERNAL", "FEATURE_FLAG" ],
             "type" : "string"
           },
           "type" : "array"
@@ -19388,6 +19389,56 @@
         } ],
         "summary" : "Delete a certificate",
         "tags" : [ "Certificate Info" ]
+      },
+      "post" : {
+        "description" : "",
+        "operationId" : "getClientCert",
+        "parameters" : [ {
+          "format" : "uuid",
+          "in" : "path",
+          "name" : "cUUID",
+          "required" : true,
+          "type" : "string"
+        }, {
+          "format" : "uuid",
+          "in" : "path",
+          "name" : "rUUID",
+          "required" : true,
+          "type" : "string"
+        }, {
+          "in" : "query",
+          "name" : "request",
+          "required" : false
+        }, {
+          "description" : "post certificate info",
+          "in" : "body",
+          "name" : "certificate",
+          "required" : true,
+          "schema" : {
+            "$ref" : "#/definitions/ClientCertParams"
+          }
+        } ],
+        "responses" : {
+          "200" : {
+            "description" : "successful operation",
+            "schema" : {
+              "$ref" : "#/definitions/CertificateDetails"
+            }
+          }
+        },
+        "responsesObject" : {
+          "200" : {
+            "description" : "successful operation",
+            "schema" : {
+              "$ref" : "#/definitions/CertificateDetails"
+            }
+          }
+        },
+        "security" : [ {
+          "apiKeyAuth" : [ ]
+        } ],
+        "summary" : "Add a client certificate",
+        "tags" : [ "Certificate Info" ]
       }
     },
     "/api/v1/customers/{cUUID}/certificates/{rUUID}/download" : {
@@ -30568,7 +30619,7 @@
           "200" : {
             "description" : "successful operation",
             "schema" : {
-              "$ref" : "#/definitions/YBPSuccess"
+              "$ref" : "#/definitions/YBPCreateSuccess"
             }
           }
         },
@@ -30576,7 +30627,7 @@
           "200" : {
             "description" : "successful operation",
             "schema" : {
-              "$ref" : "#/definitions/YBPSuccess"
+              "$ref" : "#/definitions/YBPCreateSuccess"
             }
           }
         },
@@ -30647,13 +30698,19 @@
           "required" : false
         } ],
         "responses" : {
-          "default" : {
-            "description" : "successful operation"
+          "200" : {
+            "description" : "successful operation",
+            "schema" : {
+              "$ref" : "#/definitions/YBPCreateSuccess"
+            }
           }
         },
         "responsesObject" : {
-          "default" : {
-            "description" : "successful operation"
+          "200" : {
+            "description" : "successful operation",
+            "schema" : {
+              "$ref" : "#/definitions/YBPCreateSuccess"
+            }
           }
         },
         "security" : [ {

@@ -144,7 +144,6 @@ DECLARE_bool(yb_enable_cdc_consistent_snapshot_streams);
 DECLARE_bool(ysql_yb_enable_replica_identity);
 DECLARE_uint32(cdc_wal_retention_time_secs);
 DECLARE_bool(cdcsdk_enable_dynamic_table_addition_with_table_cleanup);
-DECLARE_bool(ysql_yb_allow_replication_slot_lsn_types);
 
 
 

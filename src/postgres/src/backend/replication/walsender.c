@@ -1030,6 +1030,7 @@ parseCreateReplSlotOptions(CreateReplicationSlotCmd *cmd,
 	bool		snapshot_action_given = false;
 	bool		reserve_wal_given = false;
 	bool		two_phase_given = false;
+	bool		lsn_type_given = false;
 
 	/* Parse options */
 	foreach(lc, cmd->options)
@@ -1079,14 +1080,24 @@ parseCreateReplSlotOptions(CreateReplicationSlotCmd *cmd,
 			two_phase_given = true;
 			*two_phase = defGetBoolean(defel);
 		}
-		else if (strcmp(defel->defname, "HYBRID_TIME") == 0)
+		else if (strcmp(defel->defname, "lsn_type") == 0)
 		{
+			char	   *action;
+
 			reportErrorIfLsnTypeNotEnabled();
-			*lsn_type = CRS_HYBRID_TIME;
-		} else if (strcmp(defel->defname, "SEQUENCE") == 0)
-		{
-			reportErrorIfLsnTypeNotEnabled();
-			*lsn_type = CRS_SEQUENCE;
+
+			if (lsn_type_given || cmd->REPLICATION_KIND_LOGICAL)
+				ereport(ERROR,
+						(errcode(ERRCODE_SYNTAX_ERROR),
+						errmsg("conflicting or redundant lsn_type options")));
+
+			action = defGetString(defel);
+			lsn_type_given = true;
+
+			if (strcmp(action, "SEQUENCE") == 0)
+				*lsn_type = CRS_SEQUENCE;
+			else if (strcmp(action, "HYBRID_TIME") == 0)
+				*lsn_type = CRS_HYBRID_TIME;
 		}
 		else
 			elog(ERROR, "unrecognized option: %s", defel->defname);

@@ -22,7 +22,6 @@
 #include "yb/common/entity_ids.h"
 #include "yb/common/pg_system_attr.h"
 
-#include "yb/util/atomic.h"
 #include "yb/util/flags.h"
 #include "yb/util/status_format.h"
 #include "yb/util/status_log.h"

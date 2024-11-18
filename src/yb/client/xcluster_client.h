@@ -105,6 +105,10 @@ class XClusterClient {
       CoarseTimePoint deadline, const xcluster::ReplicationGroupId& replication_group_id,
       const NamespaceId& namespace_id, IsXClusterBootstrapRequiredCallback callback);
 
+  Status EnsureSequenceUpdatesAreInWal(
+      const xcluster::ReplicationGroupId& replication_group_id,
+      const std::vector<NamespaceId>& namespace_ids, CoarseTimePoint deadline);
+
   // Count of table_names and pg_schema_names must match. If no table_names are provided then all
   // tables of the namespace are returned.
   Status GetXClusterStreams(
@@ -240,6 +244,13 @@ class XClusterClient {
       const xrepl::StreamId& stream_id, MicrosecondsInt64 target_time, CoarseTimePoint deadline);
 
   Result<std::vector<xrepl::StreamId>> GetXClusterStreams(const TableId& table_id);
+
+  // Updates the schema version of the table by 2, and then inserts the packed schema into the
+  // historical set of schemas for all tablets.
+  // current_schema_version is passed to avoid sending repeated alter table requests.
+  Status InsertPackedSchemaForXClusterTarget(
+      const TableId& table_id, const SchemaPB& packed_schema_to_insert,
+      uint32_t current_schema_version);
 
  private:
   CoarseTimePoint GetDeadline() const;

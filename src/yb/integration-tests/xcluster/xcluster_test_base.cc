@@ -225,7 +225,9 @@ Status XClusterTestBase::CreateDatabase(
 }
 
 Status XClusterTestBase::DropDatabase(Cluster& cluster, const std::string& namespace_name) {
-  auto conn = VERIFY_RESULT(cluster.Connect());
+  // Connect to template1 so we can delete yugabyte database if desired (you cannot DROP a database
+  // you are connected to).
+  auto conn = VERIFY_RESULT(cluster.ConnectToDB("template1"));
   return conn.ExecuteFormat("DROP DATABASE $0", namespace_name);
 }
 
@@ -901,28 +903,35 @@ Status XClusterTestBase::WaitForSafeTime(
           return safe_time && safe_time->is_valid() && *safe_time > min_safe_time;
         },
         propagation_timeout_,
-        Format("Wait for safe_time to move above $0", min_safe_time.ToDebugString())));
+        Format(
+            "Wait for safe_time to move above $0 for namespace ID $1",
+            min_safe_time.ToDebugString(), namespace_id)));
   }
 
   return Status::OK();
 }
 
-Status XClusterTestBase::WaitForSafeTimeToAdvanceToNow() {
+Status XClusterTestBase::WaitForSafeTimeToAdvanceToNow(std::vector<NamespaceName> namespace_names) {
+  if (namespace_names.empty()) {
+    namespace_names = {namespace_name};
+  }
   auto producer_master = VERIFY_RESULT(producer_cluster()->GetLeaderMiniMaster())->master();
   HybridTime now = producer_master->clock()->Now();
   for (auto ts : producer_cluster()->mini_tablet_servers()) {
     now.MakeAtLeast(ts->server()->clock()->Now());
   }
 
-  master::GetNamespaceInfoResponsePB resp;
-  RETURN_NOT_OK(consumer_client()->GetNamespaceInfo(
-      std::string() /* namespace_id */, namespace_name, YQL_DATABASE_PGSQL, &resp));
-  if (resp.has_error()) {
-    return StatusFromPB(resp.error().status());
+  for (const auto& name : namespace_names) {
+    master::GetNamespaceInfoResponsePB resp;
+    RETURN_NOT_OK(consumer_client()->GetNamespaceInfo(
+        std::string() /* namespace_id */, name, YQL_DATABASE_PGSQL, &resp));
+    if (resp.has_error()) {
+      return StatusFromPB(resp.error().status());
+    }
+    auto namespace_id = resp.namespace_().id();
+    RETURN_NOT_OK(WaitForSafeTime(namespace_id, now));
   }
-  auto namespace_id = resp.namespace_().id();
-
-  return WaitForSafeTime(namespace_id, now);
+  return Status::OK();
 }
 
 Status XClusterTestBase::PauseResumeXClusterProducerStreams(

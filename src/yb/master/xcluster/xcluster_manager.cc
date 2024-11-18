@@ -20,6 +20,7 @@
 #include "yb/master/catalog_entity_info.h"
 #include "yb/master/catalog_manager.h"
 #include "yb/master/master_cluster.pb.h"
+#include "yb/master/xcluster/master_xcluster_util.h"
 #include "yb/master/xcluster/xcluster_status.h"
 #include "yb/master/xcluster/xcluster_universe_replication_setup_helper.h"
 #include "yb/util/backoff_waiter.h"
@@ -58,7 +59,13 @@ DEFINE_test_flag(bool, force_automatic_ddl_replication_mode, false,
     "Make XClusterCreateOutboundReplicationGroup always use automatic instead of semi-automatic "
     "xCluster replication mode.");
 
-DEFINE_RUNTIME_bool(auto_add_new_index_to_bidirectional_xcluster, false,
+DEFINE_RUNTIME_AUTO_bool(ysql_auto_add_new_index_to_bidirectional_xcluster_infra, kExternal,
+    false, true,
+    "Determines if the system supports the capability of automatically adding ysql index to "
+    "bi-directional xCluster. NOTE: Do not change this flag directly. If you want to disable the "
+    "feature, use ysql_auto_add_new_index_to_bidirectional_xcluster instead.");
+
+DEFINE_RUNTIME_bool(ysql_auto_add_new_index_to_bidirectional_xcluster, true,
     "If the indexed table is part of a bi-directional xCluster setup, then automatically add new "
     "indexes for this table to replication. This flag must be set on both universes, and the index "
     "must be created concurrently on both universes.");
@@ -81,6 +88,11 @@ Status ValidateUniverseUUID(const RequestType& req, CatalogManager& catalog_mana
   }
 
   return Status::OK();
+}
+
+bool IsYsqlAutoAddNewIndexToBiDirectionalXClusterEnabled() {
+  return FLAGS_ysql_auto_add_new_index_to_bidirectional_xcluster_infra &&
+         FLAGS_ysql_auto_add_new_index_to_bidirectional_xcluster;
 }
 
 }  // namespace
@@ -386,6 +398,18 @@ Status XClusterManager::IsXClusterBootstrapRequired(
   resp->set_initial_bootstrap_required(bootstrap_required.value());
 
   return Status::OK();
+}
+
+Status XClusterManager::XClusterEnsureSequenceUpdatesAreInWal(
+    const XClusterEnsureSequenceUpdatesAreInWalRequestPB* req,
+    XClusterEnsureSequenceUpdatesAreInWalResponsePB* resp, rpc::RpcContext* rpc,
+    const LeaderEpoch& epoch) {
+  LOG_FUNC_AND_RPC;
+  SCHECK_PB_FIELDS_NOT_EMPTY(*req, replication_group_id, namespace_ids);
+
+  std::vector<NamespaceId> namespace_ids{req->namespace_ids().begin(), req->namespace_ids().end()};
+  return EnsureSequenceUpdatesAreInWal(
+      xcluster::ReplicationGroupId(req->replication_group_id()), namespace_ids);
 }
 
 Status XClusterManager::GetXClusterStreams(
@@ -731,15 +755,25 @@ bool XClusterManager::IsTableBiDirectionallyReplicated(const TableId& table_id) 
          XClusterTargetManager::IsTableReplicated(table_id);
 }
 
+bool XClusterManager::ShouldAutoAddIndexesToBiDirectionalXCluster(
+    const TableInfo& indexed_table) const {
+  if (!IsYsqlAutoAddNewIndexToBiDirectionalXClusterEnabled() ||
+      indexed_table.GetTableType() != PGSQL_TABLE_TYPE) {
+    return false;
+  }
+
+  auto table_id = indexed_table.id();
+  if (indexed_table.colocated()) {
+    table_id = indexed_table.LockForRead()->pb.parent_table_id();
+  }
+
+  return IsTableBiDirectionallyReplicated(table_id);
+}
+
 Status XClusterManager::HandleTabletSplit(
     const TableId& consumer_table_id, const SplitTabletIds& split_tablet_ids,
     const LeaderEpoch& epoch) {
   return XClusterTargetManager::HandleTabletSplit(consumer_table_id, split_tablet_ids, epoch);
-}
-
-Status XClusterManager::ValidateNewSchema(
-    const TableInfo& table_info, const Schema& consumer_schema) const {
-  return XClusterTargetManager::ValidateNewSchema(table_info, consumer_schema);
 }
 
 Status XClusterManager::ValidateSplitCandidateTable(const TableId& table_id) const {
@@ -753,12 +787,6 @@ Status XClusterManager::ValidateSplitCandidateTable(const TableId& table_id) con
   RETURN_NOT_OK(XClusterSourceManager::ValidateSplitCandidateTable(table_id));
 
   return Status::OK();
-}
-
-Status XClusterManager::HandleTabletSchemaVersionReport(
-    const TableInfo& table_info, SchemaVersion consumer_schema_version, const LeaderEpoch& epoch) {
-  return XClusterTargetManager::ResumeStreamsAfterNewSchema(
-      table_info, consumer_schema_version, epoch);
 }
 
 Status XClusterManager::SetupUniverseReplication(
@@ -870,6 +898,17 @@ Status XClusterManager::AddTableToReplicationGroup(
 
   return XClusterTargetManager::AddTableToReplicationGroup(
       replication_group_id, source_table_id, bootstrap_id, target_table_id, epoch);
+}
+
+// Inserts the sent schema into the historical packing schema for the target table.
+Status XClusterManager::InsertPackedSchemaForXClusterTarget(
+    const InsertPackedSchemaForXClusterTargetRequestPB* req,
+    InsertPackedSchemaForXClusterTargetResponsePB* resp, rpc::RpcContext* rpc,
+    const LeaderEpoch& epoch) {
+  LOG_FUNC_AND_RPC;
+  SCHECK_PB_FIELDS_NOT_EMPTY(*req, table_id);
+  return XClusterTargetManager::InsertPackedSchemaForXClusterTarget(
+      req->table_id(), req->packed_schema(), req->current_schema_version(), epoch);
 }
 
 Status XClusterManager::RegisterMonitoredTask(server::MonitoredTaskPtr task) {

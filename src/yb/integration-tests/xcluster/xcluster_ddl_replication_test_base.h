@@ -14,6 +14,7 @@
 #pragma once
 
 #include "yb/integration-tests/xcluster/xcluster_ysql_test_base.h"
+#include "yb/tools/tools_test_utils.h"
 
 namespace yb {
 
@@ -29,7 +30,7 @@ class XClusterDDLReplicationTestBase : public XClusterYsqlTestBase {
     return true;
   }
 
-  Status SetUpClusters(bool is_colocated = false);
+  Status SetUpClusters(bool is_colocated = false, bool start_yb_controller_servers = false);
 
   Status EnableDDLReplicationExtension();
 
@@ -37,6 +38,21 @@ class XClusterDDLReplicationTestBase : public XClusterYsqlTestBase {
       const xcluster::ReplicationGroupId& replication_group_id = kReplicationGroupId) override {
     return XClusterYsqlTestBase::CheckpointReplicationGroup(replication_group_id);
   }
+
+  // Unlike the previous method, this one does not fail if bootstrap is required.
+  Status CheckpointReplicationGroupOnNamespaces(const std::vector<NamespaceName>& namespace_names);
+
+  // A empty list for namespace_names (the default) means just the namespace namespace_name.
+  // Saves backups in TmpDir directories.
+  Status BackupFromProducer(std::vector<NamespaceName> namespace_names = {});
+
+  // A empty list for namespace_names (the default) means just the namespace namespace_name.
+  // Restores backups saved by BackupFromProducer.
+  Status RestoreToConsumer(std::vector<NamespaceName> namespace_names = {});
+
+  Status RunBackupCommand(const std::vector<std::string>& args, MiniClusterBase* cluster);
+
+  std::string GetTempDir(const std::string& subdir) { return tmp_dir_ / subdir; }
 
   Result<std::shared_ptr<client::YBTable>> GetProducerTable(
       const client::YBTableName& producer_table_name);
@@ -46,7 +62,12 @@ class XClusterDDLReplicationTestBase : public XClusterYsqlTestBase {
 
   void InsertRowsIntoProducerTableAndVerifyConsumer(const client::YBTableName& producer_table_name);
 
+  Status WaitForSafeTimeToAdvanceToNowWithoutDDLQueue();
+
   Status PrintDDLQueue(Cluster& cluster);
+
+ private:
+  tools::TmpDirProvider tmp_dir_;
 };
 
 }  // namespace yb

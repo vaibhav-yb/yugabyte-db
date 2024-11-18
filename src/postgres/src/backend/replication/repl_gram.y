@@ -243,13 +243,13 @@ create_slot_legacy_opt:
 
 			| K_YB_SEQUENCE
 				{
-				  $$ = makeDefElem("SEQUENCE",
-								   (Node *)makeInteger(false), -1);
+				  $$ = makeDefElem("lsn_type",
+								   (Node *) makeString("SEQUENCE"), -1);
 				}
 			| K_YB_HYBRID_TIME
 				{
-				  $$ = makeDefElem("HYBRID_TIME",
-								   (Node *)makeInteger(true), -1);
+				  $$ = makeDefElem("lsn_type",
+								   (Node *) makeString("HYBRID_TIME"), -1);
 				}
 			;
 
@@ -427,6 +427,8 @@ ident_or_keyword:
 			| K_EXPORT_SNAPSHOT				{ $$ = "export_snapshot"; }
 			| K_NOEXPORT_SNAPSHOT			{ $$ = "noexport_snapshot"; }
 			| K_USE_SNAPSHOT				{ $$ = "use_snapshot"; }
+			| K_YB_SEQUENCE					{ $$ = "sequence"; }
+			| K_YB_HYBRID_TIME				{ $$ = "hybrid_time"; }
 		;
 
 %%

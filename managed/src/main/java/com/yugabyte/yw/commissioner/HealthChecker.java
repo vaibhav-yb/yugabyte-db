@@ -750,12 +750,10 @@ public class HealthChecker {
           nodeInfo.setSslProtocol(tserverGflags.get("ssl_protocols"));
         }
         if (nodeInfo.enableYSQL && nodeDetails.isYsqlServer) {
-          nodeInfo.setYsqlPort(
-              params.universe.getUniverseDetails().communicationPorts.ysqlServerRpcPort);
+          nodeInfo.setYsqlPort(nodeDetails.ysqlServerRpcPort);
           nodeInfo.setYsqlServerHttpPort(nodeDetails.ysqlServerHttpPort);
           if (nodeInfo.enableConnectionPooling) {
-            nodeInfo.setInternalYsqlPort(
-                params.universe.getUniverseDetails().communicationPorts.internalYsqlServerRpcPort);
+            nodeInfo.setInternalYsqlPort(nodeDetails.internalYsqlServerRpcPort);
           }
         }
         if (nodeInfo.enableYCQL && nodeDetails.isYqlServer) {
@@ -764,8 +762,9 @@ public class HealthChecker {
         if (nodeInfo.enableYEDIS && nodeDetails.isRedisServer) {
           nodeInfo.setRedisPort(nodeDetails.redisServerRpcPort);
         }
-        if (!provider.getCode().equals(CloudType.onprem.toString())
-            && !provider.getCode().equals(CloudType.kubernetes.toString())) {
+
+        // Skip clock check for k8s.
+        if (!provider.getCode().equals(CloudType.kubernetes.toString())) {
           nodeInfo.setCheckClock(true);
         }
         // Clock drift config values. Clock drift health checks are only run for non-k8s universes

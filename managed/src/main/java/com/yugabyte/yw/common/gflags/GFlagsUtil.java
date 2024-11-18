@@ -488,6 +488,7 @@ public class GFlagsUtil {
     ybcFlags.put("ysqlsh", getYbHomeDir(providerUUID) + YSQLSH_PATH);
     ybcFlags.put("ycqlsh", getYbHomeDir(providerUUID) + YCQLSH_PATH);
     ybcFlags.put("log_filename", YBC_LOG_FILENAME);
+    ybcFlags.put("log_utc_time", "true");
 
     if (taskParam.enableNodeToNodeEncrypt) {
       ybcFlags.put(CERT_NODE_FILENAME, node.cloudInfo.private_ip);
@@ -554,6 +555,7 @@ public class GFlagsUtil {
     ybcFlags.put("ysqlsh", ybHomeDir + YSQLSH_PATH);
     ybcFlags.put("ycqlsh", ybHomeDir + YCQLSH_PATH);
     ybcFlags.put("log_filename", YBC_LOG_FILENAME);
+    ybcFlags.put("log_utc_time", "true");
 
     if (MapUtils.isNotEmpty(userIntent.ybcFlags)) {
       ybcFlags.putAll(userIntent.ybcFlags);
@@ -652,16 +654,13 @@ public class GFlagsUtil {
     // Add timestamp_history_retention_sec gflag if required.
     Duration timestampHistoryRetentionForPITR =
         Schedule.getMaxBackupIntervalInUniverseForPITRestore(
-            universe.getUniverseUUID(), true /* includeIntermediate */);
+            universe.getUniverseUUID(),
+            true /* includeIntermediate */,
+            null /* excludeScheduleUUID */);
     if (timestampHistoryRetentionForPITR.toSeconds() > 0L) {
       gflags.put(
           TIMESTAMP_HISTORY_RETENTION_INTERVAL_SEC,
           Long.toString(timestampHistoryRetentionForPITR.toSeconds() + historyRetentionBufferSecs));
-    }
-    if (taskParam.ysqlMajorVersionUpgradeState != null
-        && !taskParam.ysqlMajorVersionUpgradeState.equals(YsqlMajorVersionUpgradeState.FINALIZE)) {
-      gflags.put("ysql_enable_db_catalog_version_mode", "false");
-      gflags.put("TEST_online_pg11_to_pg15_upgrade", "true");
     }
     return gflags;
   }
@@ -778,9 +777,14 @@ public class GFlagsUtil {
     return gflags;
   }
 
-  private static String getYsqlPgConfCsv(AnsibleConfigureServers.Params taskParams) {
-    List<String> ysqlPgConfCsvEntries = new ArrayList<>();
+  public static String getYsqlPgConfCsv(AnsibleConfigureServers.Params taskParams) {
     AuditLogConfig auditLogConfig = taskParams.auditLogConfig;
+    return getYsqlPgConfCsv(auditLogConfig, taskParams.ysqlMajorVersionUpgradeState);
+  }
+
+  public static String getYsqlPgConfCsv(
+      AuditLogConfig auditLogConfig, YsqlMajorVersionUpgradeState ysqlMajorVersionUpgradeState) {
+    List<String> ysqlPgConfCsvEntries = new ArrayList<>();
     if (auditLogConfig != null) {
       if (auditLogConfig.getYsqlAuditConfig() != null
           && auditLogConfig.getYsqlAuditConfig().isEnabled()) {
@@ -817,8 +821,8 @@ public class GFlagsUtil {
                 "pgaudit.log_statement_once", ysqlAuditConfig.isLogStatementOnce()));
       }
     }
-    if (taskParams.ysqlMajorVersionUpgradeState != null
-        && !taskParams.ysqlMajorVersionUpgradeState.equals(YsqlMajorVersionUpgradeState.FINALIZE)) {
+    if (ysqlMajorVersionUpgradeState != null
+        && !ysqlMajorVersionUpgradeState.equals(YsqlMajorVersionUpgradeState.FINALIZE)) {
       ysqlPgConfCsvEntries.add("yb_enable_expression_pushdown=false");
     }
     return String.join(",", ysqlPgConfCsvEntries);
@@ -1019,11 +1023,6 @@ public class GFlagsUtil {
       // addresses are set by mistake. Once the master joins an existing cluster, this is ignored.
       gflags.put(MASTER_JOIN_EXISTING_UNIVERSE, "true");
       gflags.merge(UNDEFOK, MASTER_JOIN_EXISTING_UNIVERSE, (v1, v2) -> mergeCSVs(v1, v2, false));
-    }
-    if (taskParam.ysqlMajorVersionUpgradeState != null
-        && !taskParam.ysqlMajorVersionUpgradeState.equals(YsqlMajorVersionUpgradeState.FINALIZE)) {
-      gflags.put("ysql_enable_db_catalog_version_mode", "false");
-      gflags.put("TEST_online_pg11_to_pg15_upgrade", "true");
     }
     return gflags;
   }

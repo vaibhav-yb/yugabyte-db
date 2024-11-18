@@ -38,7 +38,7 @@ The YugabyteDB Helm chart has been tested with the following software versions:
 - Kubernetes 1.20 or later with nodes such that a total of 12 CPU cores and 18 GB RAM can be allocated to YugabyteDB. This can be three nodes with 4 CPU core and 6 GB RAM allocated to YugabyteDB.
 - Helm 3.4 or later.
 - YugabyteDB Docker image (yugabytedb/yugabyte) 2.1.0 or later
-- For optimal performance, ensure you have set the appropriate [system limits using `ulimit`](../../../../manual-deployment/system-config/#ulimits) on each node in your Kubernetes cluster.
+- For optimal performance, ensure you have set the appropriate [system limits using `ulimit`](../../../../manual-deployment/system-config/#set-ulimits) on each node in your Kubernetes cluster.
 
 Confirm that `helm` and `kubectl` are configured correctly, as follows:
 
@@ -306,6 +306,46 @@ Replica count can be changed using the following command. Note that only the YB-
 
 ```sh
 helm upgrade --set replicas.tserver=5 yb-demo ./yugabyte
+```
+
+### Readiness probes
+
+{{<tags/feature/ea>}}Readiness probes provide readiness checks for your Kubernetes deployment. Probes are compatible with both direct Helm deployments and [YugabyteDB Anywhere-managed deployments](../../../../../yugabyte-platform/create-deployments/create-universe-multi-zone-kubernetes/#configure-helm-overrides), and work with TLS enabled or restricted authorization environments. Use the probes to ensure pods are ready before being marked as available. The probes verify connectivity using ysqlsh for YSQL and ycqlsh for YCQL.
+
+The following probes are available:
+
+- YSQL Readiness. Uses ysqlsh to verify connectivity via local socket for credentialed setups.
+
+- YCQL Readiness. Uses ycqlsh to validate connectivity.
+
+- Master Readiness. Uses `httpGet` to probe master.
+
+- Custom Readiness. Supports custom readiness probe parameters, such as delays, timeouts, and thresholds.
+
+- Startup probes to delay enforcing of readiness probes.
+
+Readiness probes are disabled by default for compatibility.
+
+Enable probes via `values.yaml` or using Kubernetes overrides.
+
+```yaml
+master:
+  readinessProbe:
+    enabled: true
+
+tserver:
+  readinessProbe:
+    enabled: true
+```
+
+The following is example of custom readiness parameters:
+
+```yaml
+tserver:
+  customReadinessProbe:
+    initialDelaySeconds: 30
+    periodSeconds: 20
+    timeoutSeconds: 10
 ```
 
 ### Independent LoadBalancers

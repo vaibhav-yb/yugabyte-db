@@ -227,7 +227,7 @@ DECLARE_int32(cdc_checkpoint_opid_interval_ms);
 
 DECLARE_int32(rpc_workers_limit);
 
-DECLARE_int64(cdc_intent_retention_ms);
+DECLARE_uint64(cdc_intent_retention_ms);
 
 DECLARE_bool(ysql_yb_enable_replication_commands);
 DECLARE_bool(enable_xcluster_auto_flag_validation);
@@ -1700,6 +1700,8 @@ void CDCServiceImpl::GetChanges(
     if (is_replication_paused_for_stream && VLOG_IS_ON(1)) {
       YB_LOG_EVERY_N_SECS(INFO, 300)
           << "Replication is paused from the producer for stream: " << req->stream_id();
+      // Below log line used in tests to detect when streams are paused.
+      VLOG(3) << "Replication is paused from the producer for stream: " << req->stream_id();
     }
     // Returning success to slow down polling on the consumer side while replication is paused or
     // early exit for testing purpose.
@@ -3980,7 +3982,9 @@ Status CDCServiceImpl::CheckStreamActive(
                               : last_active_time_passed;
 
   auto now = GetCurrentTimeMicros();
-  if (now < last_active_time + 1000 * (GetAtomicFlag(&FLAGS_cdc_intent_retention_ms))) {
+  int64_t intent_retention_duration =
+      static_cast<int64_t>(1000 * GetAtomicFlag(&FLAGS_cdc_intent_retention_ms));
+  if (now < last_active_time + intent_retention_duration) {
     VLOG(1) << "Tablet: " << producer_tablet.ToString()
             << " found in CDCState table/ cache with active time: " << last_active_time
             << " current time:" << now << ", for stream: " << producer_tablet.stream_id;
@@ -3988,7 +3992,7 @@ Status CDCServiceImpl::CheckStreamActive(
   }
 
   last_active_time = VERIFY_RESULT(GetLastActiveTime(producer_tablet, true));
-  if (now < last_active_time + 1000 * (GetAtomicFlag(&FLAGS_cdc_intent_retention_ms))) {
+  if (now < last_active_time + intent_retention_duration) {
     VLOG(1) << "Tablet: " << producer_tablet.ToString()
             << " found in CDCState table with active time: " << last_active_time
             << " current time:" << now << ", for stream: " << producer_tablet.stream_id;

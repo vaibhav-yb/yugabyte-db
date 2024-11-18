@@ -15,6 +15,7 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/AlecAivazis/survey/v2"
 	"github.com/sirupsen/logrus"
@@ -195,14 +196,21 @@ func ErrorFromResponseBody(errorBlock YbaStructuredError) string {
 
 	errorMap := (*errorBlock.Error).(map[string]interface{})
 	for k, v := range errorMap {
+		logrus.Debug("Key: ", k, " Value: ", v, "\n", "Type is ", reflect.TypeOf(v))
 		if k != "" {
 			errorString = fmt.Sprintf("Field: %s, Error:", k)
 		}
 		var checkType []interface{}
+		var checkTypeMap map[string]interface{}
 		if reflect.TypeOf(v) == reflect.TypeOf(checkType) {
 			for _, s := range *StringSlice(v.([]interface{})) {
 				errorString = fmt.Sprintf("%s %s", errorString, s)
 			}
+		} else if reflect.TypeOf(v) == reflect.TypeOf(checkTypeMap) {
+			for _, s := range *StringMap(v.(map[string]interface{})) {
+				errorString = fmt.Sprintf("%s %s", errorString, s)
+			}
+			errorString = fmt.Sprintf("%s %v", errorString, v)
 		} else {
 			errorString = fmt.Sprintf("%s %s", errorString, v.(string))
 		}
@@ -377,4 +385,12 @@ func RemoveComponentFromSlice(sliceInterface interface{}, index int) interface{}
 		}
 	}
 	return slice
+}
+
+// FromEpochMilli converts epoch in milliseconds to time.Time
+func FromEpochMilli(millis int64) time.Time {
+	// Convert milliseconds to seconds and nanoseconds
+	seconds := millis / 1000
+	nanos := (millis % 1000) * int64(time.Millisecond)
+	return time.Unix(seconds, nanos)
 }

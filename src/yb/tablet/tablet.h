@@ -462,6 +462,11 @@ class Tablet : public AbstractTablet,
   // Apply the Schema of the specified operation.
   Status AlterSchema(ChangeMetadataOperation* operation);
 
+  // Insert a historical packed schema, used by xCluster for automatic DDL replication.
+  Status InsertPackedSchemaForXClusterTarget(
+      ChangeMetadataOperation* operation,
+      std::shared_ptr<yb::tablet::TableInfo> current_table_info);
+
   // Used to update the tablets on the index table that the index has been backfilled.
   // This means that full compactions can now garbage collect delete markers.
   Status MarkBackfillDone(const OpId& op_id, const TableId& table_id = "");
@@ -765,6 +770,10 @@ class Tablet : public AbstractTablet,
 
   HybridTime GetMinStartHTCDCUnstreamedTxns(log::Log* log) const;
 
+  HybridTime GetMinStartHTRunningTxnsForCDCProducer() const;
+
+  HybridTime GetMinStartHTRunningTxnsForCDCLogCallback() const;
+
   //------------------------------------------------------------------------------------------------
 
   // Allows us to add tablet-specific information that will get deref'd when the tablet does.
@@ -974,8 +983,6 @@ class Tablet : public AbstractTablet,
   MonoTime cdcsdk_block_barrier_revision_start_time = MonoTime::Now();
 
   void CleanupIntentFiles();
-
-  HybridTime GetMinStartHTRunningTxnsOrLeaderSafeTime();
 
  private:
   friend class Iterator;
@@ -1271,6 +1278,8 @@ class Tablet : public AbstractTablet,
   std::function<uint32_t(const TableId&, const ColocationId&)>
       get_min_xcluster_schema_version_ = nullptr;
 
+  rpc::ThreadPool* rpc_thread_pool_ = nullptr;
+
   simple_spinlock operation_filters_mutex_;
 
   boost::intrusive::list<OperationFilter> operation_filters_ GUARDED_BY(operation_filters_mutex_);
@@ -1280,6 +1289,13 @@ class Tablet : public AbstractTablet,
   std::unique_ptr<log::LogAnchor> completed_split_log_anchor_ GUARDED_BY(operation_filters_mutex_);
 
   std::unique_ptr<OperationFilter> restoring_operation_filter_ GUARDED_BY(operation_filters_mutex_);
+
+  std::atomic<bool> has_vector_indexes_{false};
+  std::shared_mutex vector_indexes_mutex_;
+  std::unordered_map<TableId, docdb::VectorIndexPtr> all_vector_indexes_
+      GUARDED_BY(vector_indexes_mutex_);
+  std::unordered_map<TableId, docdb::VectorIndexesPtr> vector_indexes_for_table_
+      GUARDED_BY(vector_indexes_mutex_);
 
   DISALLOW_COPY_AND_ASSIGN(Tablet);
 };

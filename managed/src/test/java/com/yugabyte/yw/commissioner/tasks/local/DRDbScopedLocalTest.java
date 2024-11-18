@@ -12,6 +12,7 @@ import com.fasterxml.jackson.databind.JsonMappingException;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
+import com.yugabyte.yw.commissioner.tasks.UniverseTaskBase.ServerType;
 import com.yugabyte.yw.common.ModelFactory;
 import com.yugabyte.yw.common.PlacementInfoUtil;
 import com.yugabyte.yw.common.ReleaseManager;
@@ -52,6 +53,7 @@ import java.util.UUID;
 import lombok.extern.slf4j.Slf4j;
 import org.junit.Before;
 import org.junit.Test;
+import org.yb.client.YBClient;
 import play.libs.Json;
 import play.mvc.Result;
 
@@ -483,7 +485,7 @@ public class DRDbScopedLocalTest extends DRLocalTestBase {
 
     // Take down source universe nodes.
     for (NodeDetails sourceNode : sourceUniverse.getNodes()) {
-      killProcessesOnNode(sourceUniverse.getUniverseUUID(), sourceNode.nodeName);
+      killProcessOnNode(sourceUniverse.getUniverseUUID(), sourceNode.nodeName, ServerType.TSERVER);
     }
 
     // Failover DR config.
@@ -510,7 +512,16 @@ public class DRDbScopedLocalTest extends DRLocalTestBase {
     verifyUniverseState(newSourceUniverse);
 
     for (NodeDetails newTargetNode : newTargetUniverse.getNodes()) {
-      startProcessesOnNode(newTargetUniverse.getUniverseUUID(), newTargetNode.nodeName);
+      startProcessesOnNode(newTargetUniverse.getUniverseUUID(), newTargetNode, ServerType.TSERVER);
+    }
+
+    // Wait for tservers to start.
+    try (YBClient client =
+        ybClientService.getClient(
+            newTargetUniverse.getMasterAddresses(), newTargetUniverse.getCertificateNodetoNode())) {
+      waitTillNumOfTservers(client, 3);
+    } catch (Exception e) {
+      throw new RuntimeException(e);
     }
     verifyUniverseState(newTargetUniverse);
 
@@ -566,6 +577,49 @@ public class DRDbScopedLocalTest extends DRLocalTestBase {
     for (Db db : dbs) {
       dropDatabase(sourceUniverse, db);
       dropDatabase(targetUniverse, db);
+    }
+  }
+
+  @Test
+  public void testDbScopedChangeReplica() throws InterruptedException {
+    CreateDRMetadata createData = defaultDbDRCreate(1, 1);
+    UUID drConfigUUID = createData.drConfigUUID;
+    Universe sourceUniverse = createData.sourceUniverse;
+    Universe targetUniverse = createData.targetUniverse;
+    List<Db> dbs = createData.dbs;
+    List<Table> tables = createData.tables;
+
+    Universe newTargetUniverse =
+        createDRUniverse(DB_SCOPED_STABLE_VERSION, "new-target-universe", true);
+    createTestSet(newTargetUniverse, dbs, tables);
+
+    // Replace replica to use newly created universe.
+    DrConfigReplaceReplicaForm replaceReplicaForm = new DrConfigReplaceReplicaForm();
+    replaceReplicaForm.primaryUniverseUuid = sourceUniverse.getUniverseUUID();
+    replaceReplicaForm.drReplicaUniverseUuid = newTargetUniverse.getUniverseUUID();
+    Result replaceReplicaResult = replaceReplica(drConfigUUID, replaceReplicaForm);
+    assertOk(replaceReplicaResult);
+    JsonNode json = Json.parse(contentAsString(replaceReplicaResult));
+    TaskInfo taskInfo =
+        waitForTask(
+            UUID.fromString(json.get("taskUUID").asText()), sourceUniverse, newTargetUniverse);
+    assertEquals(TaskInfo.State.Success, taskInfo.getTaskState());
+    verifyUniverseState(Universe.getOrBadRequest(sourceUniverse.getUniverseUUID()));
+    verifyUniverseState(Universe.getOrBadRequest(newTargetUniverse.getUniverseUUID()));
+
+    // Validate new replication works.
+    insertRow(sourceUniverse, tables.get(0), Map.of("id", "2", "name", "'val2'"));
+    validateRowCount(newTargetUniverse, tables.get(0), 2 /* expectedRows */);
+
+    insertRow(sourceUniverse, tables.get(1), Map.of("id", "11", "name", "'val11'"));
+    validateRowCount(newTargetUniverse, tables.get(1), 2 /* expectedRows */);
+
+    deleteDrConfig(drConfigUUID, sourceUniverse, newTargetUniverse);
+
+    for (Db db : dbs) {
+      dropDatabase(sourceUniverse, db);
+      dropDatabase(targetUniverse, db);
+      dropDatabase(newTargetUniverse, db);
     }
   }
 
@@ -786,7 +840,7 @@ public class DRDbScopedLocalTest extends DRLocalTestBase {
     deleteDrConfig(drConfigUUID, sourceUniverse, targetUniverse);
   }
 
-  // @Test
+  @Test
   public void testDBScopedXClusterTableConfigStatus()
       throws InterruptedException, JsonMappingException, JsonProcessingException {
     Universe sourceUniverse =

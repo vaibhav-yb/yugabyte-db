@@ -214,7 +214,9 @@ public class UniverseCRUDHandler {
             || isRegionListUpdate(cluster, currentCluster)
             || cluster.userIntent.replicationFactor != currentCluster.userIntent.replicationFactor
             || isKubernetesVolumeUpdate(cluster, currentCluster)
-            || isKubernetesNodeSpecUpdate(cluster, currentCluster);
+            || isKubernetesNodeSpecUpdate(cluster, currentCluster)
+            || cluster.userIntent.enableExposingService
+                != currentCluster.userIntent.enableExposingService;
 
     boolean nodeSettingsChanges =
         isAwsArnChanged(cluster, currentCluster)
@@ -959,6 +961,12 @@ public class UniverseCRUDHandler {
               // Default service scope should be 'Namespaced'
               primaryIntent.defaultServiceScopeAZ = false;
             }
+          }
+          if (KubernetesUtil.isNonRestartGflagsUpgradeSupported(
+              primaryCluster.userIntent.ybSoftwareVersion)) {
+            universe.updateConfig(
+                ImmutableMap.of(
+                    Universe.K8S_SET_MASTER_EXISTING_UNIVERSE_GFLAG, Boolean.toString(true)));
           }
           // Validate service endpoints
           try {
@@ -2352,9 +2360,15 @@ public class UniverseCRUDHandler {
       throw new PlatformServiceException(
           BAD_REQUEST, "Cannot change communication ports for k8s universe");
     }
+    boolean rfChangeEnabled = false;
 
     for (Cluster newCluster : taskParams.clusters) {
       Cluster curCluster = universe.getCluster(newCluster.uuid);
+      if (curCluster.userIntent.replicationFactor != newCluster.userIntent.replicationFactor
+          && !rfChangeEnabled
+          && curCluster.clusterType == ClusterType.PRIMARY) {
+        throw new PlatformServiceException(BAD_REQUEST, "RF change is not available");
+      }
       UserIntent newIntent = newCluster.userIntent;
       UserIntent curIntent = curCluster.userIntent;
       Set<NodeDetails> nodeDetailsSet = taskParams.getNodesInCluster(newCluster.uuid);

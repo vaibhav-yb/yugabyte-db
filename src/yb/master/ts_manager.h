@@ -55,7 +55,7 @@
 #include "yb/util/net/net_util.h"
 
 DECLARE_int32(tserver_unresponsive_timeout_ms);
-DECLARE_bool(TEST_persist_tserver_registry);
+DECLARE_bool(persist_tserver_registry);
 
 namespace yb {
 
@@ -102,7 +102,7 @@ class TSManager {
   // Lookup the tablet server descriptor for the given UUID.
   // Returns false if the TS has never registered.
   // Otherwise, *desc is set and returns true.
-  bool LookupTSByUUID(const std::string& uuid, TSDescriptorPtr* desc);
+  Result<TSDescriptorPtr> LookupTSByUUID(const std::string& uuid);
 
   // Register a tserver that is not already registered but is in the raft config of a tablet report
   // encountered during ts heartbeat processing. This should not be necessary once registration is
@@ -160,7 +160,7 @@ class TSManager {
   // Transition all such TServers into the UNRESPONSIVE state.
   Status MarkUnresponsiveTServers(const LeaderEpoch& epoch);
 
-  Status RunLoader();
+  Status RunLoader(const CloudInfoPB& cloud_info, rpc::ProxyCache* proxy_cache);
 
   Status RemoveTabletServer(
       const std::string& permanent_uuid, const BlacklistSet& blacklist,

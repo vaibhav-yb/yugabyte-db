@@ -395,11 +395,13 @@ PgSession::PgSession(
     const YBCPgCallbacks& pg_callbacks,
     YBCPgExecStatsState& stats_state,
     YbctidReader&& ybctid_reader,
-    bool is_pg_binary_upgrade)
+    bool is_pg_binary_upgrade,
+    std::reference_wrapper<const WaitEventWatcher> wait_event_watcher)
     : pg_client_(pg_client),
       pg_txn_manager_(std::move(pg_txn_manager)),
       ybctid_reader_(std::move(ybctid_reader)),
       explicit_row_lock_buffer_(aux_ybctid_container_provider_, ybctid_reader_),
+      insert_on_conflict_buffer_(),
       metrics_(stats_state),
       pg_callbacks_(pg_callbacks),
       buffer_(
@@ -409,7 +411,8 @@ PgSession::PgSession(
                 VERIFY_RESULT(FlushOperations(std::move(ops), transactional)), this};
           },
           metrics_, buffering_settings_),
-      is_major_pg_version_upgrade_(is_pg_binary_upgrade) {
+      is_major_pg_version_upgrade_(is_pg_binary_upgrade),
+      wait_event_watcher_(wait_event_watcher) {
   Update(&buffering_settings_);
 }
 
@@ -1059,7 +1062,8 @@ Result<tserver::PgGetReplicationSlotResponsePB> PgSession::GetReplicationSlot(
 }
 
 PgWaitEventWatcher PgSession::StartWaitEvent(ash::WaitStateCode wait_event) {
-  return {pg_callbacks_.PgstatReportWaitStart, wait_event};
+  DCHECK_NE(wait_event, ash::WaitStateCode::kWaitingOnTServer);
+  return wait_event_watcher_(wait_event, ash::PggateRPC::kNoRPC);
 }
 
 Result<tserver::PgYCQLStatementStatsResponsePB> PgSession::YCQLStatementStats() {
@@ -1081,5 +1085,11 @@ Result<yb::tserver::PgTabletsMetadataResponsePB> PgSession::TabletsMetadata() {
 Result<yb::tserver::PgServersMetricsResponsePB> PgSession::ServersMetrics() {
   return pg_client_.ServersMetrics();
 }
+
+Status PgSession::SetCronLastMinute(int64_t last_minute) {
+  return pg_client_.SetCronLastMinute(last_minute);
+}
+
+Result<int64_t> PgSession::GetCronLastMinute() { return pg_client_.GetCronLastMinute(); }
 
 }  // namespace yb::pggate

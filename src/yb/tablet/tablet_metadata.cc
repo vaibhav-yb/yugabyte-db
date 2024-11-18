@@ -101,6 +101,10 @@ DEFINE_NON_RUNTIME_bool(lazily_flush_superblock, true,
     "Flushes the superblock lazily on metadata update. Only used for colocated table creation "
     "currently.");
 
+DEFINE_RUNTIME_bool(enable_schema_version_check, yb::kIsDebug,
+    "Whether to check existence of given schema version in CheckCotablePacking and "
+    "CheckColocationPacking. If it's off, always return Status::OK().");
+
 using std::string;
 
 using strings::Substitute;
@@ -154,7 +158,7 @@ TableInfo::TableInfo(const std::string& tablet_log_prefix,
                      TableType table_type,
                      const Schema& schema,
                      const IndexMap& index_map,
-                     const boost::optional<IndexInfo>& index_info,
+                     const std::optional<IndexInfo>& index_info,
                      const SchemaVersion schema_version,
                      dockv::PartitionSchema partition_schema,
                      TableId pg_table_id_,
@@ -247,7 +251,7 @@ TableInfo::~TableInfo() = default;
 
 void TableInfo::CompleteInit() {
   if (index_info && index_info->is_vector_idx()) {
-    doc_read_context->SetVectorIdxOptions(index_info->get_vector_idx_options());
+    doc_read_context->vector_idx_options = index_info->vector_idx_options();
   }
 
   if (!index_info || !index_info->is_unique()) {
@@ -1312,6 +1316,30 @@ void RaftGroupMetadata::SetSchemaUnlocked(const Schema& schema,
   OnChangeMetadataOperationAppliedUnlocked(op_id);
 }
 
+void RaftGroupMetadata::InsertPackedSchemaForXClusterTarget(
+    const Schema& schema, const qlexpr::IndexMap& index_map, const SchemaVersion version,
+    const OpId& op_id, const TableId& table_id) {
+  std::lock_guard lock(data_mutex_);
+  TableId target_table_id = table_id.empty() ? primary_table_id_ : table_id;
+  auto table_info_ptr = FindOrNull(kv_store_.tables, target_table_id);
+  CHECK(table_info_ptr);
+
+  // First insert the packed schema with schema_version - 1.
+  // Don't drop any columns as part of inserting the packed schema.
+  auto dropped_cols = std::vector<DeletedColumn>();
+  auto temp_table_info =
+      std::make_shared<TableInfo>(**table_info_ptr, schema, index_map, dropped_cols, version - 1);
+
+  // Then re-insert the original schema with the new schema_version.
+  auto new_table_info = std::make_shared<TableInfo>(
+      *temp_table_info, (*table_info_ptr)->schema(), index_map, dropped_cols, version);
+
+  // TODO(#22318) handle colocated tables later.
+  table_info_ptr->swap(new_table_info);
+
+  OnChangeMetadataOperationAppliedUnlocked(op_id);
+}
+
 void RaftGroupMetadata::SetPartitionSchema(const dockv::PartitionSchema& partition_schema) {
   std::lock_guard lock(data_mutex_);
   auto& tables = kv_store_.tables;
@@ -1350,10 +1378,10 @@ void RaftGroupMetadata::SetSchemaAndTableName(
   SetTableNameUnlocked(namespace_name, table_name, op_id, table_id);
 }
 
-void RaftGroupMetadata::AddTable(
+Status RaftGroupMetadata::AddTable(
     const std::string& table_id, const std::string& namespace_name, const std::string& table_name,
     const TableType table_type, const Schema& schema, const IndexMap& index_map,
-    const dockv::PartitionSchema& partition_schema, const boost::optional<IndexInfo>& index_info,
+    const dockv::PartitionSchema& partition_schema, const std::optional<IndexInfo>& index_info,
     const SchemaVersion schema_version, const OpId& op_id, const TableId& pg_table_id,
     const SkipTableTombstoneCheck skip_table_tombstone_check) {
   DCHECK(schema.has_column_ids());
@@ -1386,7 +1414,7 @@ void RaftGroupMetadata::AddTable(
     VLOG_WITH_PREFIX(1) << "Added table with schema version " << schema_version << "\n"
                         << AsString(new_table_info);
     kv_store_.UpdateColocationMap(new_table_info);
-    return;
+    return Status::OK();
   }
 
   const auto& existing_table = *iter->second;
@@ -1398,24 +1426,26 @@ void RaftGroupMetadata::AddTable(
       schema.table_properties().is_ysql_catalog_table()) {
     // This must be the one-time migration with transactional DDL being turned on for the first
     // time on this cluster.
-    return;
+    return Status::OK();
   }
 
   // We never expect colocation IDs to mismatch.
   const auto& existing_schema = existing_table.schema();
-  CHECK(existing_schema.has_colocation_id() == schema.has_colocation_id())
-      << "Attempted to change colocation state for table " << table_id << " from "
-      << existing_schema.has_colocation_id() << " to " << schema.has_colocation_id();
+  SCHECK_EQ(existing_schema.has_colocation_id(), schema.has_colocation_id(), InvalidArgument,
+            Format("Attempted to change colocation state for table $0", table_id));
 
-  CHECK(
-      !existing_schema.has_colocation_id() ||
-      existing_schema.colocation_id() == schema.colocation_id())
-      << "Attempted to change colocation ID for table " << table_id << " from "
-      << existing_schema.colocation_id() << " to " << schema.colocation_id();
+  if (existing_schema.has_colocation_id()) {
+    SCHECK_EQ(existing_schema.colocation_id(), schema.colocation_id(), InvalidArgument,
+              Format("Attempted to change colocation ID for table $0", table_id));
+  }
 
-  CHECK(!schema.colocation_id() || kv_store_.colocation_to_table.count(schema.colocation_id()))
-      << "Missing entry in colocation table: " << schema.colocation_id() << ", "
-      << AsString(kv_store_.colocation_to_table);
+  if (schema.colocation_id() && !kv_store_.colocation_to_table.count(schema.colocation_id())) {
+    return STATUS_FORMAT(
+        IllegalState, "Missing entry in colocation table: $0, $1",
+        schema.colocation_id(), kv_store_.colocation_to_table);
+  }
+
+  return Status::OK();
 }
 
 void RaftGroupMetadata::RemoveTable(const TableId& table_id, const OpId& op_id) {
@@ -1892,6 +1922,30 @@ Result<docdb::CompactionSchemaInfo> RaftGroupMetadata::ColocationPacking(
       << "Colocation id mismatch: " << colocation_id << " vs "
       << table_info->schema().colocation_id();
   return TableInfo::Packing(table_info, schema_version, history_cutoff);
+}
+
+Status RaftGroupMetadata::CheckCotablePacking(
+    const Uuid& cotable_id, uint32_t schema_version, HybridTime history_cutoff) {
+  if (!FLAGS_enable_schema_version_check) {
+    return Status::OK();
+  }
+  const auto packing = CotablePacking(cotable_id, schema_version, history_cutoff);
+  if (packing.ok() || packing.status().IsNotFound()) {
+    return Status::OK();
+  }
+  return packing.status();
+}
+
+Status RaftGroupMetadata::CheckColocationPacking(
+    ColocationId colocation_id, uint32_t schema_version, HybridTime history_cutoff) {
+  if (!FLAGS_enable_schema_version_check) {
+    return Status::OK();
+  }
+  const auto packing = ColocationPacking(colocation_id, schema_version, history_cutoff);
+  if (packing.ok() || packing.status().IsNotFound()) {
+    return Status::OK();
+  }
+  return packing.status();
 }
 
 std::string RaftGroupMetadata::GetSubRaftGroupWalDir(const RaftGroupId& raft_group_id) const {

@@ -1098,6 +1098,12 @@ parseCreateReplSlotOptions(CreateReplicationSlotCmd *cmd,
 				*lsn_type = CRS_SEQUENCE;
 			else if (strcmp(action, "HYBRID_TIME") == 0)
 				*lsn_type = CRS_HYBRID_TIME;
+			else
+				ereport(ERROR,
+						(errcode(ERRCODE_INVALID_PARAMETER_VALUE),
+						 errmsg("unrecognized lsn_type value for CREATE_REPLICATION_SLOT "
+						 		"option \"%s\": \"%s\"",
+								defel->defname, action)));
 		}
 		else
 			elog(ERROR, "unrecognized option: %s", defel->defname);

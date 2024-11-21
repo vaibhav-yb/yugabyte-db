@@ -969,15 +969,17 @@ Status PgClientSession::CreateReplicationSlot(
   }
 
   std::optional<yb::ReplicationSlotLsnType> lsn_type;
-  switch (req.lsn_type()) {
-    case ReplicationSlotLsnTypePg_SEQUENCE:
-      lsn_type = ReplicationSlotLsnType::ReplicationSlotLsnType_SEQUENCE;
-      break;
-    case ReplicationSlotLsnTypePg_HYBRID_TIME:
-      lsn_type = ReplicationSlotLsnType::ReplicationSlotLsnType_HYBRID_TIME;
-      break;
-    default:
-      return STATUS_FORMAT(InvalidArgument, "invalid lsn_type $0", req.lsn_type());
+  if (FLAGS_ysql_yb_allow_replication_slot_lsn_types) {
+    switch (req.lsn_type()) {
+      case ReplicationSlotLsnTypePg_SEQUENCE:
+        lsn_type = ReplicationSlotLsnType::ReplicationSlotLsnType_SEQUENCE;
+        break;
+      case ReplicationSlotLsnTypePg_HYBRID_TIME:
+        lsn_type = ReplicationSlotLsnType::ReplicationSlotLsnType_HYBRID_TIME;
+        break;
+      default:
+        return STATUS_FORMAT(InvalidArgument, "invalid lsn_type $0", req.lsn_type());
+    }
   }
 
   uint64_t consistent_snapshot_time;

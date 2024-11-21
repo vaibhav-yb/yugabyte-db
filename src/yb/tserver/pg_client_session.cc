@@ -95,7 +95,7 @@ DEFINE_RUNTIME_uint64(big_shared_memory_segment_session_expiration_time_ms, 5000
 DECLARE_bool(ysql_serializable_isolation_for_ddl_txn);
 DECLARE_bool(ysql_yb_enable_ddl_atomicity_infra);
 DECLARE_bool(yb_enable_cdc_consistent_snapshot_streams);
-DECLARE_bool(ysql_yb_allow_replication_slot_lsn_types)
+DECLARE_bool(ysql_yb_allow_replication_slot_lsn_types);
 
 DECLARE_uint64(rpc_max_message_size);
 

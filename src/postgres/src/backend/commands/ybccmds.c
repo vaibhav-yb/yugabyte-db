@@ -2021,9 +2021,8 @@ YBCCreateReplicationSlot(const char *slot_name,
 	// in the if block, otherwise for the default case when nothing is
 	// specified or when SEQUENCE is specified, the value will stay the same.
 	YBCLsnType repl_slot_lsn_type = YB_REPLICATION_SLOT_LSN_TYPE_SEQUENCE;
-	if (lsn_type == CRS_HYBRID_TIME) {
+	if (lsn_type == CRS_HYBRID_TIME)
 		repl_slot_lsn_type = YB_REPLICATION_SLOT_LSN_TYPE_HYBRID_TIME;
-	}
 
 	HandleYBStatus(YBCPgNewCreateReplicationSlot(slot_name,
 												 plugin_name,

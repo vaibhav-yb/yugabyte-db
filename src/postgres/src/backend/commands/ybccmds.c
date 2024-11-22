@@ -2017,18 +2017,12 @@ YBCCreateReplicationSlot(const char *slot_name,
 			pg_unreachable();
 	}
 
-	YBCLsnType repl_slot_lsn_type;
-	switch (lsn_type)
-	{
-		case CRS_SEQUENCE:
-			repl_slot_lsn_type = YB_REPLICATION_SLOT_LSN_TYPE_SEQUENCE;
-			break;
-		case CRS_HYBRID_TIME:
-			repl_slot_lsn_type = YB_REPLICATION_SLOT_LSN_TYPE_HYBRID_TIME;
-			break;
-		default:
-			repl_slot_lsn_type = YB_REPLICATION_SLOT_LSN_TYPE_SEQUENCE;
-	}
+	// If lsn_type is specified as HYBRID_TIME, it would be handled
+	// in the if block, otherwise for the default case when nothing is
+	// specified or when SEQUENCE is specified, the value will stay the same.
+	YBCLsnType repl_slot_lsn_type = YB_REPLICATION_SLOT_LSN_TYPE_SEQUENCE;
+	if (lsn_type == CRS_HYBRID_TIME)
+		repl_slot_lsn_type = YB_REPLICATION_SLOT_LSN_TYPE_HYBRID_TIME;
 
 	HandleYBStatus(YBCPgNewCreateReplicationSlot(slot_name,
 												 plugin_name,

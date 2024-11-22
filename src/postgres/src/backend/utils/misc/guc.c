@@ -3057,6 +3057,7 @@ static struct config_int ConfigureNamesInt[] =
 		0, 0, INT_MAX / 2,
 		NULL, NULL, NULL
 	},
+
 	{
 		{"post_auth_delay", PGC_BACKEND, DEVELOPER_OPTIONS,
 			gettext_noop("Sets the amount of time to wait after "

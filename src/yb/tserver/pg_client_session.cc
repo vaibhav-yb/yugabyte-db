@@ -95,6 +95,7 @@ DEFINE_RUNTIME_uint64(big_shared_memory_segment_session_expiration_time_ms, 5000
 DECLARE_bool(ysql_serializable_isolation_for_ddl_txn);
 DECLARE_bool(ysql_yb_enable_ddl_atomicity_infra);
 DECLARE_bool(yb_enable_cdc_consistent_snapshot_streams);
+DECLARE_bool(ysql_yb_allow_replication_slot_lsn_types);
 
 DECLARE_uint64(rpc_max_message_size);
 
@@ -969,15 +970,17 @@ Status PgClientSession::CreateReplicationSlot(
   }
 
   std::optional<yb::ReplicationSlotLsnType> lsn_type;
-  switch (req.lsn_type()) {
-    case ReplicationSlotLsnTypePg_SEQUENCE:
-      lsn_type = ReplicationSlotLsnType::ReplicationSlotLsnType_SEQUENCE;
-      break;
-    case ReplicationSlotLsnTypePg_HYBRID_TIME:
-      lsn_type = ReplicationSlotLsnType::ReplicationSlotLsnType_HYBRID_TIME;
-      break;
-    default:
-      return STATUS_FORMAT(InvalidArgument, "invalid lsn_type $0", req.lsn_type());
+  if (FLAGS_ysql_yb_allow_replication_slot_lsn_types) {
+    switch (req.lsn_type()) {
+      case ReplicationSlotLsnTypePg_SEQUENCE:
+        lsn_type = ReplicationSlotLsnType::ReplicationSlotLsnType_SEQUENCE;
+        break;
+      case ReplicationSlotLsnTypePg_HYBRID_TIME:
+        lsn_type = ReplicationSlotLsnType::ReplicationSlotLsnType_HYBRID_TIME;
+        break;
+      default:
+        return STATUS_FORMAT(InvalidArgument, "invalid lsn_type $0", req.lsn_type());
+    }
   }
 
   uint64_t consistent_snapshot_time;

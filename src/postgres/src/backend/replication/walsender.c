@@ -1086,7 +1086,7 @@ parseCreateReplSlotOptions(CreateReplicationSlotCmd *cmd,
 
 			reportErrorIfLsnTypeNotEnabled();
 
-			if (lsn_type_given || cmd->REPLICATION_KIND_LOGICAL)
+			if (lsn_type_given || cmd->kind != REPLICATION_KIND_LOGICAL)
 				ereport(ERROR,
 						(errcode(ERRCODE_SYNTAX_ERROR),
 						errmsg("conflicting or redundant lsn_type options")));
@@ -1098,6 +1098,12 @@ parseCreateReplSlotOptions(CreateReplicationSlotCmd *cmd,
 				*lsn_type = CRS_SEQUENCE;
 			else if (strcmp(action, "HYBRID_TIME") == 0)
 				*lsn_type = CRS_HYBRID_TIME;
+			else
+				ereport(ERROR,
+						(errcode(ERRCODE_INVALID_PARAMETER_VALUE),
+						 errmsg("unrecognized lsn_type value for CREATE_REPLICATION_SLOT "
+						 		"option \"%s\": \"%s\"",
+								defel->defname, action)));
 		}
 		else
 			elog(ERROR, "unrecognized option: %s", defel->defname);

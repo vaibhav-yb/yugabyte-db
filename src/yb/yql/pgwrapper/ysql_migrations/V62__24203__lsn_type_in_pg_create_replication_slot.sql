@@ -2,8 +2,6 @@ BEGIN;
   SET LOCAL yb_non_ddl_txn_for_sys_tables_allowed TO true;
 
   -- Add a parameter to the pg_create_logical_replication_slot method
-  -- As a workaround for GHI #13500, we perform a delete + insert instead
-  -- of an update into pg_proc. Restore to UPDATE once fixed.
   DELETE FROM pg_catalog.pg_proc WHERE proname = 'pg_create_logical_replication_slot' AND
     pronamespace = 'pg_catalog'::regnamespace;
   INSERT INTO pg_catalog.pg_proc (

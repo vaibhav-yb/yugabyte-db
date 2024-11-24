@@ -1862,6 +1862,7 @@ Status create_change_data_stream_action(
     ToUpperCase(args[1], &uppercase_checkpoint_type);
     if (uppercase_checkpoint_type != yb::ToString("EXPLICIT") &&
         uppercase_checkpoint_type != yb::ToString("IMPLICIT")) {
+      // todo Vaibhav: this can be removed as well, stop it at the admin layer itself.
       return ClusterAdminCli::kInvalidArguments;
     }
     checkpoint_type = uppercase_checkpoint_type;

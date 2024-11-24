@@ -3733,7 +3733,9 @@ Status ClusterAdminClient::CreateCDCSDKDBStream(
   if (checkpoint_type == yb::ToString("EXPLICIT")) {
         req.set_checkpoint_type(cdc::CDCCheckpointType::EXPLICIT);
   } else {
-        req.set_checkpoint_type(cdc::CDCCheckpointType::IMPLICIT);
+        cout << "IMPLICIT stream creation is disabled";
+        return STATUS_FORMAT(InvalidArgument, "IMPLICIT stream creation is disabled");
+        // req.set_checkpoint_type(cdc::CDCCheckpointType::IMPLICIT);
   }
 
   if (consistent_snapshot_option == "USE_SNAPSHOT") {

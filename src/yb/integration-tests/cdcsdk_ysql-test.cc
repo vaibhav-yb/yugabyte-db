@@ -7844,8 +7844,7 @@ TEST_F(CDCSDKYsqlTest, TestCreateReplicationSlotWithLsnTypeHybridTime) {
 
 TEST_F(CDCSDKYsqlTest, TestPgCreateReplicationSlotDefaultLsnTypeParam) {
   ASSERT_OK(SET_FLAG(ysql_yb_allow_replication_slot_lsn_types, true));
-    ASSERT_OK(
-      SetUpWithParams(3 /* replication_factor */, 1 /* num_masters */, false));
+  ASSERT_OK(SetUpWithParams(3 /* replication_factor */, 1 /* num_masters */, false));
 
   auto conn = ASSERT_RESULT(test_cluster_.ConnectToDBWithReplication(kNamespaceName));
 
@@ -7887,20 +7886,14 @@ void CDCSDKYsqlTest::TestCreateReplicationSlotWithLsnTypeParam(const std::string
 
   ASSERT_EQ("rs", list_cdc_streams_resp.streams().Get(0).cdcsdk_ysql_replication_slot_name());
 
+  auto lsn_type_from_resp = list_cdc_streams_resp.streams()
+                                .Get(0)
+                                .cdc_stream_info_options()
+                                .cdcsdk_ysql_replication_slot_lsn_type();
   if (lsn_type == "SEQUENCE") {
-    ASSERT_EQ(
-        ReplicationSlotLsnType::ReplicationSlotLsnType_SEQUENCE,
-        list_cdc_streams_resp.streams()
-            .Get(0)
-            .cdc_stream_info_options()
-            .cdcsdk_ysql_replication_slot_lsn_type());
+    ASSERT_EQ(ReplicationSlotLsnType::ReplicationSlotLsnType_SEQUENCE, lsn_type_from_resp);
   } else {
-    ASSERT_EQ(
-        ReplicationSlotLsnType::ReplicationSlotLsnType_HYBRID_TIME,
-        list_cdc_streams_resp.streams()
-            .Get(0)
-            .cdc_stream_info_options()
-            .cdcsdk_ysql_replication_slot_lsn_type());
+    ASSERT_EQ(ReplicationSlotLsnType::ReplicationSlotLsnType_HYBRID_TIME, lsn_type_from_resp);
   }
 }
 
@@ -7915,8 +7908,7 @@ TEST_F(CDCSDKYsqlTest, TestCreateReplicationSlotWithLsnTypeParamHybridTime) {
 
 TEST_F(CDCSDKYsqlTest, TestReplicationSlotLsnTypePresentAfterRestart) {
   ASSERT_OK(SET_FLAG(ysql_yb_allow_replication_slot_lsn_types, true));
-    ASSERT_OK(
-      SetUpWithParams(3 /* replication_factor */, 1 /* num_masters */, false));
+  ASSERT_OK(SetUpWithParams(3 /* replication_factor */, 1 /* num_masters */, false));
 
   auto conn = ASSERT_RESULT(test_cluster_.ConnectToDBWithReplication(kNamespaceName));
 

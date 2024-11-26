@@ -14,6 +14,7 @@
 #include "yb/vector_index/usearch_wrapper.h"
 
 #include <memory>
+#include <semaphore>
 
 #include <boost/preprocessor/seq/for_each.hpp>
 
@@ -26,6 +27,19 @@
 #include "yb/vector_index/index_wrapper_base.h"
 #include "yb/vector_index/usearch_include_wrapper_internal.h"
 #include "yb/vector_index/coordinate_types.h"
+#include "yb/vector_index/vectorann_util.h"
+
+namespace unum::usearch {
+
+// Expcilit specialization for the operator== is required for usearch need, as a compiler is not
+// smart enough to resolve StronglyTypedUuid's comparison operator, where one argument is different
+// from StronglyTypedUuid but can be implicitly casted the corresponding StronglyTypedUuid.
+bool operator==(const yb::vector_index::VectorId& lhs,
+                const yb::vector_index::VectorId& rhs) noexcept {
+  return *lhs == *rhs;
+}
+
+} // namespace unum::usearch
 
 namespace yb::vector_index {
 
@@ -72,11 +86,28 @@ scalar_kind_t ConvertCoordinateKind(CoordinateKind coordinate_kind) {
 
 namespace {
 
+// No-op VectorIterator
+template <IndexableVectorType Vector, ValidDistanceResultType DistanceResult>
+class NoOpVectorIterator : public AbstractIterator<std::pair<VectorId, Vector>> {
+ protected:
+  std::pair<VectorId, Vector> Dereference() const override {
+    return {};
+  }
+
+  void Next() override {
+    // TODO(vector_index) implement iterator for Usearch
+  }
+
+  bool NotEquals(const AbstractIterator<std::pair<VectorId, Vector>>&) const override {
+    return false;  // Always the same, indicating no iteration
+  }
+};
+
 template<IndexableVectorType Vector, ValidDistanceResultType DistanceResult>
 class UsearchIndex :
     public IndexWrapperBase<UsearchIndex<Vector, DistanceResult>, Vector, DistanceResult> {
  public:
-  using IndexImpl = index_dense_gt<VertexId>;
+  using IndexImpl = index_dense_gt<VectorId>;
 
   explicit UsearchIndex(const HNSWOptions& options)
       : dimensions_(options.dimensions),
@@ -90,15 +121,32 @@ class UsearchIndex :
     CHECK_GT(dimensions_, 0);
   }
 
-  Status Reserve(size_t num_vectors) override {
-    index_.reserve(num_vectors);
+  std::unique_ptr<AbstractIterator<std::pair<VectorId, Vector>>> BeginImpl() const override {
+    // TODO(vector_index) implement real vector iterator for USearchIndex
+    return std::make_unique<NoOpVectorIterator<Vector, DistanceResult>>();
+  }
+
+  std::unique_ptr<AbstractIterator<std::pair<VectorId, Vector>>> EndImpl() const override {
+    // TODO(vector_index) implement real vector iterator for USearchIndex
+    return std::make_unique<NoOpVectorIterator<Vector, DistanceResult>>();
+  }
+
+  Status Reserve(
+      size_t num_vectors, size_t max_concurrent_inserts, size_t max_concurrent_reads) override {
+    // Usearch could allocate 3 times more entries, than requested.
+    // Since it always allocate power of 2, we use this weird logic to make it pick minimal
+    // power of 2 that is greater or equals than num_vectors.
+    auto rounded_num_vectors = unum::usearch::ceil2(num_vectors);
+    index_.reserve(unum::usearch::index_limits_t(
+        rounded_num_vectors * 2 / 3, max_concurrent_inserts + max_concurrent_reads));
+    search_semaphore_.emplace(max_concurrent_reads);
     return Status::OK();
   }
 
-  Status DoInsert(VertexId vertex_id, const Vector& v) {
-    if (!index_.add(vertex_id, v.data())) {
-      return STATUS_FORMAT(RuntimeError, "Failed to add a vector");
-    }
+  Status DoInsert(VectorId vertex_id, const Vector& v) {
+    auto add_result = index_.add(vertex_id, v.data());
+    RSTATUS_DCHECK(
+        add_result, RuntimeError, "Failed to add a vector: $0", add_result.error.release());
     return Status::OK();
   }
 
@@ -124,9 +172,13 @@ class UsearchIndex :
         pointer_cast<const byte_t*>(lhs.data()), pointer_cast<const byte_t*>(rhs.data()));
   }
 
-  std::vector<VertexWithDistance<DistanceResult>> DoSearch(
+  Result<std::vector<VertexWithDistance<DistanceResult>>> DoSearch(
       const Vector& query_vector, size_t max_num_results) const {
+    SemaphoreLock lock(*search_semaphore_);
     auto usearch_results = index_.search(query_vector.data(), max_num_results);
+    RSTATUS_DCHECK(
+        usearch_results, RuntimeError, "Failed to search a vector: $0",
+        usearch_results.error.release());
     std::vector<VertexWithDistance<DistanceResult>> result_vec;
     result_vec.reserve(usearch_results.size());
     for (size_t i = 0; i < usearch_results.size(); ++i) {
@@ -136,7 +188,7 @@ class UsearchIndex :
     return result_vec;
   }
 
-  Result<Vector> GetVector(VertexId vertex_id) const override {
+  Result<Vector> GetVector(VectorId vertex_id) const override {
     Vector result;
     result.resize(dimensions_);
     if (index_.get(vertex_id, result.data())) {
@@ -186,7 +238,8 @@ class UsearchIndex :
   size_t dimensions_;
   DistanceKind distance_kind_;
   metric_punned_t metric_;
-  index_dense_gt<VertexId> index_;
+  IndexImpl index_;
+  mutable std::optional<std::counting_semaphore<1>> search_semaphore_;
 };
 
 }  // namespace

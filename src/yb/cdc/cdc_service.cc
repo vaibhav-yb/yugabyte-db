@@ -254,32 +254,6 @@ METRIC_DEFINE_entity(cdcsdk);
       xrepl::StreamId::FromString(stream_id_str), resp->mutable_error(), \
       CDCErrorPB::INVALID_REQUEST, context)
 
-// TODO(22655): Remove the below macro once YB_LOG_EVERY_N_SECS_OR_VLOG() is fixed.
-#define YB_CDC_LOG_EVERY_N_SECS_OR_VLOG(oss, n_secs, verbose_level) \
-  do { \
-    if (VLOG_IS_ON(verbose_level)) { \
-      switch (verbose_level) { \
-        case 1: \
-          VLOG(1) << (oss).str(); \
-          break; \
-        case 2: \
-          VLOG(2) << (oss).str(); \
-          break; \
-        case 3: \
-          VLOG(3) << (oss).str(); \
-          break; \
-        case 4: \
-          VLOG(4) << (oss).str(); \
-          break; \
-        default: \
-          LOG(INFO) << (oss).str(); \
-          break; \
-      } \
-    } else { \
-      YB_LOG_EVERY_N_SECS(INFO, n_secs) << (oss).str(); \
-    } \
-  } while (0)
-
 using namespace std::literals;
 using namespace std::placeholders;
 
@@ -1533,7 +1507,8 @@ void CDCServiceImpl::GetChanges(
   if (!CheckOnline(req, resp, &context)) {
     return;
   }
-  YB_LOG_EVERY_N_SECS(INFO, 300) << "Received GetChanges request " << req->ShortDebugString();
+  YB_LOG_EVERY_N_SECS_OR_VLOG(INFO, 300, 5)
+      << "Received GetChanges request " << req->ShortDebugString();
 
   RPC_CHECK_AND_RETURN_ERROR(
       req->has_tablet_id(),
@@ -2145,6 +2120,7 @@ void CDCServiceImpl::ProcessMetricsForEmptyChildrenTablets(
 void CDCServiceImpl::UpdateMetrics() {
   auto tablet_checkpoints = impl_->TabletCheckpointsCopy();
   TabletInfoToLastReplicationTimeMap cdc_state_tablets_to_last_replication_time;
+  std::unordered_set<TabletStreamInfo, TabletStreamInfo::Hash> expired_entries;
   EmptyChildrenTabletMap empty_children_tablets;
 
   Status iteration_status;
@@ -2192,6 +2168,11 @@ void CDCServiceImpl::UpdateMetrics() {
     bool is_leader = (tablet_peer->LeaderStatus() == consensus::LeaderStatus::LEADER_AND_READY);
 
     if (record.GetSourceType() == CDCSDK) {
+      if (entry.active_time.has_value() &&
+          CheckTabletExpiredOrNotOfInterest(tablet_info, *entry.active_time)) {
+        expired_entries.insert(tablet_info);
+        continue;
+      }
       auto tablet_metric_result = GetCDCSDKTabletMetrics(
           *tablet_peer.get(), tablet_info.stream_id, CreateMetricsEntityIfNotFound::kTrue,
           record.GetReplicationSlotName());
@@ -2305,7 +2286,8 @@ void CDCServiceImpl::UpdateMetrics() {
   // longer replicating.
   for (const auto& checkpoint : tablet_checkpoints) {
     const TabletStreamInfo& tablet_info = checkpoint.producer_tablet_info;
-    if (!cdc_state_tablets_to_last_replication_time.contains(tablet_info)) {
+    if (!cdc_state_tablets_to_last_replication_time.contains(tablet_info) ||
+        expired_entries.contains(tablet_info)) {
       // We're no longer replicating this tablet, so set lag to 0.
       auto tablet_peer = context_->LookupTablet(checkpoint.tablet_id());
       if (!tablet_peer) {
@@ -4066,6 +4048,25 @@ Status CDCServiceImpl::CheckTabletNotOfInterest(
       producer_tablet.tablet_id);
 }
 
+bool CDCServiceImpl::CheckTabletExpiredOrNotOfInterest(
+    const TabletStreamInfo& producer_tablet, int64_t last_active_time_passed) {
+  auto s = CheckStreamActive(producer_tablet, last_active_time_passed);
+  if (!s.ok()) {
+    VLOG(3) << "Tablet: " << producer_tablet.tablet_id
+            << " expired for stream: " << producer_tablet.stream_id;
+    return true;
+  }
+
+  s = CheckTabletNotOfInterest(producer_tablet, last_active_time_passed);
+  if (!s.ok()) {
+    VLOG(3) << "Tablet: " << producer_tablet.tablet_id
+            << " is not of interest for stream: " << producer_tablet.stream_id;
+    return true;
+  }
+
+  return false;
+}
+
 Result<int64_t> CDCServiceImpl::GetLastActiveTime(
     const TabletStreamInfo& producer_tablet, bool ignore_cache) {
   DCHECK(producer_tablet.stream_id && !producer_tablet.tablet_id.empty());
@@ -4862,9 +4863,8 @@ void CDCServiceImpl::GetConsistentChanges(
     return;
   }
 
-  std::ostringstream oss;
-  oss << "Received GetConsistentChanges request: " << req->ShortDebugString();
-  YB_CDC_LOG_EVERY_N_SECS_OR_VLOG(oss, 300, 1);
+  YB_LOG_EVERY_N_SECS_OR_VLOG(INFO, 300, 1)
+      << "Received GetConsistentChanges request: " << req->ShortDebugString();
 
   RPC_CHECK_AND_RETURN_ERROR(
       req->has_session_id(),
@@ -5001,9 +5001,8 @@ void CDCServiceImpl::UpdateAndPersistLSN(
     return;
   }
 
-  std::ostringstream oss;
-  oss << "Received UpdateAndPersistLSN request: " << req->ShortDebugString();
-  YB_CDC_LOG_EVERY_N_SECS_OR_VLOG(oss, 300, 1);
+  YB_LOG_EVERY_N_SECS_OR_VLOG(INFO, 300, 1)
+      << "Received UpdateAndPersistLSN request: " << req->ShortDebugString();
 
   RPC_CHECK_AND_RETURN_ERROR(
       req->has_session_id(),
@@ -5052,10 +5051,9 @@ void CDCServiceImpl::UpdateAndPersistLSN(
 
   resp->set_restart_lsn(*res);
 
-  oss.clear();
-  oss << "Succesfully persisted LSN values for stream_id: " << stream_id
+  YB_LOG_EVERY_N_SECS_OR_VLOG(INFO, 300, 1)
+      << "Successfully persisted LSN values for stream_id: " << stream_id
       << ", confirmed_flush_lsn = " << confirmed_flush_lsn << ", restart_lsn = " << *res;
-  YB_CDC_LOG_EVERY_N_SECS_OR_VLOG(oss, 300, 1);
 
   context.RespondSuccess();
 }

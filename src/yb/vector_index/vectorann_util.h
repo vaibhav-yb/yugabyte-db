@@ -15,9 +15,9 @@
 #pragma once
 
 #include <queue>
+#include <thread>
 
 #include "yb/common/vector_types.h"
-
 #include "yb/rocksdb/status.h"
 
 #include "yb/util/result.h"
@@ -25,6 +25,8 @@
 
 #include "yb/vector_index/coordinate_types.h"
 #include "yb/vector_index/distance.h"
+#include "yb/vector_index/vector_index_if.h"
+#include "yb/vector_index/hnswlib_wrapper.h"
 
 namespace yb::vector_index {
 
@@ -82,7 +84,7 @@ auto DrainMaxQueueToIncreasingDistanceList(MaxDistanceQueue<DistanceResult>& que
 template<IndexableVectorType Vector, ValidDistanceResultType DistanceResult>
 std::vector<VertexWithDistance<DistanceResult>> BruteForcePreciseNearestNeighbors(
     const Vector& query,
-    const std::vector<VertexId>& vertex_ids,
+    const std::vector<VectorId>& vertex_ids,
     const VertexIdToVectorDistanceFunction<Vector, DistanceResult>& distance_fn,
     size_t num_results) {
   if (num_results == 0) {
@@ -112,6 +114,28 @@ std::vector<VertexWithDistance<DistanceResult>> BruteForcePreciseNearestNeighbor
       << num_results << ", returned: " << result.size();
 
   return result;
+}
+
+// Draft of a function that returns a pointer to a merged index
+template <IndexableVectorType Vector, ValidDistanceResultType DistanceResult>
+VectorIndexIfPtr<Vector, DistanceResult> Merge(
+    VectorIndexFactory<Vector, DistanceResult> index_factory,
+    VectorIndexIfPtr<Vector, DistanceResult> index_a,
+    VectorIndexIfPtr<Vector, DistanceResult> index_b) {
+  VectorIndexIfPtr<Vector, DistanceResult> merged_index = index_factory();
+  // TODO(vector_index) we need a way to get the size of merging index
+  auto status_reserve = merged_index->Reserve(
+      10, std::thread::hardware_concurrency(), std::thread::hardware_concurrency());
+
+  for (const auto& [vertex_id, vector] : *index_a) {
+    auto status = merged_index->Insert(vertex_id, vector);
+  }
+
+  for (const auto& [vertex_id, vector] : *index_b) {
+    auto status = merged_index->Insert(vertex_id, vector);
+  }
+
+  return merged_index;
 }
 
 }  // namespace yb::vector_index

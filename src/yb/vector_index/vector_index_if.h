@@ -15,9 +15,8 @@
 
 #pragma once
 
+#include "yb/util/polymorphic_iterator.h"
 #include "yb/util/result.h"
-
-#include "yb/common/vector_types.h"
 
 #include "yb/vector_index/coordinate_types.h"
 #include "yb/vector_index/distance.h"
@@ -25,16 +24,26 @@
 
 namespace yb::vector_index {
 
+template <IndexableVectorType Vector, ValidDistanceResultType DistanceResult>
+class VectorIndexReaderIf;
+
 template<IndexableVectorType Vector, ValidDistanceResultType DistanceResult>
 class VectorIndexReaderIf {
  public:
-  using SearchResult = std::vector<VertexWithDistance<DistanceResult>>;
+  using SearchResult  = std::vector<VertexWithDistance<DistanceResult>>;
+  using IteratorValue = std::pair<VectorId, Vector>;
+  using Iterator      = PolymorphicIterator<IteratorValue>;
 
   virtual ~VectorIndexReaderIf() = default;
-
   virtual DistanceResult Distance(const Vector& lhs, const Vector& rhs) const = 0;
-  virtual SearchResult Search(const Vector& query_vector, size_t max_num_results) const = 0;
+  virtual Result<SearchResult> Search(const Vector& query_vector, size_t max_num_results) const = 0;
+
+  virtual std::unique_ptr<AbstractIterator<IteratorValue>> BeginImpl() const = 0;
+  virtual std::unique_ptr<AbstractIterator<IteratorValue>> EndImpl()   const = 0;
   virtual std::string IndexStatsStr() const { return "N/A"; }
+
+  Iterator begin() const { return Iterator(BeginImpl()); }
+  Iterator end()   const { return Iterator(EndImpl()); }
 };
 
 template<IndexableVectorType Vector>
@@ -43,13 +52,14 @@ class VectorIndexWriterIf {
   virtual ~VectorIndexWriterIf() = default;
 
   // Reserves capacity for this number of vectors.
-  virtual Status Reserve(size_t num_vectors) = 0;
+  virtual Status Reserve(
+      size_t num_vectors, size_t max_concurrent_inserts, size_t max_concurrent_reads) = 0;
 
-  virtual Status Insert(VertexId vertex_id, const Vector& vector) = 0;
+  virtual Status Insert(VectorId vertex_id, const Vector& vector) = 0;
 
-  // Returns the vector with the given id, an empty vector if such VertexId does not exist, or
+  // Returns the vector with the given id, an empty vector if such VectorId does not exist, or
   // a non-OK status if an error occurred.
-  virtual Result<Vector> GetVector(VertexId vertex_id) const = 0;
+  virtual Result<Vector> GetVector(VectorId vertex_id) const = 0;
 };
 
 template<IndexableVectorType Vector, ValidDistanceResultType DistanceResult>

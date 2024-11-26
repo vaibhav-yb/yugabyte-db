@@ -12,6 +12,7 @@
 
 #pragma once
 #include <algorithm>
+#include <string>
 #include <utility>
 #include <vector>
 
@@ -800,6 +801,8 @@ class CDCSDKYsqlTest : public CDCSDKTestBase {
       google::protobuf::RepeatedPtrField<master::TabletLocationsPB> tablets,
       CDCSDKCheckpointPB checkpoint, GetChangesResponsePB* change_resp);
 
+  void TestCreateReplicationSlotWithLsnType(const std::string lsn_type);
+
   void TestTableIdAndPkInCDCRecords(bool colocated_db);
 
   void VerifyTableIdAndPkInCDCRecords(
@@ -849,6 +852,8 @@ class CDCSDKYsqlTest : public CDCSDKTestBase {
   Status GetIntentEntriesAndSSTFileCountForTablet(
       const TabletId& tablet_id, std::unordered_map<std::string, std::pair<int64_t, int64_t>>*
                                         initial_intents_and_intent_sst_file_count);
+
+  void TestLagMetricWithConsistentSnapshotStream(bool expire_table);
 };
 
 }  // namespace cdc

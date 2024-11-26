@@ -5642,6 +5642,7 @@ void CDCSDKYsqlTest::TestMetricObjectRemovalAfterStreamDeletion(bool use_logical
   ANNOTATE_UNPROTECTED_WRITE(FLAGS_update_min_cdc_indices_interval_secs) = 0;
   ANNOTATE_UNPROTECTED_WRITE(FLAGS_cdc_state_checkpoint_update_interval_ms) = 0;
   ANNOTATE_UNPROTECTED_WRITE(FLAGS_update_metrics_interval_ms) = 0;
+  ANNOTATE_UNPROTECTED_WRITE(FLAGS_yb_enable_cdc_consistent_snapshot_streams) = true;
   ASSERT_OK(SetUpWithParams(1, 1, false));
 
   const uint32_t num_tablets = 1;

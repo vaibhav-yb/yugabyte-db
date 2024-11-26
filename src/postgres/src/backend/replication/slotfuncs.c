@@ -206,11 +206,12 @@ pg_create_logical_replication_slot(PG_FUNCTION_ARGS)
 	Name		yb_lsn_type_arg;
 	char		*yb_lsn_type = "SEQUENCE";
 
-	if (!PG_ARGISNULL(4)) {
+	if (!PG_ARGISNULL(4))
+	{
 		yb_lsn_type_arg = PG_GETARG_NAME(4);
 		yb_lsn_type = NameStr(*yb_lsn_type_arg);
 	}
-	
+
 	Datum		result;
 	TupleDesc	tupdesc;
 	HeapTuple	tuple;

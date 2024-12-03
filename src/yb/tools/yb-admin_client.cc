@@ -124,6 +124,7 @@ DEFINE_test_flag(int32, metadata_file_format_version, 0,
 
 DECLARE_bool(use_client_to_server_encryption);
 DECLARE_int32(yb_client_admin_operation_timeout_sec);
+DECLARE_bool(cdc_enable_implicit_checkpointing);
 
 // Maximum number of elements to dump on unexpected errors.
 static constexpr int MAX_NUM_ELEMENTS_TO_SHOW_ON_ERROR = 10;
@@ -3733,9 +3734,15 @@ Status ClusterAdminClient::CreateCDCSDKDBStream(
   if (checkpoint_type == yb::ToString("EXPLICIT")) {
         req.set_checkpoint_type(cdc::CDCCheckpointType::EXPLICIT);
   } else {
-        cout << "IMPLICIT stream creation is disabled";
-        return STATUS_FORMAT(InvalidArgument, "IMPLICIT stream creation is disabled");
-        // req.set_checkpoint_type(cdc::CDCCheckpointType::IMPLICIT);
+    LOG(INFO) << "VKVK Flag value is " << FLAGS_cdc_enable_implicit_checkpointing;
+    if (FLAGS_cdc_enable_implicit_checkpointing) {
+      cout << "WARNING: Creation of streams with IMPLICIT checkpointing is going to be removed "
+              "soon, consider creating a stream with EXPLICIT checkpointing.\n\n";
+      req.set_checkpoint_type(cdc::CDCCheckpointType::IMPLICIT);
+    } else {
+      cout << "IMPLICIT stream creation is disabled\n\n";
+      return STATUS_FORMAT(InvalidArgument, "IMPLICIT stream creation is disabled");
+    }
   }
 
   if (consistent_snapshot_option == "USE_SNAPSHOT") {

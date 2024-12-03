@@ -227,14 +227,6 @@ class CDCSDKStreamTest : public CDCSDKTestBase {
   }
 };
 
-TEST_F(CDCSDKStreamTest, CreateCDCSDKStreamImplicit) {
-  // Create a cluster.
-  ASSERT_OK(SetUpWithParams(3, 1, false));
-
-  auto db_stream_id = ASSERT_RESULT(CreateDBStream(CDCCheckpointType::IMPLICIT));
-  ASSERT_NE(0, db_stream_id.size());
-}
-
 TEST_F(CDCSDKStreamTest, CreateCDCSDKStreamExplicit) {
   // Create a cluster.
   ASSERT_OK(SetUpWithParams(3, 1, false));
@@ -403,35 +395,6 @@ TEST_F(CDCSDKStreamTest, CDCWithXclusterEnabled) {
   }
 }
 
-TEST_F(CDCSDKStreamTest, ImplicitCheckPointValidate) {
-  // Create a cluster.
-  ASSERT_OK(SetUpWithParams(3, 1, false));
-
-  // Create a DB Stream.
-  auto db_stream_id = ASSERT_RESULT(CreateDBStream(CDCCheckpointType::IMPLICIT));
-  ASSERT_NE(0, db_stream_id.size());
-
-  // Get the list of dbstream.
-  google::protobuf::RepeatedPtrField<yb::master::CDCStreamInfoPB> list_streams =
-      ASSERT_RESULT(ListDBStreams(kNamespaceName));
-  const uint32_t num_streams = list_streams.size();
-
-  for (uint32_t i = 0; i < num_streams; ++i) {
-    // Validate the streamid.
-    ASSERT_EQ(db_stream_id.ToString(), list_streams.Get(i).stream_id());
-
-    const uint32_t options_sz = list_streams.Get(i).options_size();
-    for (uint32_t j = 0; j < options_sz; j++) {
-      // Validate the checkpoint type IMPLICIT.
-      string cur_key = list_streams.Get(i).options(j).key();
-      string cur_value = list_streams.Get(i).options(j).value();
-      if (cur_key == string("checkpoint_type")) {
-        ASSERT_EQ(cur_value, string("IMPLICIT"));
-      }
-    }
-  }
-}
-
 TEST_F(CDCSDKStreamTest, ExplicitCheckPointValidate) {
     // Create a cluster.
     ASSERT_OK(SetUpWithParams(3, 1, false));
@@ -520,6 +483,29 @@ TEST_F(CDCSDKStreamTest, TestStreamRetentionWithTableDeletion) {
         return (resp->table_info_size() == 0);
       },
       MonoDelta::FromSeconds(60), "Waiting for stream metadata update with no table info."));
+}
+
+TEST_F(CDCSDKStreamTest, TestDisallowImplicitStreamCreation) {
+  constexpr int num_tservers = 1;
+  ASSERT_OK(SetUpWithParams(num_tservers, /* num_masters */ 1, false));
+
+  constexpr auto num_tablets = 1;
+  auto table = ASSERT_RESULT(CreateTable(&test_cluster_, kNamespaceName, kTableName, num_tablets));
+
+  ASSERT_NOK(CreateConsistentSnapshotStream(
+      CDCSDKSnapshotOption::USE_SNAPSHOT, CDCCheckpointType::IMPLICIT));
+}
+
+TEST_F(CDCSDKStreamTest, TestAllowImplicitStreamCreationOnlyWhenFlagEnabled) {
+  ANNOTATE_UNPROTECTED_WRITE(FLAGS_cdc_enable_implicit_checkpointing) = true;
+  constexpr int num_tservers = 1;
+  ASSERT_OK(SetUpWithParams(num_tservers, /* num_masters */ 1, false));
+
+  constexpr auto num_tablets = 1;
+  auto table = ASSERT_RESULT(CreateTable(&test_cluster_, kNamespaceName, kTableName, num_tablets));
+
+  ASSERT_OK(CreateConsistentSnapshotStream(
+      CDCSDKSnapshotOption::USE_SNAPSHOT, CDCCheckpointType::IMPLICIT));
 }
 
 }  // namespace cdc

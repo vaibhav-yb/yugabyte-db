@@ -328,7 +328,7 @@ TEST_F(CDCSDKYsqlTest, YB_DISABLE_TEST_IN_TSAN(TestSafeTimePersistedFromGetChang
 
   auto tablets = ASSERT_RESULT(SetUpCluster());
   ASSERT_EQ(tablets.size(), 1);
-  xrepl::StreamId stream_id = ASSERT_RESULT(CreateDBStream(IMPLICIT, PG_FULL));
+  xrepl::StreamId stream_id = ASSERT_RESULT(CreateDBStream(EXPLICIT, PG_FULL));
   auto set_resp = ASSERT_RESULT(SetCDCCheckpoint(stream_id, tablets));
   ASSERT_FALSE(set_resp.has_error());
 
@@ -942,40 +942,20 @@ TEST_F(CDCSDKYsqlTest, YB_DISABLE_TEST_IN_TSAN(TestGarbageCollectionFlagExplicit
   TestIntentGarbageCollectionFlag(1, true, 10000, CDCCheckpointType::EXPLICIT);
 }
 
-TEST_F(CDCSDKYsqlTest, YB_DISABLE_TEST_IN_TSAN(TestGarbageCollectionFlagImplicit)) {
-  TestIntentGarbageCollectionFlag(1, true, 10000, CDCCheckpointType::IMPLICIT);
-}
-
 TEST_F(CDCSDKYsqlTest, YB_DISABLE_TEST_IN_TSAN(TestGarbageCollectionWithSmallIntervalExplicit)) {
   TestIntentGarbageCollectionFlag(3, true, 5000, CDCCheckpointType::EXPLICIT);
-}
-
-TEST_F(CDCSDKYsqlTest, YB_DISABLE_TEST_IN_TSAN(TestGarbageCollectionWithSmallIntervalImplicit)) {
-  TestIntentGarbageCollectionFlag(3, true, 5000, CDCCheckpointType::IMPLICIT);
 }
 
 TEST_F(CDCSDKYsqlTest, YB_DISABLE_TEST_IN_TSAN(TestGarbageCollectionWithLargerIntervalExplicit)) {
   TestIntentGarbageCollectionFlag(3, true, 10000, CDCCheckpointType::EXPLICIT);
 }
 
-TEST_F(CDCSDKYsqlTest, YB_DISABLE_TEST_IN_TSAN(TestGarbageCollectionWithLargerIntervalImplicit)) {
-  TestIntentGarbageCollectionFlag(3, true, 10000, CDCCheckpointType::IMPLICIT);
-}
-
 TEST_F(CDCSDKYsqlTest, YB_DISABLE_TEST_IN_TSAN(TestNoGarbageCollectionBeforeIntervalExplicit)) {
   TestIntentGarbageCollectionFlag(3, false, 0, CDCCheckpointType::EXPLICIT);
 }
 
-TEST_F(CDCSDKYsqlTest, YB_DISABLE_TEST_IN_TSAN(TestNoGarbageCollectionBeforeIntervalImplicit)) {
-  TestIntentGarbageCollectionFlag(3, false, 0, CDCCheckpointType::IMPLICIT);
-}
-
 TEST_F(CDCSDKYsqlTest, YB_DISABLE_TEST_IN_TSAN(TestExtendingIntentRetentionTimeExplicit)) {
   TestIntentGarbageCollectionFlag(3, true, 10000, CDCCheckpointType::EXPLICIT, true);
-}
-
-TEST_F(CDCSDKYsqlTest, YB_DISABLE_TEST_IN_TSAN(TestExtendingIntentRetentionTimeImplicit)) {
-  TestIntentGarbageCollectionFlag(3, true, 10000, CDCCheckpointType::IMPLICIT, true);
 }
 
 CDCSDK_TESTS_FOR_ALL_CHECKPOINT_OPTIONS(CDCSDKYsqlTest, TestSetCDCCheckpoint);
@@ -1181,7 +1161,7 @@ TEST_F(CDCSDKYsqlTest, YB_DISABLE_TEST_IN_TSAN(TestCheckPointPersistencyNodeRest
   ASSERT_EQ(tablets.size(), num_tablets);
 
   std::string table_id = ASSERT_RESULT(GetTableId(&test_cluster_, kNamespaceName, kTableName));
-  xrepl::StreamId stream_id = ASSERT_RESULT(CreateDBStream(IMPLICIT));
+  xrepl::StreamId stream_id = ASSERT_RESULT(CreateDBStream(EXPLICIT));
 
   auto resp = ASSERT_RESULT(SetCDCCheckpoint(stream_id, tablets));
   ASSERT_FALSE(resp.has_error());
@@ -2170,7 +2150,7 @@ TEST_F(CDCSDKYsqlTest, YB_DISABLE_TEST_IN_TSAN(TestEnumMultipleStreams)) {
   ASSERT_EQ(tablets.size(), num_tablets);
 
   std::string table_id = ASSERT_RESULT(GetTableId(&test_cluster_, kNamespaceName, kTableName));
-  xrepl::StreamId stream_id = ASSERT_RESULT(CreateDBStream(IMPLICIT));
+  xrepl::StreamId stream_id = ASSERT_RESULT(CreateDBStream(EXPLICIT));
   auto resp = ASSERT_RESULT(SetCDCCheckpoint(stream_id, tablets));
   ASSERT_FALSE(resp.has_error());
 
@@ -2182,7 +2162,7 @@ TEST_F(CDCSDKYsqlTest, YB_DISABLE_TEST_IN_TSAN(TestEnumMultipleStreams)) {
   ASSERT_OK(test_client()->GetTablets(table1, 0, &tablets1, /* partition_list_version =*/nullptr));
   ASSERT_EQ(tablets1.size(), num_tablets);
 
-  xrepl::StreamId stream_id1 = ASSERT_RESULT(CreateDBStream(IMPLICIT));
+  xrepl::StreamId stream_id1 = ASSERT_RESULT(CreateDBStream(EXPLICIT));
 
   auto resp1 = ASSERT_RESULT(SetCDCCheckpoint(stream_id1, tablets1));
   ASSERT_FALSE(resp1.has_error());
@@ -2298,7 +2278,7 @@ TEST_F(CDCSDKYsqlTest, YB_DISABLE_TEST(TestCompositeType)) {
   ASSERT_EQ(tablets.size(), num_tablets);
 
   std::string table_id = ASSERT_RESULT(GetTableId(&test_cluster_, kNamespaceName, "emp"));
-  xrepl::StreamId stream_id = ASSERT_RESULT(CreateDBStream(IMPLICIT));
+  xrepl::StreamId stream_id = ASSERT_RESULT(CreateDBStream(EXPLICIT));
 
   auto resp = ASSERT_RESULT(SetCDCCheckpoint(stream_id, tablets));
   ASSERT_FALSE(resp.has_error());
@@ -2342,7 +2322,7 @@ TEST_F(CDCSDKYsqlTest, YB_DISABLE_TEST(TestCompositeTypeWithRestart)) {
   ASSERT_EQ(tablets.size(), num_tablets);
 
   std::string table_id = ASSERT_RESULT(GetTableId(&test_cluster_, kNamespaceName, "emp"));
-  xrepl::StreamId stream_id = ASSERT_RESULT(CreateDBStream(IMPLICIT));
+  xrepl::StreamId stream_id = ASSERT_RESULT(CreateDBStream(EXPLICIT));
 
   auto resp = ASSERT_RESULT(SetCDCCheckpoint(stream_id, tablets));
   ASSERT_FALSE(resp.has_error());
@@ -2395,7 +2375,7 @@ TEST_F(CDCSDKYsqlTest, YB_DISABLE_TEST(TestNestedCompositeType)) {
   ASSERT_EQ(tablets.size(), num_tablets);
 
   std::string table_id = ASSERT_RESULT(GetTableId(&test_cluster_, kNamespaceName, "emp_nested"));
-  xrepl::StreamId stream_id = ASSERT_RESULT(CreateDBStream(IMPLICIT));
+  xrepl::StreamId stream_id = ASSERT_RESULT(CreateDBStream(EXPLICIT));
 
   auto resp = ASSERT_RESULT(SetCDCCheckpoint(stream_id, tablets));
   ASSERT_FALSE(resp.has_error());
@@ -2439,7 +2419,7 @@ TEST_F(CDCSDKYsqlTest, YB_DISABLE_TEST(TestArrayCompositeType)) {
   ASSERT_EQ(tablets.size(), num_tablets);
 
   std::string table_id = ASSERT_RESULT(GetTableId(&test_cluster_, kNamespaceName, "emp_array"));
-  xrepl::StreamId stream_id = ASSERT_RESULT(CreateDBStream(IMPLICIT));
+  xrepl::StreamId stream_id = ASSERT_RESULT(CreateDBStream(EXPLICIT));
 
   auto resp = ASSERT_RESULT(SetCDCCheckpoint(stream_id, tablets));
   ASSERT_FALSE(resp.has_error());
@@ -2486,7 +2466,7 @@ TEST_F(CDCSDKYsqlTest, YB_DISABLE_TEST(TestRangeCompositeType)) {
 
   std::string table_id =
       ASSERT_RESULT(GetTableId(&test_cluster_, kNamespaceName, "range_composite_table"));
-  xrepl::StreamId stream_id = ASSERT_RESULT(CreateDBStream(IMPLICIT));
+  xrepl::StreamId stream_id = ASSERT_RESULT(CreateDBStream(EXPLICIT));
 
   auto resp = ASSERT_RESULT(SetCDCCheckpoint(stream_id, tablets));
   ASSERT_FALSE(resp.has_error());
@@ -2535,7 +2515,7 @@ TEST_F(CDCSDKYsqlTest, YB_DISABLE_TEST(TestRangeArrayCompositeType)) {
 
   std::string table_id =
       ASSERT_RESULT(GetTableId(&test_cluster_, kNamespaceName, "range_array_composite_table"));
-  xrepl::StreamId stream_id = ASSERT_RESULT(CreateDBStream(IMPLICIT));
+  xrepl::StreamId stream_id = ASSERT_RESULT(CreateDBStream(EXPLICIT));
 
   auto resp = ASSERT_RESULT(SetCDCCheckpoint(stream_id, tablets));
   ASSERT_FALSE(resp.has_error());
@@ -2585,7 +2565,7 @@ TEST_F(CDCSDKYsqlTest, YB_DISABLE_TEST_IN_TSAN(TestTransactionWithLargeBatchSize
   google::protobuf::RepeatedPtrField<master::TabletLocationsPB> tablets;
   ASSERT_OK(test_client()->GetTablets(table, 0, &tablets, /* partition_list_version=*/nullptr));
   ASSERT_EQ(tablets.size(), num_tablets);
-  xrepl::StreamId stream_id = ASSERT_RESULT(CreateDBStream(IMPLICIT));
+  xrepl::StreamId stream_id = ASSERT_RESULT(CreateDBStream(EXPLICIT));
 
   auto resp = ASSERT_RESULT(SetCDCCheckpoint(stream_id, tablets));
   ASSERT_FALSE(resp.has_error());
@@ -2639,7 +2619,7 @@ TEST_F(CDCSDKYsqlTest, YB_DISABLE_TEST_IN_TSAN(TestIntentCountPersistencyAfterCo
   ASSERT_EQ(tablets.size(), num_tablets);
 
   TableId table_id = ASSERT_RESULT(GetTableId(&test_cluster_, kNamespaceName, kTableName));
-  xrepl::StreamId stream_id = ASSERT_RESULT(CreateDBStream(IMPLICIT));
+  xrepl::StreamId stream_id = ASSERT_RESULT(CreateDBStream(EXPLICIT));
 
   auto resp = ASSERT_RESULT(SetCDCCheckpoint(stream_id, tablets));
   ASSERT_FALSE(resp.has_error());
@@ -2782,7 +2762,7 @@ TEST_F(CDCSDKYsqlTest, YB_DISABLE_TEST_IN_TSAN(TestLogGCedWithTabletBootStrap)) 
   ASSERT_OK(test_client()->GetTablets(table, 0, &tablets, /* partition_list_version=*/nullptr));
   ASSERT_EQ(tablets.size(), num_tablets);
 
-  xrepl::StreamId stream_id = ASSERT_RESULT(CreateDBStream(IMPLICIT));
+  xrepl::StreamId stream_id = ASSERT_RESULT(CreateDBStream(EXPLICIT));
   auto resp = ASSERT_RESULT(SetCDCCheckpoint(stream_id, tablets));
   ASSERT_FALSE(resp.has_error());
 
@@ -2918,7 +2898,7 @@ TEST_F(CDCSDKYsqlTest, YB_DISABLE_TEST_IN_TSAN(TestEnumWithMultipleTablets)) {
     ASSERT_EQ(tablets[idx].size(), num_tablets);
 
     table_id[idx] = ASSERT_RESULT(GetTableId(&test_cluster_, kNamespaceName, listTablesName[idx]));
-    auto stream_id = ASSERT_RESULT(CreateDBStream(IMPLICIT));
+    auto stream_id = ASSERT_RESULT(CreateDBStream(EXPLICIT));
 
     for (uint32_t jdx = 0; jdx < num_tablets; jdx++) {
       auto resp = ASSERT_RESULT(
@@ -2981,7 +2961,7 @@ TEST_F(CDCSDKYsqlTest, YB_DISABLE_TEST_IN_TSAN(TestGetTabletListToPollForCDC)) {
   ASSERT_EQ(tablets.size(), num_tablets);
   TableId table_id = ASSERT_RESULT(GetTableId(&test_cluster_, kNamespaceName, kTableName));
 
-  xrepl::StreamId stream_id = ASSERT_RESULT(CreateDBStream(IMPLICIT));
+  xrepl::StreamId stream_id = ASSERT_RESULT(CreateDBStream(EXPLICIT));
   auto resp = ASSERT_RESULT(SetCDCCheckpoint(stream_id, tablets));
   ASSERT_FALSE(resp.has_error());
 
@@ -3191,7 +3171,7 @@ TEST_F(CDCSDKYsqlTest, YB_DISABLE_TEST_IN_TSAN(TestDeletedStreamRowRemovedEvenAf
   ASSERT_EQ(tablets.size(), num_tablets);
 
   TableId table_id = ASSERT_RESULT(GetTableId(&test_cluster_, kNamespaceName, kTableName));
-  xrepl::StreamId stream_id = ASSERT_RESULT(CreateDBStream(IMPLICIT));
+  xrepl::StreamId stream_id = ASSERT_RESULT(CreateDBStream(EXPLICIT));
 
   auto resp = ASSERT_RESULT(SetCDCCheckpoint(stream_id, tablets));
   ASSERT_FALSE(resp.has_error());
@@ -3353,7 +3333,7 @@ TEST_F(CDCSDKYsqlTest, YB_DISABLE_TEST_IN_TSAN(TestCreateStreamAfterSetCheckpoin
 
   TableId table_id = ASSERT_RESULT(GetTableId(&test_cluster_, kNamespaceName, kTableName));
 
-  xrepl::StreamId stream_id = ASSERT_RESULT(CreateDBStream(IMPLICIT));
+  xrepl::StreamId stream_id = ASSERT_RESULT(CreateDBStream(EXPLICIT));
   auto resp = ASSERT_RESULT(SetCDCCheckpoint(stream_id, tablets));
   ASSERT_FALSE(resp.has_error());
 
@@ -3388,7 +3368,7 @@ TEST_F(CDCSDKYsqlTest, YB_DISABLE_TEST_IN_TSAN(TestCreateStreamAfterSetCheckpoin
       test_client(), stream_id, tablets[0].tablet_id(), max_commit_op_id.term,
       max_commit_op_id.index);
 
-  xrepl::StreamId stream_id_2 = ASSERT_RESULT(CreateDBStream(IMPLICIT));
+  xrepl::StreamId stream_id_2 = ASSERT_RESULT(CreateDBStream(EXPLICIT));
   resp = ASSERT_RESULT(SetCDCCheckpoint(stream_id_2, tablets));
   ASSERT_FALSE(resp.has_error());
 }
@@ -3412,7 +3392,7 @@ TEST_F(CDCSDKYsqlTest, YB_DISABLE_TEST_IN_TSAN(TestCDCSDKCacheWithLeaderChange))
   EnableCDCServiceInAllTserver(3);
   TableId table_id = ASSERT_RESULT(GetTableId(&test_cluster_, kNamespaceName, kTableName));
 
-  xrepl::StreamId stream_id = ASSERT_RESULT(CreateDBStream(IMPLICIT));
+  xrepl::StreamId stream_id = ASSERT_RESULT(CreateDBStream(EXPLICIT));
   auto resp = ASSERT_RESULT(SetCDCCheckpoint(stream_id, tablets));
   ASSERT_FALSE(resp.has_error());
 
@@ -3473,7 +3453,7 @@ TEST_F(CDCSDKYsqlTest, YB_DISABLE_TEST_IN_TSAN(TestCDCSDKCacheWithLeaderReElect)
 
   TableId table_id = ASSERT_RESULT(GetTableId(&test_cluster_, kNamespaceName, kTableName));
 
-  xrepl::StreamId stream_id = ASSERT_RESULT(CreateDBStream(IMPLICIT));
+  xrepl::StreamId stream_id = ASSERT_RESULT(CreateDBStream(EXPLICIT));
 
   auto resp = ASSERT_RESULT(SetCDCCheckpoint(stream_id, tablets));
   ASSERT_FALSE(resp.has_error());
@@ -3571,7 +3551,7 @@ TEST_F(CDCSDKYsqlTest, YB_DISABLE_TEST_IN_TSAN(TestCDCSDKCacheWithLeaderRestart)
 
   TableId table_id = ASSERT_RESULT(GetTableId(&test_cluster_, kNamespaceName, kTableName));
 
-  xrepl::StreamId stream_id = ASSERT_RESULT(CreateDBStream(IMPLICIT));
+  xrepl::StreamId stream_id = ASSERT_RESULT(CreateDBStream(EXPLICIT));
   auto resp = ASSERT_RESULT(SetCDCCheckpoint(stream_id, tablets));
   ASSERT_FALSE(resp.has_error());
 
@@ -3697,7 +3677,7 @@ TEST_F(CDCSDKYsqlTest, YB_DISABLE_TEST_IN_TSAN(TestCDCSDKActiveTimeCacheInSyncWi
 
   TableId table_id = ASSERT_RESULT(GetTableId(&test_cluster_, kNamespaceName, kTableName));
 
-  xrepl::StreamId stream_id = ASSERT_RESULT(CreateDBStream(IMPLICIT));
+  xrepl::StreamId stream_id = ASSERT_RESULT(CreateDBStream(EXPLICIT));
 
   auto resp = ASSERT_RESULT(SetCDCCheckpoint(stream_id, tablets));
   ASSERT_FALSE(resp.has_error());
@@ -3776,7 +3756,7 @@ TEST_F(CDCSDKYsqlTest, YB_DISABLE_TEST_IN_TSAN(TestCDCSDKCacheWhenAFollowerIsUna
 
   TableId table_id = ASSERT_RESULT(GetTableId(&test_cluster_, kNamespaceName, kTableName));
 
-  xrepl::StreamId stream_id = ASSERT_RESULT(CreateDBStream(IMPLICIT));
+  xrepl::StreamId stream_id = ASSERT_RESULT(CreateDBStream(EXPLICIT));
   auto resp = ASSERT_RESULT(SetCDCCheckpoint(stream_id, tablets));
   ASSERT_FALSE(resp.has_error());
 
@@ -3840,7 +3820,7 @@ TEST_F(CDCSDKYsqlTest, YB_DISABLE_TEST_IN_TSAN(TestColocation)) {
   ASSERT_EQ(tablets.size(), 1);
 
   std::string table_id = table.table_id();
-  xrepl::StreamId stream_id = ASSERT_RESULT(CreateDBStream(IMPLICIT));
+  xrepl::StreamId stream_id = ASSERT_RESULT(CreateDBStream(EXPLICIT));
   auto resp = ASSERT_RESULT(SetCDCCheckpoint(stream_id, tablets));
   ASSERT_FALSE(resp.has_error());
 
@@ -3898,7 +3878,7 @@ TEST_F(CDCSDKYsqlTest, YB_DISABLE_TEST_IN_TSAN(TestIntentsInColocation)) {
   ASSERT_EQ(tablets.size(), 1);
 
   std::string table_id = table.table_id();
-  xrepl::StreamId stream_id = ASSERT_RESULT(CreateDBStream(IMPLICIT));
+  xrepl::StreamId stream_id = ASSERT_RESULT(CreateDBStream(EXPLICIT));
   auto resp = ASSERT_RESULT(SetCDCCheckpoint(stream_id, tablets));
   ASSERT_FALSE(resp.has_error());
 
@@ -3948,7 +3928,7 @@ TEST_F(CDCSDKYsqlTest, YB_DISABLE_TEST_IN_TSAN(TestCDCSDKLagMetrics)) {
   TableId table_id = ASSERT_RESULT(GetTableId(&test_cluster_, kNamespaceName, kTableName));
   vector<xrepl::StreamId> stream_ids;
   for (int idx = 0; idx < 2; idx++) {
-    stream_ids.push_back(ASSERT_RESULT(CreateDBStream(IMPLICIT)));
+    stream_ids.push_back(ASSERT_RESULT(CreateDBStream(EXPLICIT)));
   }
 
   auto resp = ASSERT_RESULT(SetCDCCheckpoint(stream_ids[0], tablets));
@@ -4007,7 +3987,7 @@ TEST_F(CDCSDKYsqlTest, YB_DISABLE_TEST_IN_TSAN(TestCDCSDKLastSentTimeMetric)) {
   ASSERT_EQ(tablets.size(), num_tablets);
 
   TableId table_id = ASSERT_RESULT(GetTableId(&test_cluster_, kNamespaceName, kTableName));
-  auto stream_id = ASSERT_RESULT(CreateDBStream(IMPLICIT));
+  auto stream_id = ASSERT_RESULT(CreateDBStream(EXPLICIT));
 
   auto resp = ASSERT_RESULT(SetCDCCheckpoint(stream_id, tablets));
   ASSERT_FALSE(resp.has_error());
@@ -4054,7 +4034,7 @@ TEST_F(CDCSDKYsqlTest, YB_DISABLE_TEST_IN_TSAN(TestCDCSDKExpiryMetric)) {
   ASSERT_EQ(tablets.size(), num_tablets);
 
   TableId table_id = ASSERT_RESULT(GetTableId(&test_cluster_, kNamespaceName, kTableName));
-  auto stream_id = ASSERT_RESULT(CreateDBStream(IMPLICIT));
+  auto stream_id = ASSERT_RESULT(CreateDBStream(EXPLICIT));
 
   auto resp = ASSERT_RESULT(SetCDCCheckpoint(stream_id, tablets));
   ASSERT_FALSE(resp.has_error());
@@ -4096,7 +4076,7 @@ TEST_F(CDCSDKYsqlTest, YB_DISABLE_TEST_IN_TSAN(TestCDCSDKTrafficSentMetric)) {
   ASSERT_EQ(tablets.size(), num_tablets);
 
   TableId table_id = ASSERT_RESULT(GetTableId(&test_cluster_, kNamespaceName, kTableName));
-  auto stream_id = ASSERT_RESULT(CreateDBStream(IMPLICIT));
+  auto stream_id = ASSERT_RESULT(CreateDBStream(EXPLICIT));
 
   auto resp = ASSERT_RESULT(SetCDCCheckpoint(stream_id, tablets));
   ASSERT_FALSE(resp.has_error());
@@ -4155,7 +4135,7 @@ TEST_F(CDCSDKYsqlTest, YB_DISABLE_TEST_IN_TSAN(TestCDCSDKChangeEventCountMetric)
   ASSERT_EQ(tablets.size(), num_tablets);
 
   TableId table_id = ASSERT_RESULT(GetTableId(&test_cluster_, kNamespaceName, kTableName));
-  auto stream_id = ASSERT_RESULT(CreateDBStream(IMPLICIT));
+  auto stream_id = ASSERT_RESULT(CreateDBStream(EXPLICIT));
 
   auto resp = ASSERT_RESULT(SetCDCCheckpoint(stream_id, tablets));
   ASSERT_FALSE(resp.has_error());
@@ -4206,7 +4186,7 @@ TEST_F(CDCSDKYsqlTest, YB_DISABLE_TEST_IN_TSAN(TestCDCSDKMetricsTwoTablesSingleS
         ASSERT_RESULT(GetTableId(&test_cluster_, kNamespaceName, kTableName + table_suffix[idx]));
   }
 
-  auto stream_id = ASSERT_RESULT(CreateDBStream(IMPLICIT));
+  auto stream_id = ASSERT_RESULT(CreateDBStream(EXPLICIT));
 
   for (auto tablet : tablets) {
     auto resp = ASSERT_RESULT(SetCDCCheckpoint(stream_id, tablet));
@@ -4304,7 +4284,7 @@ TEST_F(
     table_id[idx] = ASSERT_RESULT(
         GetTableId(&test_cluster_, kNamespaceName, kTableName + underscore + std::to_string(idx)));
 
-    auto stream_id = ASSERT_RESULT(CreateDBStream(IMPLICIT));
+    auto stream_id = ASSERT_RESULT(CreateDBStream(EXPLICIT));
     stream_ids.push_back(stream_id);
     auto resp = ASSERT_RESULT(SetCDCCheckpoint(stream_id, tablets[idx]));
     ASSERT_FALSE(resp.has_error());
@@ -4370,7 +4350,7 @@ TEST_F(CDCSDKYsqlTest, YB_DISABLE_TEST_IN_TSAN(TestCDCSDKMetricsTwoTablesTwoStre
   }
 
   for (uint32_t idx = 0; idx < num_streams; idx++) {
-    auto stream_id = ASSERT_RESULT(CreateDBStream(IMPLICIT));
+    auto stream_id = ASSERT_RESULT(CreateDBStream(EXPLICIT));
     stream_ids.push_back(stream_id);
     for (auto tablet : tablets) {
       auto resp = ASSERT_RESULT(SetCDCCheckpoint(stream_id, tablet));
@@ -4424,7 +4404,7 @@ TEST_F(CDCSDKYsqlTest, YB_DISABLE_TEST_IN_TSAN(TestCDCSDKMetricsWithAddStream)) 
   ASSERT_EQ(tablets.size(), num_tablets);
 
   TableId table_id = ASSERT_RESULT(GetTableId(&test_cluster_, kNamespaceName, kTableName));
-  auto stream_id = ASSERT_RESULT(CreateDBStream(IMPLICIT));
+  auto stream_id = ASSERT_RESULT(CreateDBStream(EXPLICIT));
 
   auto resp = ASSERT_RESULT(SetCDCCheckpoint(stream_id, tablets));
   ASSERT_FALSE(resp.has_error());
@@ -4458,7 +4438,7 @@ TEST_F(CDCSDKYsqlTest, YB_DISABLE_TEST_IN_TSAN(TestCDCSDKMetricsWithAddStream)) 
 
   // Create a new stream
   auto
-  new_stream_id = ASSERT_RESULT(CreateDBStream(IMPLICIT));
+  new_stream_id = ASSERT_RESULT(CreateDBStream(EXPLICIT));
 
   auto new_resp = ASSERT_RESULT(SetCDCCheckpoint(new_stream_id, tablets));
   ASSERT_FALSE(new_resp.has_error());
@@ -4725,7 +4705,7 @@ TEST_F(CDCSDKYsqlTest, YB_DISABLE_TEST_IN_TSAN(TestAddTableToNamespaceWithActive
   expected_table_ids.reserve(2);
   TableId table_id = ASSERT_RESULT(GetTableId(&test_cluster_, kNamespaceName, kTableName));
   expected_table_ids.push_back(table_id);
-  xrepl::StreamId stream_id = ASSERT_RESULT(CreateDBStream(IMPLICIT));
+  xrepl::StreamId stream_id = ASSERT_RESULT(CreateDBStream(EXPLICIT));
 
   std::unordered_set<TabletId> expected_tablet_ids;
   for (const auto& tablet : tablets) {
@@ -4765,7 +4745,7 @@ TEST_F(CDCSDKYsqlTest, YB_DISABLE_TEST_IN_TSAN(TestAdd100TableToNamespaceWithAct
   ASSERT_EQ(tablets.size(), num_tablets);
 
   TableId table_id = ASSERT_RESULT(GetTableId(&test_cluster_, kNamespaceName, kTableName));
-  xrepl::StreamId stream_id = ASSERT_RESULT(CreateDBStream(IMPLICIT));
+  xrepl::StreamId stream_id = ASSERT_RESULT(CreateDBStream(EXPLICIT));
 
   const int num_new_tables = 100;
   auto conn = ASSERT_RESULT(test_cluster_.ConnectToDB(kNamespaceName));
@@ -4800,7 +4780,7 @@ TEST_F(
   expected_table_ids.reserve(2);
   TableId table_id = ASSERT_RESULT(GetTableId(&test_cluster_, kNamespaceName, kTableName));
   expected_table_ids.push_back(table_id);
-  xrepl::StreamId stream_id = ASSERT_RESULT(CreateDBStream(IMPLICIT));
+  xrepl::StreamId stream_id = ASSERT_RESULT(CreateDBStream(EXPLICIT));
 
   std::unordered_set<TabletId> expected_tablet_ids;
   for (const auto& tablet : tablets) {
@@ -4867,7 +4847,7 @@ TEST_F(CDCSDKYsqlTest, YB_DISABLE_TEST_IN_TSAN(TestAddColocatedTableToNamespaceW
   expected_table_ids.push_back(table_id);
   expected_table_ids.push_back(table_id_2);
 
-  xrepl::StreamId stream_id = ASSERT_RESULT(CreateDBStream(IMPLICIT));
+  xrepl::StreamId stream_id = ASSERT_RESULT(CreateDBStream(EXPLICIT));
 
   std::unordered_set<TabletId> expected_tablet_ids;
   for (const auto& tablet : tablets) {
@@ -4921,7 +4901,7 @@ TEST_F(CDCSDKYsqlTest, YB_DISABLE_TEST_IN_TSAN(TestAddTableToNamespaceWithMultip
   expected_table_ids.reserve(2);
   TableId table_id = ASSERT_RESULT(GetTableId(&test_cluster_, kNamespaceName, kTableName));
   expected_table_ids.push_back(table_id);
-  xrepl::StreamId stream_id = ASSERT_RESULT(CreateDBStream(IMPLICIT));
+  xrepl::StreamId stream_id = ASSERT_RESULT(CreateDBStream(EXPLICIT));
 
   std::unordered_set<TabletId> expected_tablet_ids;
   for (const auto& tablet : tablets) {
@@ -4941,7 +4921,7 @@ TEST_F(CDCSDKYsqlTest, YB_DISABLE_TEST_IN_TSAN(TestAddTableToNamespaceWithMultip
   }
   ASSERT_EQ(expected_tablet_ids.size(), num_tablets * 2);
 
-  xrepl::StreamId stream_id_1 = ASSERT_RESULT(CreateDBStream(IMPLICIT));
+  xrepl::StreamId stream_id_1 = ASSERT_RESULT(CreateDBStream(EXPLICIT));
 
   auto table_2 =
       ASSERT_RESULT(CreateTable(&test_cluster_, kNamespaceName, "test_table_2", num_tablets));
@@ -4983,7 +4963,7 @@ TEST_F(
   expected_table_ids.reserve(2);
   TableId table_id = ASSERT_RESULT(GetTableId(&test_cluster_, kNamespaceName, kTableName));
   expected_table_ids.push_back(table_id);
-  xrepl::StreamId stream_id = ASSERT_RESULT(CreateDBStream(IMPLICIT));
+  xrepl::StreamId stream_id = ASSERT_RESULT(CreateDBStream(EXPLICIT));
 
   std::unordered_set<TabletId> expected_tablet_ids;
   for (const auto& tablet : tablets) {
@@ -5003,14 +4983,14 @@ TEST_F(
   }
   ASSERT_EQ(expected_tablet_ids.size(), num_tablets * 2);
 
-  xrepl::StreamId stream_id_1 = ASSERT_RESULT(CreateDBStream(IMPLICIT));
+  xrepl::StreamId stream_id_1 = ASSERT_RESULT(CreateDBStream(EXPLICIT));
 
   auto table_2 =
       ASSERT_RESULT(CreateTable(&test_cluster_, kNamespaceName, "test_table_2", num_tablets));
   TableId table_2_id = ASSERT_RESULT(GetTableId(&test_cluster_, kNamespaceName, "test_table_2"));
   expected_table_ids.push_back(table_2_id);
 
-  xrepl::StreamId stream_id_2 = ASSERT_RESULT(CreateDBStream(IMPLICIT));
+  xrepl::StreamId stream_id_2 = ASSERT_RESULT(CreateDBStream(EXPLICIT));
 
   test_cluster_.mini_cluster_->mini_master()->Shutdown();
   ASSERT_OK(test_cluster_.mini_cluster_->StartMasters());
@@ -5060,7 +5040,7 @@ TEST_F(CDCSDKYsqlTest, YB_DISABLE_TEST_IN_TSAN(TestAddMultipleTableToNamespaceWi
     expected_tablet_ids.insert(tablet.tablet_id());
   }
   expected_table_ids.insert(table_id);
-  xrepl::StreamId stream_id = ASSERT_RESULT(CreateDBStream(IMPLICIT));
+  xrepl::StreamId stream_id = ASSERT_RESULT(CreateDBStream(EXPLICIT));
 
   // We add another table without a primary key. And we do not include the table_id in
   // 'expected_table_ids' nor do we add the tablets to 'expected_tablet_ids', since this table will
@@ -5102,7 +5082,7 @@ TEST_F(CDCSDKYsqlTest, YB_DISABLE_TEST_IN_TSAN(TestStreamActiveOnEmptyNamespace)
   ASSERT_OK(SetUpWithParams(1, 1, false));
 
   // Create a stream on the empty namespace: test_namespace (kNamespaceName).
-  xrepl::StreamId stream_id = ASSERT_RESULT(CreateDBStream(IMPLICIT));
+  xrepl::StreamId stream_id = ASSERT_RESULT(CreateDBStream(EXPLICIT));
 
   NamespaceId ns_id;
   std::vector<TableId> stream_table_ids;
@@ -5147,7 +5127,7 @@ TEST_F(CDCSDKYsqlTest, YB_DISABLE_TEST_IN_TSAN(TestStreamActiveOnNamespaceNoPKTa
   ASSERT_OK(CreateTableWithoutPK(&test_cluster_));
 
   // Create a stream on the namespace: test_namespace (kNamespaceName).
-  xrepl::StreamId stream_id = ASSERT_RESULT(CreateDBStream(IMPLICIT));
+  xrepl::StreamId stream_id = ASSERT_RESULT(CreateDBStream(EXPLICIT));
 
   NamespaceId ns_id;
   std::vector<TableId> stream_table_ids;
@@ -5198,7 +5178,7 @@ TEST_F(CDCSDKYsqlTest, YB_DISABLE_TEST_IN_TSAN(TestIntentGCedWithTabletBootStrap
 
   TableId table_id = ASSERT_RESULT(GetTableId(&test_cluster_, kNamespaceName, kTableName));
 
-  xrepl::StreamId stream_id = ASSERT_RESULT(CreateDBStream(IMPLICIT));
+  xrepl::StreamId stream_id = ASSERT_RESULT(CreateDBStream(EXPLICIT));
   auto resp = ASSERT_RESULT(SetCDCCheckpoint(stream_id, tablets));
   ASSERT_FALSE(resp.has_error());
 
@@ -5256,7 +5236,7 @@ TEST_F(CDCSDKYsqlTest, YB_DISABLE_TEST_IN_TSAN(TestBackwardCompatibillitySupport
 
   TableId table_id = ASSERT_RESULT(GetTableId(&test_cluster_, kNamespaceName, kTableName));
 
-  xrepl::StreamId stream_id = ASSERT_RESULT(CreateDBStream(IMPLICIT));
+  xrepl::StreamId stream_id = ASSERT_RESULT(CreateDBStream(EXPLICIT));
   auto resp = ASSERT_RESULT(SetCDCCheckpoint(stream_id, tablets));
   ASSERT_FALSE(resp.has_error());
 
@@ -5316,7 +5296,7 @@ TEST_F(CDCSDKYsqlTest, YB_DISABLE_TEST_IN_TSAN(TestBackwardCompatibillitySupport
   TableId table_id = ASSERT_RESULT(GetTableId(&test_cluster_, kNamespaceName, kTableName));
 
   xrepl::StreamId stream_id =
-      ASSERT_RESULT(CreateDBStream(CDCCheckpointType::IMPLICIT, CDCRecordType::PG_FULL));
+      ASSERT_RESULT(CreateDBStream(CDCCheckpointType::EXPLICIT, CDCRecordType::PG_FULL));
   auto resp = ASSERT_RESULT(SetCDCCheckpoint(stream_id, tablets));
   ASSERT_FALSE(resp.has_error());
 
@@ -5384,7 +5364,7 @@ TEST_F(CDCSDKYsqlTest, YB_DISABLE_TEST_IN_TSAN(TestDDLRecordValidationWithColoca
   ASSERT_EQ(tablets.size(), 1);
 
   std::string table_id = table.table_id();
-  xrepl::StreamId stream_id = ASSERT_RESULT(CreateDBStream(IMPLICIT));
+  xrepl::StreamId stream_id = ASSERT_RESULT(CreateDBStream(EXPLICIT));
   auto resp = ASSERT_RESULT(SetCDCCheckpoint(stream_id, tablets));
   ASSERT_FALSE(resp.has_error());
 
@@ -5449,7 +5429,7 @@ TEST_F(CDCSDKYsqlTest, YB_DISABLE_TEST_IN_TSAN(TestBeginCommitRecordValidationWi
   ASSERT_EQ(tablets.size(), 1);
 
   std::string table_id = table.table_id();
-  xrepl::StreamId stream_id = ASSERT_RESULT(CreateDBStream(IMPLICIT));
+  xrepl::StreamId stream_id = ASSERT_RESULT(CreateDBStream(EXPLICIT));
   auto resp = ASSERT_RESULT(SetCDCCheckpoint(stream_id, tablets));
   ASSERT_FALSE(resp.has_error());
 
@@ -5506,7 +5486,7 @@ TEST_F(
   ASSERT_OK(test_client()->GetTablets(table, 0, &tablets, /* partition_list_version =*/nullptr));
   ASSERT_EQ(tablets.size(), num_tablets);
   TableId table_id = ASSERT_RESULT(GetTableId(&test_cluster_, kNamespaceName, kTableName));
-  auto stream_id = ASSERT_RESULT(CreateDBStream(IMPLICIT));
+  auto stream_id = ASSERT_RESULT(CreateDBStream(EXPLICIT));
 
   auto resp = ASSERT_RESULT(SetCDCCheckpoint(stream_id, tablets));
   ASSERT_FALSE(resp.has_error());
@@ -5577,7 +5557,7 @@ TEST_F(CDCSDKYsqlTest, YB_DISABLE_TEST_IN_TSAN(TestCDCSDKLagMetricUnchangedOnEmp
   ASSERT_EQ(tablets.size(), num_tablets);
 
   TableId table_id = ASSERT_RESULT(GetTableId(&test_cluster_, kNamespaceName, kTableName));
-  auto stream_id = ASSERT_RESULT(CreateDBStream(IMPLICIT));
+  auto stream_id = ASSERT_RESULT(CreateDBStream(EXPLICIT));
 
   auto resp = ASSERT_RESULT(SetCDCCheckpoint(stream_id, tablets));
   ASSERT_FALSE(resp.has_error());
@@ -5750,7 +5730,7 @@ TEST_F(CDCSDKYsqlTest, YB_DISABLE_TEST_IN_TSAN(TestExpiredStreamWithCompaction))
   ASSERT_OK(test_client()->GetTablets(table, 0, &tablets, nullptr));
   ASSERT_EQ(tablets.size(), 1);
   xrepl::StreamId stream_id =
-      ASSERT_RESULT(CreateDBStream(CDCCheckpointType::IMPLICIT, CDCRecordType::PG_FULL));
+      ASSERT_RESULT(CreateDBStream(CDCCheckpointType::EXPLICIT, CDCRecordType::PG_FULL));
   auto set_resp =
       ASSERT_RESULT(SetCDCCheckpoint(stream_id, tablets, OpId::Min(), kuint64max, false, 0, true));
   ASSERT_FALSE(set_resp.has_error());
@@ -5844,7 +5824,7 @@ TEST_F(CDCSDKYsqlTest, YB_DISABLE_TEST_IN_TSAN(TestCommitTimeOfTransactionRecord
   ASSERT_EQ(tablets.size(), num_tablets);
 
   TableId table_id = ASSERT_RESULT(GetTableId(&test_cluster_, kNamespaceName, kTableName));
-  xrepl::StreamId stream_id = ASSERT_RESULT(CreateDBStream(IMPLICIT));
+  xrepl::StreamId stream_id = ASSERT_RESULT(CreateDBStream(EXPLICIT));
 
   auto resp = ASSERT_RESULT(SetCDCCheckpoint(stream_id, tablets));
   ASSERT_FALSE(resp.has_error());
@@ -5881,7 +5861,7 @@ TEST_F(CDCSDKYsqlTest, YB_DISABLE_TEST_IN_TSAN(TestCommitTimeIncreasesForTransac
   ASSERT_EQ(tablets.size(), num_tablets);
 
   TableId table_id = ASSERT_RESULT(GetTableId(&test_cluster_, kNamespaceName, kTableName));
-  xrepl::StreamId stream_id = ASSERT_RESULT(CreateDBStream(IMPLICIT));
+  xrepl::StreamId stream_id = ASSERT_RESULT(CreateDBStream(EXPLICIT));
 
   auto resp = ASSERT_RESULT(SetCDCCheckpoint(stream_id, tablets));
   ASSERT_FALSE(resp.has_error());
@@ -5947,7 +5927,7 @@ TEST_F(CDCSDKYsqlTest, YB_DISABLE_TEST_IN_TSAN(TestCommitTimeOrderAcrossMultiTab
   TableId first_table_id = ASSERT_RESULT(GetTableId(&test_cluster_, kNamespaceName, kTableName));
   TableId second_table_id =
       ASSERT_RESULT(GetTableId(&test_cluster_, kNamespaceName, second_table_name));
-  xrepl::StreamId stream_id = ASSERT_RESULT(CreateDBStream(IMPLICIT));
+  xrepl::StreamId stream_id = ASSERT_RESULT(CreateDBStream(EXPLICIT));
 
   auto resp = ASSERT_RESULT(SetCDCCheckpoint(stream_id, tablets));
   ASSERT_FALSE(resp.has_error());
@@ -6132,7 +6112,7 @@ TEST_F(CDCSDKYsqlTest, YB_DISABLE_TEST_IN_TSAN(TestIsUnderCDCSDKReplicationField
   ASSERT_EQ(tablets.size(), num_tablets);
 
   TableId table_id = ASSERT_RESULT(GetTableId(&test_cluster_, kNamespaceName, kTableName));
-  xrepl::StreamId stream_id = ASSERT_RESULT(CreateDBStream(IMPLICIT));
+  xrepl::StreamId stream_id = ASSERT_RESULT(CreateDBStream(EXPLICIT));
 
   EnableCDCServiceInAllTserver(3);
   auto resp = ASSERT_RESULT(SetCDCCheckpoint(stream_id, tablets));
@@ -6192,7 +6172,7 @@ TEST_F(CDCSDKYsqlTest, YB_DISABLE_TEST_IN_TSAN(TestColocationWithDropColumns)) {
   ASSERT_EQ(tablets.size(), 1);
 
   std::string table_id = table.table_id();
-  xrepl::StreamId stream_id = ASSERT_RESULT(CreateDBStream(IMPLICIT));
+  xrepl::StreamId stream_id = ASSERT_RESULT(CreateDBStream(EXPLICIT));
   auto resp = ASSERT_RESULT(SetCDCCheckpoint(stream_id, tablets));
   ASSERT_FALSE(resp.has_error());
 
@@ -6257,7 +6237,7 @@ TEST_F(CDCSDKYsqlTest, YB_DISABLE_TEST_IN_TSAN(TestColocationWithAddColumns)) {
   ASSERT_EQ(tablets.size(), 1);
 
   std::string table_id = table.table_id();
-  xrepl::StreamId stream_id = ASSERT_RESULT(CreateDBStream(IMPLICIT));
+  xrepl::StreamId stream_id = ASSERT_RESULT(CreateDBStream(EXPLICIT));
   auto resp = ASSERT_RESULT(SetCDCCheckpoint(stream_id, tablets));
   ASSERT_FALSE(resp.has_error());
 
@@ -6342,7 +6322,7 @@ TEST_F(CDCSDKYsqlTest, YB_DISABLE_TEST_IN_TSAN(TestColocationWithAddAndDropColum
   ASSERT_EQ(tablets.size(), 1);
 
   std::string table_id = table.table_id();
-  xrepl::StreamId stream_id = ASSERT_RESULT(CreateDBStream(IMPLICIT));
+  xrepl::StreamId stream_id = ASSERT_RESULT(CreateDBStream(EXPLICIT));
   auto resp = ASSERT_RESULT(SetCDCCheckpoint(stream_id, tablets));
   ASSERT_FALSE(resp.has_error());
 
@@ -6427,7 +6407,7 @@ TEST_F(CDCSDKYsqlTest, YB_DISABLE_TEST_IN_TSAN(TestColocationWithMultipleAlterAn
   ASSERT_EQ(tablets.size(), 1);
 
   std::string table_id = table.table_id();
-  xrepl::StreamId stream_id = ASSERT_RESULT(CreateDBStream(IMPLICIT));
+  xrepl::StreamId stream_id = ASSERT_RESULT(CreateDBStream(EXPLICIT));
   auto resp = ASSERT_RESULT(SetCDCCheckpoint(stream_id, tablets));
   ASSERT_FALSE(resp.has_error());
 
@@ -6543,7 +6523,7 @@ TEST_F(CDCSDKYsqlTest, YB_DISABLE_TEST_IN_TSAN(TestColocationWithMultipleAlterAn
   ASSERT_EQ(tablets.size(), 1);
 
   std::string table_id = table.table_id();
-  xrepl::StreamId stream_id = ASSERT_RESULT(CreateDBStream(IMPLICIT));
+  xrepl::StreamId stream_id = ASSERT_RESULT(CreateDBStream(EXPLICIT));
   auto resp = ASSERT_RESULT(SetCDCCheckpoint(stream_id, tablets));
   ASSERT_FALSE(resp.has_error());
 
@@ -6667,7 +6647,7 @@ TEST_F(CDCSDKYsqlTest, YB_DISABLE_TEST_IN_TSAN(TestColocationWithRepeatedRequest
   ASSERT_EQ(tablets.size(), 1);
 
   std::string table_id = table.table_id();
-  xrepl::StreamId stream_id = ASSERT_RESULT(CreateDBStream(IMPLICIT));
+  xrepl::StreamId stream_id = ASSERT_RESULT(CreateDBStream(EXPLICIT));
   auto resp = ASSERT_RESULT(SetCDCCheckpoint(stream_id, tablets));
   ASSERT_FALSE(resp.has_error());
 
@@ -6822,7 +6802,7 @@ TEST_F(CDCSDKYsqlTest, YB_DISABLE_TEST_IN_TSAN(TestTransactionWithZeroIntents)) 
   ASSERT_EQ(parent_tablets.size(), 1);
 
   std::string fk_table_id = fk_table.table_id();
-  xrepl::StreamId stream_id = ASSERT_RESULT(CreateDBStream(IMPLICIT));
+  xrepl::StreamId stream_id = ASSERT_RESULT(CreateDBStream(EXPLICIT));
   auto resp = ASSERT_RESULT(SetCDCCheckpoint(stream_id, fk_tablets));
   ASSERT_FALSE(resp.has_error());
   resp = ASSERT_RESULT(SetCDCCheckpoint(stream_id, parent_tablets));
@@ -6875,7 +6855,7 @@ TEST_F(CDCSDKYsqlTest, YB_DISABLE_TEST_IN_TSAN(TestGetCheckpointForColocatedTabl
   ASSERT_OK(test_client()->GetTablets(table, 0, &tablets, /* partition_list_version =*/nullptr));
   ASSERT_EQ(tablets.size(), 1);
 
-  xrepl::StreamId stream_id = ASSERT_RESULT(CreateDBStream(IMPLICIT));
+  xrepl::StreamId stream_id = ASSERT_RESULT(CreateDBStream(EXPLICIT));
   auto resp = ASSERT_RESULT(SetCDCCheckpoint(stream_id, tablets));
   ASSERT_FALSE(resp.has_error());
 
@@ -6961,7 +6941,7 @@ TEST_F(CDCSDKYsqlTest, YB_DISABLE_TEST_IN_TSAN(TestGetCheckpointOnStreamedColoca
   ASSERT_OK(test_client()->GetTablets(table, 0, &tablets, /* partition_list_version =*/nullptr));
   ASSERT_EQ(tablets.size(), 1);
 
-  xrepl::StreamId stream_id = ASSERT_RESULT(CreateDBStream(IMPLICIT));
+  xrepl::StreamId stream_id = ASSERT_RESULT(CreateDBStream(EXPLICIT));
   auto resp = ASSERT_RESULT(SetCDCCheckpoint(stream_id, tablets));
   ASSERT_FALSE(resp.has_error());
 
@@ -7089,7 +7069,7 @@ TEST_F(CDCSDKYsqlTest, YB_DISABLE_TEST_IN_TSAN(TestGetCheckpointOnAddedColocated
   ASSERT_OK(test_client()->GetTablets(table, 0, &tablets, /* partition_list_version =*/nullptr));
   ASSERT_EQ(tablets.size(), 1);
 
-  xrepl::StreamId stream_id = ASSERT_RESULT(CreateDBStream(IMPLICIT));
+  xrepl::StreamId stream_id = ASSERT_RESULT(CreateDBStream(EXPLICIT));
   auto resp = ASSERT_RESULT(SetCDCCheckpoint(stream_id, tablets));
   ASSERT_FALSE(resp.has_error());
 
@@ -7323,7 +7303,7 @@ TEST_F(CDCSDKYsqlTest, YB_DISABLE_TEST_IN_TSAN(TestAddManyColocatedTablesOnNames
   ASSERT_OK(SetUpWithParams(3 /* replication_factor */, 2 /* num_masters */, true /* colocated */));
 
   auto conn = ASSERT_RESULT(test_cluster_.ConnectToDB(kNamespaceName));
-  ASSERT_RESULT(CreateDBStream(IMPLICIT));
+  ASSERT_RESULT(CreateDBStream(EXPLICIT));
 
   for (int i = 1; i <= 400; i++) {
     std::string table_name = "test" + std::to_string(i);
@@ -7341,7 +7321,7 @@ TEST_F(
   // Create a table with default number of tablets.
   ASSERT_OK(test_client()->GetTablets(table, 0, &tablets, nullptr));
   ASSERT_EQ(tablets.size(), 1);
-  xrepl::StreamId stream_id = ASSERT_RESULT(CreateDBStream(CDCCheckpointType::IMPLICIT));
+  xrepl::StreamId stream_id = ASSERT_RESULT(CreateDBStream(CDCCheckpointType::EXPLICIT));
   auto set_resp = ASSERT_RESULT(SetCDCCheckpoint(stream_id, tablets));
   ASSERT_FALSE(set_resp.has_error());
 
@@ -7379,7 +7359,7 @@ TEST_F(CDCSDKYsqlTest, YB_DISABLE_TEST_IN_TSAN(TestBeginAndCommitRecordsForSingl
   // Create a table with default number of tablets.
   ASSERT_OK(test_client()->GetTablets(table, 0, &tablets, nullptr));
   ASSERT_EQ(tablets.size(), 1);
-  xrepl::StreamId stream_id = ASSERT_RESULT(CreateDBStream(CDCCheckpointType::IMPLICIT));
+  xrepl::StreamId stream_id = ASSERT_RESULT(CreateDBStream(CDCCheckpointType::EXPLICIT));
   auto set_resp = ASSERT_RESULT(SetCDCCheckpoint(stream_id, tablets));
   ASSERT_FALSE(set_resp.has_error());
 
@@ -8284,7 +8264,7 @@ TEST_F(CDCSDKYsqlTest, TestPackedRowsWithLargeColumnValue) {
   ASSERT_OK(test_client()->GetTablets(table, 0, &tablets, nullptr));
   ASSERT_EQ(tablets.size(), 1);
 
-  auto stream_id = ASSERT_RESULT(CreateDBStream(IMPLICIT));
+  auto stream_id = ASSERT_RESULT(CreateDBStream(EXPLICIT));
   auto set_resp = ASSERT_RESULT(SetCDCCheckpoint(stream_id, tablets));
   ASSERT_FALSE(set_resp.has_error());
 
@@ -8466,7 +8446,7 @@ TEST_F(CDCSDKYsqlTest, TestPackedRowsWithLargeColumnValueSingleShardTransaction)
   ASSERT_OK(test_client()->GetTablets(table, 0, &tablets, nullptr));
   ASSERT_EQ(tablets.size(), 1);
 
-  auto stream_id = ASSERT_RESULT(CreateDBStream(IMPLICIT));
+  auto stream_id = ASSERT_RESULT(CreateDBStream(EXPLICIT));
   auto set_resp = ASSERT_RESULT(SetCDCCheckpoint(stream_id, tablets));
   ASSERT_FALSE(set_resp.has_error());
 

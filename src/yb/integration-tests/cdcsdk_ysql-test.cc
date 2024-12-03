@@ -5678,13 +5678,13 @@ TEST_F(CDCSDKYsqlTest, YB_DISABLE_TEST_IN_TSAN(TestMetricObjectRemovalAfterStrea
 
   ASSERT_OK(SetUpWithParams(1, 1, false));
   auto table = ASSERT_RESULT(CreateTable(&test_cluster_, kNamespaceName, kTableName));
-  
+
   google::protobuf::RepeatedPtrField<master::TabletLocationsPB> tablets;
   ASSERT_OK(test_client()->GetTablets(table, 0, &tablets, /* partition_list_version=*/nullptr));
   ASSERT_EQ(tablets.size(), 1);
-  
+
   auto stream_id = ASSERT_RESULT(CreateConsistentSnapshotStream());
-  
+
   auto stream_metadata = ASSERT_RESULT(GetDBStreamInfo(stream_id));
   ASSERT_EQ(stream_metadata.table_info_size(), 1);
   ASSERT_EQ(ASSERT_RESULT(GetStateTableRowCount()), 1);

@@ -16,7 +16,6 @@
 
 #include "yb/client/transaction_manager.h"
 
-#include "yb/gutil/dynamic_annotations.h"
 #include "yb/integration-tests/cdc_test_util.h"
 #include "yb/integration-tests/mini_cluster.h"
 #include "yb/integration-tests/postgres-minicluster.h"

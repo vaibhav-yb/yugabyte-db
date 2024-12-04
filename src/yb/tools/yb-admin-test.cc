@@ -1674,13 +1674,14 @@ TEST_F(AdminCliTest, TestDisallowImplicitStreamCreation) {
 TEST_F(AdminCliTest, TestAllowImplicitStreamCreationWhenFlagEnabled) {
   std::string test_namespace = "pg_namespace_cdc";
   BuildAndStart(
-      {"--cdc_enable_implicit_checkpointing=true"}, {"--cdc_enable_implicit_checkpointing=true"});
+      {"--cdc_enable_implicit_checkpointing=true"}, {});
   ASSERT_OK(client_->CreateNamespace(test_namespace, YQL_DATABASE_PGSQL));
 
   auto output =
       ASSERT_RESULT(CallAdmin("create_change_data_stream", "ysql." + test_namespace, "IMPLICIT"));
 
-  LOG(INFO) << "VKVK output is " << output;
+  ASSERT_STR_CONTAINS(
+      output, "Creation of streams with IMPLICIT checkpointing is going to be removed soon");
 }
 
 }  // namespace tools

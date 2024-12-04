@@ -54,7 +54,6 @@
 #include "yb/client/table_info.h"
 #include "yb/client/xcluster_client.h"
 
-#include "yb/common/common_flags.h"
 #include "yb/common/colocated_util.h"
 #include "yb/common/json_util.h"
 #include "yb/common/ql_type_util.h"
@@ -3735,15 +3734,15 @@ Status ClusterAdminClient::CreateCDCSDKDBStream(
   if (checkpoint_type == yb::ToString("EXPLICIT")) {
         req.set_checkpoint_type(cdc::CDCCheckpointType::EXPLICIT);
   } else {
-    // LOG(INFO) << "VKVK Flag value is " << FLAGS_cdc_enable_implicit_checkpointing;
-    // if (FLAGS_cdc_enable_implicit_checkpointing) {
-    //   cout << "WARNING: Creation of streams with IMPLICIT checkpointing is going to be removed "
-    //           "soon, consider creating a stream with EXPLICIT checkpointing.\n\n";
+    cout << "VKVK Flag value is " << FLAGS_cdc_enable_implicit_checkpointing;
+    if (FLAGS_cdc_enable_implicit_checkpointing) {
+      cout << "WARNING: Creation of streams with IMPLICIT checkpointing is going to be removed "
+              "soon, consider creating a stream with EXPLICIT checkpointing.\n\n";
       req.set_checkpoint_type(cdc::CDCCheckpointType::IMPLICIT);
-    // } else {
-    //   cout << "ERROR: IMPLICIT stream creation is disabled\n\n";
-    //   return STATUS_FORMAT(InvalidArgument, "IMPLICIT stream creation is disabled");
-    // }
+    } else {
+      cout << "ERROR: IMPLICIT stream creation is disabled\n\n";
+      return STATUS_FORMAT(InvalidArgument, "IMPLICIT stream creation is disabled");
+    }
   }
 
   if (consistent_snapshot_option == "USE_SNAPSHOT") {

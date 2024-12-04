@@ -34,6 +34,8 @@
 
 #include <boost/optional.hpp>
 
+DECLARE_bool(cdc_enable_implicit_checkpointing);
+
 namespace rocksdb {
 
 class RateLimiter;

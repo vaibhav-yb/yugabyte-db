@@ -16,6 +16,7 @@
 
 #include "yb/client/transaction_manager.h"
 
+#include "yb/gutil/dynamic_annotations.h"
 #include "yb/integration-tests/cdc_test_util.h"
 #include "yb/integration-tests/mini_cluster.h"
 #include "yb/integration-tests/postgres-minicluster.h"
@@ -64,7 +65,9 @@ using client::YBTableName;
 namespace cdc {
 // TODO(#19752): Remove the YB_DISABLE_TEST_IN_TSAN
 #define CDCSDK_TESTS_FOR_ALL_CHECKPOINT_OPTIONS(fixture, test_name)                       \
-  TEST_F(fixture, YB_DISABLE_TEST_IN_TSAN(test_name##Explicit)) { test_name(EXPLICIT); }
+  TEST_F(fixture, YB_DISABLE_TEST_IN_TSAN(test_name##Explicit)) { test_name(EXPLICIT); }  \
+                                                                                          \
+  TEST_F(fixture, YB_DISABLE_TEST_IN_TSAN(test_name##Implicit)) { test_name(IMPLICIT); }
 
 constexpr int kRpcTimeout = 60 * kTimeMultiplier;
 constexpr int kFlushTimeoutSecs = 60 * kTimeMultiplier;
@@ -141,6 +144,8 @@ class CDCSDKTestBase : public YBTest {
     ANNOTATE_UNPROTECTED_WRITE(FLAGS_yb_enable_cdc_consistent_snapshot_streams) = false;
 
     ANNOTATE_UNPROTECTED_WRITE(FLAGS_ysql_enable_packed_row_for_colocated_table) = true;
+
+    ANNOTATE_UNPROTECTED_WRITE(FLAGS_cdc_enable_implicit_checkpointing) = true;
 
     google::SetVLOGLevel("cdc*", 4);
     google::SetVLOGLevel("tablet*", 1);

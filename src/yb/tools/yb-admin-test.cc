@@ -90,8 +90,6 @@ using itest::TabletServerMap;
 using itest::TServerDetails;
 using strings::Substitute;
 
-DECLARE_bool(cdc_enable_implicit_checkpointing);
-
 namespace {
 
 //  Helper to check hosts list by requesting cluster config via yb-admin and parse its output:

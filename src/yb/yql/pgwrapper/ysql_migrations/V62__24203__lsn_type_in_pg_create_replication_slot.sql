@@ -13,6 +13,14 @@ BEGIN;
     3786, 'pg_create_logical_replication_slot', 11, 10, 12, 1, 0, 0, '-', 'f', false, false, true,
     false, 'v', 'u', 5, 3, 2249, '19 19 16 16 19', '{19,19,16,16,19,19,3220}',
     '{i,i,i,i,i,o,o}', '{slot_name,plugin,temporary,twophase,yb_lsn_type,slot_name,lsn}',
-    '({CONST :consttype 16 :consttypmod -1 :constcollid 0 :constlen 1 :constbyval true :constisnull false :location 135 :constvalue 1 [ 0 0 0 0 0 0 0 0 ]} {CONST :consttype 16 :consttypmod -1 :constcollid 0 :constlen 1 :constbyval true :constisnull false :location 174 :constvalue 1 [ 0 0 0 0 0 0 0 0 ]} {CONST :consttype 19 :consttypmod -1 :constcollid 950 :constlen 64 :constbyval false :constisnull false :location 213 :constvalue 64 [ 83 69 81 85 69 78 67 69 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 ]})', NULL, 'pg_create_logical_replication_slot', NULL, NULL, NULL)
+    '({CONST :consttype 16 :consttypmod -1 :constcollid 0 :constlen 1 :constbyval true 
+    :constisnull false :location 135 :constvalue 1 [ 0 0 0 0 0 0 0 0 ]} 
+    {CONST :consttype 16 :consttypmod -1 :constcollid 0 :constlen 1 :constbyval true 
+    :constisnull false :location 174 :constvalue 1 [ 0 0 0 0 0 0 0 0 ]} 
+    {CONST :consttype 19 :consttypmod -1 :constcollid 950 :constlen 64 :constbyval false 
+    :constisnull false :location 213 :constvalue 64 
+    [ 83 69 81 85 69 78 67 69 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 
+    0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 ]})', NULL, 
+    'pg_create_logical_replication_slot', NULL, NULL, NULL)
   ON CONFLICT DO NOTHING;
 COMMIT;

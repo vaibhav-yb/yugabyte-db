@@ -202,7 +202,7 @@ DEFINE_RUNTIME_AUTO_bool(
     "update these entries in cdc_state table and also move the corresponding table's entry to "
     "unqualified tables list in stream metadata.");
 
-DEFINE_NON_RUNTIME_bool(
+DEFINE_RUNTIME_bool(
     cdc_enable_implicit_checkpointing, false,
     "When enabled, users will be able to create a stream having IMPLICIT checkpointing.");
 

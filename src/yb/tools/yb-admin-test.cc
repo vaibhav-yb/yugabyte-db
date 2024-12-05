@@ -1681,7 +1681,7 @@ TEST_F(AdminCliTest, TestAllowImplicitStreamCreationWhenFlagEnabled) {
       ASSERT_RESULT(CallAdmin("create_change_data_stream", "ysql." + test_namespace, "IMPLICIT"));
 
   ASSERT_STR_CONTAINS(
-      output, "Creation of streams with IMPLICIT checkpointing is going to be removed soon");
+      output, "Creation of streams with IMPLICIT checkpointing is deprecated");
 }
 
 }  // namespace tools

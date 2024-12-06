@@ -203,7 +203,7 @@ DEFINE_RUNTIME_AUTO_bool(
     "unqualified tables list in stream metadata.");
 
 DEFINE_RUNTIME_bool(cdc_enable_implicit_checkpointing, false,
-    "When enabled, users will be able to create a stream having IMPLICIT checkpointing.");
+    "When enabled, users will be able to create a CDC stream having IMPLICIT checkpointing.");
 
 DECLARE_int32(log_min_seconds_to_retain);
 

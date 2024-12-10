@@ -13,6 +13,8 @@
 #include "yb/integration-tests/cdcsdk_ysql_test_base.h"
 #include "yb/master/sys_catalog_initialization.h"
 
+DECLARE_bool(cdc_enable_implicit_checkpointing;)
+
 namespace yb {
 namespace cdc {
 

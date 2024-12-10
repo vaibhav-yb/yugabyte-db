@@ -29,15 +29,12 @@ type prometheusDirectories struct {
 	templateFileName    string
 	DataDir             string
 	PromDir             string
-	PromBinaryFile      string
 	LogDir              string
 }
 
 func newPrometheusDirectories() prometheusDirectories {
-	binFile := "/usr/local/bin/prometheus"
 	logDir := "/var/log"
 	if !common.HasSudoAccess() {
-		binFile = common.GetSoftwareRoot() + "/prometheus/bin/prometheus"
 		logDir = common.GetBaseInstall() + "/data/logs"
 	}
 	return prometheusDirectories{
@@ -47,7 +44,6 @@ func newPrometheusDirectories() prometheusDirectories {
 		templateFileName:    "yba-installer-prometheus.yml",
 		DataDir:             common.GetBaseInstall() + "/data/prometheus",
 		PromDir:             common.GetSoftwareRoot() + "/prometheus",
-		PromBinaryFile:      binFile,
 		LogDir:              logDir,
 	}
 }
@@ -242,8 +238,7 @@ func (prom Prometheus) Upgrade() error {
 	//chown is not needed when we are operating under non-root, the user will already
 	//have the necessary access.
 	if common.HasSudoAccess() {
-		userName := viper.GetString("service_username")
-		if err := common.Chown(common.GetSoftwareRoot()+"/prometheus", userName, userName, true); err != nil {
+		if err := common.SetSoftwarePermissions(); err != nil {
 			return err
 		}
 	}
@@ -450,8 +445,8 @@ func (prom Prometheus) createPrometheusSymlinks() error {
 		common.GetInstallerSoftwareDir(), prom.version)
 
 	// Required for systemctl.
-	binDir := filepath.Dir(prom.PromBinaryFile)
 	if !common.HasSudoAccess() {
+		binDir := filepath.Dir(common.GetSoftwareRoot() + "/prometheus/bin/prometheus")
 		// promBinaryDir doesn't exist for non-root mode, lets create it.
 		if err := common.MkdirAll(binDir, common.DirMode); err != nil {
 			log.Error("failed to create " + binDir + ": " + err.Error())
@@ -462,8 +457,8 @@ func (prom Prometheus) createPrometheusSymlinks() error {
 	links := []struct {
 		pkgDir, linkDir, binary string
 	}{
-		{promPkg, binDir, "prometheus"},
-		{promPkg, binDir, "promtool"},
+		{promPkg, prom.PromDir, "prometheus"},
+		{promPkg, prom.PromDir, "promtool"},
 		{promPkg, prom.PromDir, "consoles"},
 		{promPkg, prom.PromDir, "console_libraries"},
 	}

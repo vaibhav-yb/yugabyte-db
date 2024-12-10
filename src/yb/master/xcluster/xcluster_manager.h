@@ -79,6 +79,11 @@ class XClusterManager : public XClusterManagerIf,
   Status RemoveStreamsFromSysCatalog(
       const LeaderEpoch& epoch, const std::vector<CDCStreamInfo*>& streams);
 
+  Status SetUniverseReplicationEnabled(
+      const SetUniverseReplicationEnabledRequestPB* req,
+      SetUniverseReplicationEnabledResponsePB* resp, rpc::RpcContext* rpc,
+      const LeaderEpoch& epoch);
+
   Status PauseResumeXClusterProducerStreams(
       const PauseResumeXClusterProducerStreamsRequestPB* req,
       PauseResumeXClusterProducerStreamsResponsePB* resp, rpc::RpcContext* rpc,
@@ -141,6 +146,12 @@ class XClusterManager : public XClusterManagerIf,
       const xrepl::StreamId& bootstrap_id, const std::optional<TableId>& target_table_id,
       const LeaderEpoch& epoch) override;
 
+  // Inserts the sent schema into the historical packing schema for the target table.
+  Status InsertPackedSchemaForXClusterTarget(
+      const InsertPackedSchemaForXClusterTargetRequestPB* req,
+      InsertPackedSchemaForXClusterTargetResponsePB* resp, rpc::RpcContext* rpc,
+      const LeaderEpoch& epoch);
+
   // OutboundReplicationGroup RPCs.
   Status XClusterCreateOutboundReplicationGroup(
       const XClusterCreateOutboundReplicationGroupRequestPB* req,
@@ -161,6 +172,10 @@ class XClusterManager : public XClusterManagerIf,
   Status IsXClusterBootstrapRequired(
       const IsXClusterBootstrapRequiredRequestPB* req, IsXClusterBootstrapRequiredResponsePB* resp,
       rpc::RpcContext* rpc, const LeaderEpoch& epoch);
+  Status XClusterEnsureSequenceUpdatesAreInWal(
+      const XClusterEnsureSequenceUpdatesAreInWalRequestPB* req,
+      XClusterEnsureSequenceUpdatesAreInWalResponsePB* resp, rpc::RpcContext* rpc,
+      const LeaderEpoch& epoch);
   Status GetXClusterStreams(
       const GetXClusterStreamsRequestPB* req, GetXClusterStreamsResponsePB* resp,
       rpc::RpcContext* rpc, const LeaderEpoch& epoch);
@@ -254,16 +269,13 @@ class XClusterManager : public XClusterManagerIf,
 
   bool IsTableBiDirectionallyReplicated(const TableId& table_id) const override;
 
+  bool ShouldAutoAddIndexesToBiDirectionalXCluster(const TableInfo& indexed_table) const override;
+
   Status HandleTabletSplit(
       const TableId& consumer_table_id, const SplitTabletIds& split_tablet_ids,
       const LeaderEpoch& epoch) override;
 
-  Status ValidateNewSchema(const TableInfo& table_info, const Schema& consumer_schema) const;
-
   Status ValidateSplitCandidateTable(const TableId& table_id) const;
-
-  Status HandleTabletSchemaVersionReport(
-      const TableInfo& table_info, SchemaVersion consumer_schema_version, const LeaderEpoch& epoch);
 
   Status RegisterMonitoredTask(server::MonitoredTaskPtr task) EXCLUDES(monitored_tasks_mutex_);
   void UnRegisterMonitoredTask(server::MonitoredTaskPtr task) EXCLUDES(monitored_tasks_mutex_);

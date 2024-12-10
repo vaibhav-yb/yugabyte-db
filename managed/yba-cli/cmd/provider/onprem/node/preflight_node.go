@@ -21,9 +21,10 @@ import (
 
 // preflightNodesCmd represents the provider command
 var preflightNodesCmd = &cobra.Command{
-	Use:   "preflight",
-	Short: "Preflight check a node of a YugabyteDB Anywhere on-premises provider",
-	Long:  "Preflight check a node of a YugabyteDB Anywhere on-premises provider",
+	Use:     "preflight",
+	Short:   "Preflight check a node of a YugabyteDB Anywhere on-premises provider",
+	Long:    "Preflight check a node of a YugabyteDB Anywhere on-premises provider",
+	Example: `yba provider onprem node preflight --name <provider-name> --ip <node-ip>`,
 	PreRun: func(cmd *cobra.Command, args []string) {
 		providerNameFlag, err := cmd.Flags().GetString("name")
 		if err != nil {
@@ -54,7 +55,7 @@ var preflightNodesCmd = &cobra.Command{
 			logrus.Fatalf(formatter.Colorize(err.Error()+"\n", formatter.RedColor))
 		}
 		providerListRequest := authAPI.GetListOfProviders()
-		providerListRequest = providerListRequest.Name(providerName)
+		providerListRequest = providerListRequest.Name(providerName).ProviderCode(util.OnpremProviderType)
 		r, response, err := providerListRequest.Execute()
 		if err != nil {
 			errMessage := util.ErrorFromHTTPResponse(response, err,
@@ -64,14 +65,9 @@ var preflightNodesCmd = &cobra.Command{
 		if len(r) < 1 {
 			logrus.Fatalf(
 				formatter.Colorize(
-					fmt.Sprintf("No providers with name: %s found\n", providerName),
+					fmt.Sprintf("No on premises providers with name: %s found\n", providerName),
 					formatter.RedColor,
 				))
-		}
-
-		if r[0].GetCode() != util.OnpremProviderType {
-			errMessage := "Operation only supported for On-premises providers."
-			logrus.Fatalf(formatter.Colorize(errMessage+"\n", formatter.RedColor))
 		}
 
 		providerUUID := r[0].GetUuid()

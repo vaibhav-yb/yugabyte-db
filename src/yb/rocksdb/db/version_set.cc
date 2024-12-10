@@ -828,7 +828,7 @@ void Version::AddLevel0Iterators(
   for (size_t i = 0; i < storage_info_.LevelFilesBrief(0).num_files; i++) {
     const auto& file = storage_info_.LevelFilesBrief(0).files[i];
     if (!read_options.file_filter || read_options.file_filter->Filter(file)) {
-      InternalIterator *file_iter;
+      typename MergeIteratorBuilderType::IteratorType* file_iter;
       TableCache::TableReaderWithHandle trwh;
       Status s = cfd_->table_cache()->GetTableReaderForIterator(read_options, soptions,
           cfd_->internal_comparator(), file.fd, &trwh, cfd_->internal_stats()->GetFileReadHist(0),
@@ -843,7 +843,7 @@ void Version::AddLevel0Iterators(
           file_iter = nullptr;
         }
       } else {
-        file_iter = NewErrorInternalIterator(s, arena);
+        file_iter = NewErrorIterator<typename MergeIteratorBuilderType::IteratorType>(s, arena);
       }
       if (file_iter) {
         merge_iter_builder->AddIterator(file_iter);
@@ -892,6 +892,29 @@ void Version::AddIterators(const ReadOptions& read_options,
   }
 }
 
+namespace {
+
+template <typename IndexIteratorType>
+IndexIteratorType* NewIndexIterator(
+    const ReadOptions& read_options, TableCache* table_cache,
+    TableCache::TableReaderWithHandle* trwh);
+
+template<>
+DataBlockAwareIndexInternalIterator* NewIndexIterator<DataBlockAwareIndexInternalIterator>(
+    const ReadOptions& read_options, TableCache* table_cache,
+    TableCache::TableReaderWithHandle* trwh) {
+  return table_cache->NewDataBlockAwareIndexIterator(read_options, trwh);
+}
+
+template<>
+InternalIterator* NewIndexIterator<InternalIterator>(
+    const ReadOptions& read_options, TableCache* table_cache,
+    TableCache::TableReaderWithHandle* trwh) {
+  return table_cache->NewIndexIterator(read_options, trwh);
+}
+
+} // namespace
+
 template<typename MergeIteratorBuilderType>
 void Version::AddIndexIterators(
     const ReadOptions& read_options, const EnvOptions& soptions,
@@ -909,18 +932,31 @@ void Version::AddIndexIterators(
   AddLevel0Iterators(
       read_options, soptions, merge_iter_builder, /* arena = */ nullptr,
       [this, &read_options](TableCache::TableReaderWithHandle* trwh, size_t i) {
-        return cfd_->table_cache()->NewIndexIterator(read_options, trwh);
+        return NewIndexIterator<typename MergeIteratorBuilderType::IteratorType>(
+            read_options, cfd_->table_cache(), trwh);
       });
 }
 
 template void Version::AddIndexIterators(
     const ReadOptions& read_options, const EnvOptions& soptions,
-    MergeIteratorInHeapBuilder<IteratorWrapperBase</* kSkipLastEntry = */ false>>*
+    MergeIteratorInHeapBuilder<IteratorWrapperBase<InternalIterator, /* kSkipLastEntry = */ false>>*
         merge_iter_builder);
 
 template void Version::AddIndexIterators(
     const ReadOptions& read_options, const EnvOptions& soptions,
-    MergeIteratorInHeapBuilder<IteratorWrapperBase</* kSkipLastEntry = */ true>>*
+    MergeIteratorInHeapBuilder<IteratorWrapperBase<InternalIterator, /* kSkipLastEntry = */ true>>*
+        merge_iter_builder);
+
+template void Version::AddIndexIterators(
+    const ReadOptions& read_options, const EnvOptions& soptions,
+    MergeIteratorInHeapBuilder<
+        IteratorWrapperBase<DataBlockAwareIndexInternalIterator, /* kSkipLastEntry = */ false>>*
+        merge_iter_builder);
+
+template void Version::AddIndexIterators(
+    const ReadOptions& read_options, const EnvOptions& soptions,
+    MergeIteratorInHeapBuilder<
+        IteratorWrapperBase<DataBlockAwareIndexInternalIterator, /* kSkipLastEntry = */ true>>*
         merge_iter_builder);
 
 VersionStorageInfo::VersionStorageInfo(
@@ -2386,7 +2422,9 @@ Status VersionSet::LogAndApply(ColumnFamilyData* column_family_data,
   // Unlock during expensive operations. New writes cannot get here
   // because &w is ensuring that all new writes get queued.
   {
-
+    // Before releasing mutex, make a copy of mutable_cf_options and pass to `PrepareApply` to
+    // avoid a potential data race.
+    MutableCFOptions mutable_cf_options_copy(mutable_cf_options);
     mu->Unlock();
 
     DEBUG_ONLY_TEST_SYNC_POINT("VersionSet::LogAndApply:WriteManifest");
@@ -2430,7 +2468,7 @@ Status VersionSet::LogAndApply(ColumnFamilyData* column_family_data,
 
     if (!edit->IsColumnFamilyManipulation()) {
       // This is cpu-heavy operations, which should be called outside mutex.
-      v->PrepareApply(mutable_cf_options, true);
+      v->PrepareApply(mutable_cf_options_copy, true);
     }
 
     // Write new records to MANIFEST log.

@@ -62,12 +62,12 @@ class IntentAwareIterator final : public IntentAwareIteratorIf {
   IntentAwareIterator(const IntentAwareIterator& other) = delete;
   void operator=(const IntentAwareIterator& other) = delete;
 
-  void Revalidate();
+  void Revalidate(SeekFilter seek_filter);
 
   // Seek to the smallest key which is greater or equal than doc_key.
   void Seek(const dockv::DocKey& doc_key);
 
-  void Seek(Slice key, Full full = Full::kTrue) override;
+  void Seek(Slice key, SeekFilter seek_filter, Full full = Full::kTrue) override;
 
   // Seek forward to specified encoded key (it is responsibility of caller to make sure it
   // doesn't have hybrid time).
@@ -79,10 +79,13 @@ class IntentAwareIterator final : public IntentAwareIteratorIf {
   // hybrid time).
   void SeekPastSubKey(Slice key);
 
+  // Seek before the specified subdoc key (it is consideres as an exclusive upperbound).
+  void SeekBeforeSubKey(Slice key);
+
   // For efficiency, this overload takes a non-const KeyBytes pointer avoids memory allocation by
   // using the KeyBytes buffer to prepare the key to seek to by appending an extra byte. The
   // appended byte is removed when the method returns.
-  void SeekOutOfSubDoc(dockv::KeyBytes* key_bytes) override;
+  void SeekOutOfSubDoc(SeekFilter seek_filter, dockv::KeyBytes* key_bytes) override;
 
   // Seek to last doc key.
   void SeekToLastDocKey();
@@ -139,10 +142,6 @@ class IntentAwareIterator final : public IntentAwareIteratorIf {
   // Returns HybridTime::kInvalid if no such record was found.
   Result<HybridTime> FindOldestRecord(Slice key_without_ht, HybridTime min_hybrid_time);
 
-  size_t NumberOfBytesAppendedDuringSeekForward() const {
-    return 1 + encoded_read_time_.global_limit.size();
-  }
-
   void DebugDump();
 
   std::string DebugPosToString() override;
@@ -186,13 +185,6 @@ class IntentAwareIterator final : public IntentAwareIteratorIf {
 
   // Strong write intents which are either committed or written by the current
   // transaction (stored in txn_op_context) by considered time are considered as suitable.
-
-  // Seek intent sub-iterator to latest suitable intent starting with seek_key_buffer_.
-  // intent_iter_ will be positioned to first intent for the smallest key greater than
-  // resolved_intent_sub_doc_key_encoded_.
-  // If iterator already positioned far enough - does not perform seek.
-  // If we already resolved intent after seek_key_prefix_, then it will be used.
-  void SeekForwardToSuitableIntent();
 
   // Returns true if there is a resolved intent and it is correctly ordered towards the given key.
   template <Direction direction>
@@ -268,7 +260,7 @@ class IntentAwareIterator final : public IntentAwareIteratorIf {
 
   bool SatisfyBounds(Slice slice);
 
-  const EncodedDocHybridTime& GetIntentDocHybridTime(bool* same_transaction = nullptr);
+  const EncodedDocHybridTime& GetIntentDocHybridTime(bool* same_transaction = nullptr) const;
 
   inline bool HasValidIntent() const {
     return resolved_intent_state_ == ResolvedIntentState::kValid;
@@ -287,8 +279,8 @@ class IntentAwareIterator final : public IntentAwareIteratorIf {
   // If use_suffix_for_prefix then suffix is used in seek_key_prefix_, otherwise it will match key.
   void IntentSeekForward(size_t prefix_len);
 
-  // Seeks backwards to specified encoded key taking (it is responsibility of caller to make sure it
-  // doesn't have hybrid time). Does not perform a seek if the iterator is already positioned
+  // Seeks backwards to specified encoded key taking (it is responsibility of a caller to make sure
+  // it doesn't have hybrid time). Does not perform a seek if the iterator is already positioned
   // before the given key.
   void IntentSeekBackward(Slice key);
 
@@ -405,5 +397,8 @@ using IntentAwareIteratorLowerboundScope = IntentAwareIteratorBoundScope<true>;
 using IntentAwareIteratorUpperboundScope = IntentAwareIteratorBoundScope<false>;
 
 std::string DebugDumpKeyToStr(Slice key);
+
+// Used for IntentIterator only.
+void AppendStrongWrite(dockv::KeyBytes* out);
 
 } // namespace yb::docdb

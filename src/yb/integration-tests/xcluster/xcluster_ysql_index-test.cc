@@ -32,9 +32,9 @@ DECLARE_bool(TEST_disable_apply_committed_transactions);
 DECLARE_bool(TEST_xcluster_fail_table_create_during_bootstrap);
 DECLARE_int32(TEST_user_ddl_operation_timeout_sec);
 DECLARE_bool(TEST_fail_universe_replication_merge);
-DECLARE_bool(auto_add_new_index_to_bidirectional_xcluster);
 DECLARE_string(ysql_yb_test_block_index_phase);
 DECLARE_int32(ysql_yb_index_state_flags_update_delay);
+DECLARE_int32(cdc_state_checkpoint_update_interval_ms);
 
 using std::string;
 using namespace std::chrono_literals;
@@ -348,6 +348,9 @@ TEST_F(XClusterYsqlIndexTest, CreateIndexWithWorkload) {
 }
 
 TEST_F(XClusterYsqlIndexTest, FailedCreateIndex) {
+  // TODO(#24990): Bug in xCluster poller when we have more than 2 schema changes.
+  ANNOTATE_UNPROTECTED_WRITE(FLAGS_cdc_state_checkpoint_update_interval_ms) = 5 * 60 * 1000;
+
   // Create index on consumer before producer should fail.
   ASSERT_NOK_STR_CONTAINS(
       CreateIndex(*consumer_conn_), "Failed to bootstrap table on the source universe");
@@ -480,7 +483,8 @@ class XClusterColocatedNonTransactionalIndexTest : public XClusterColocatedIndex
  public:
   Transactional IsTransactional() override { return Transactional::kFalse; }
 
-  Status WaitForSafeTimeToAdvanceToNow() override {
+  Status WaitForSafeTimeToAdvanceToNow(std::vector<NamespaceName> namespace_names) override {
+    CHECK(namespace_names.empty());
     // There is no SafeTime in Non-transactional xCluster so instead wait for replication drain.
     return WaitForReplicationDrain(
         /* expected_num_nondrained */ 0, /* timeout_secs */ kRpcTimeout,
@@ -651,8 +655,6 @@ class XClusterBiDirectionalIndexTest : public XClusterYsqlNonTransactionalTest,
 
   void SetUp() override {
     YB_SKIP_TEST_IN_TSAN();
-    ANNOTATE_UNPROTECTED_WRITE(FLAGS_auto_add_new_index_to_bidirectional_xcluster) = true;
-
     XClusterYsqlNonTransactionalTest::SetUp();
 
     // Setup the reverse replication.

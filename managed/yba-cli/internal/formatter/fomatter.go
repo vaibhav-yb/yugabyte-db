@@ -47,7 +47,7 @@ const (
 	// ProviderHeader
 	ProviderHeader = "Provider"
 	// StorageConfigurationHeader
-	StorageConfigurationHeader = "StorageConfiguration"
+	StorageConfigurationHeader = "Storage Configuration"
 	// CodeHeader
 	CodeHeader = "Code"
 	// UUIDHeader
@@ -58,6 +58,12 @@ const (
 	InUseHeader = "In Use"
 	// KMSConfigHeader
 	KMSConfigHeader = "KMS configuration"
+	// CreateTimeHeader to display create time
+	CreateTimeHeader = "Create Time"
+	// UpdateTimeHeader to display update time
+	UpdateTimeHeader = "Update Time"
+	// TypeHeader to display type
+	TypeHeader = "Type"
 
 	// GreenColor for colored output
 	GreenColor = "green"

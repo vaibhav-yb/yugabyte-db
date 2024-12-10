@@ -38,8 +38,6 @@ DEFINE_RUNTIME_bool(xcluster_skip_health_check_on_replication_setup, false,
 DEFINE_test_flag(bool, exit_unfinished_deleting, false,
     "Whether to exit part way through the deleting universe process.");
 
-DECLARE_bool(auto_add_new_index_to_bidirectional_xcluster);
-
 namespace yb::master {
 
 namespace {
@@ -309,13 +307,6 @@ Result<bool> ShouldAddTableToReplicationGroup(
     CatalogManager& catalog_manager) {
   const auto& table_pb = table_info.old_pb();
 
-  SCHECK(
-      !table_info.IsColocationParentTable(), IllegalState,
-      Format(
-          "Colocated parent tables can only be added during the initial xCluster replication "
-          "setup: $0",
-          table_info.ToString()));
-
   if (!IsTableEligibleForXClusterReplication(table_info)) {
     return false;
   }
@@ -346,6 +337,13 @@ Result<bool> ShouldAddTableToReplicationGroup(
       return false;
     }
   }
+
+  SCHECK(
+      !table_info.IsColocationParentTable(), IllegalState,
+      Format(
+          "Colocated parent tables can only be added during the initial xCluster replication "
+          "setup: $0",
+          table_info.ToString()));
 
   // Skip if the table has already been added to this replication group.
   return !VERIFY_RESULT(HasTable(universe, table_info, catalog_manager));

@@ -38,11 +38,11 @@ import java.util.Set;
 import java.util.UUID;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.commons.lang3.StringUtils;
+import org.pac4j.core.context.session.SessionStore;
 import org.pac4j.core.profile.CommonProfile;
 import org.pac4j.core.profile.ProfileManager;
 import org.pac4j.oidc.profile.OidcProfile;
 import org.pac4j.play.PlayWebContext;
-import org.pac4j.play.store.PlaySessionStore;
 import play.Environment;
 import play.mvc.Http.Request;
 import play.mvc.Http.Status;
@@ -54,7 +54,7 @@ import play.mvc.Results;
 public class ThirdPartyLoginHandler {
 
   private final Environment environment;
-  private final PlaySessionStore sessionStore;
+  private final SessionStore sessionStore;
   private final RuntimeConfGetter confGetter;
   private final RoleBindingUtil roleBindingUtil;
   private final ApiHelper apiHelper;
@@ -64,7 +64,7 @@ public class ThirdPartyLoginHandler {
   @Inject
   public ThirdPartyLoginHandler(
       Environment environment,
-      PlaySessionStore sessionStore,
+      SessionStore sessionStore,
       RuntimeConfGetter confGetter,
       RoleBindingUtil roleBindingUtil,
       ApiHelper apiHelper) {
@@ -128,6 +128,7 @@ public class ThirdPartyLoginHandler {
       user.setRole(userRole);
       user.setUserType(UserType.oidc);
     } else {
+      log.info("Adding new user with email: " + email);
       user = Users.create(email, getRandomPassword(), userRole, custUUID, false, UserType.oidc);
     }
 
@@ -154,6 +155,7 @@ public class ThirdPartyLoginHandler {
       OidcProfile profile = (OidcProfile) getProfile(request);
       JWT idToken = profile.getIdToken();
       List<String> groups;
+      String groupsClaim = confGetter.getGlobalConf(GlobalConfKeys.oidcGroupClaim);
 
       // If the IdP is Azure we need to fetch groups from Microsoft endpoint since group names are
       // not returned in ID token
@@ -163,10 +165,16 @@ public class ThirdPartyLoginHandler {
                 idToken.getJWTClaimsSet().getStringClaim("oid"),
                 profile.getAccessToken().toAuthorizationHeader());
       } else {
-        groups = idToken.getJWTClaimsSet().getStringListClaim("groups");
+        groups = idToken.getJWTClaimsSet().getStringListClaim(groupsClaim);
       }
       // return if groups claim not found in token
-      if (groups == null) {
+      if (groups == null || groups.isEmpty()) {
+        String msg =
+            String.format(
+                "Failed to fetch groups from ID token for user: %s. Please make sure field %s is"
+                    + " present in the ID token. User will be assigned the default role.",
+                getEmailFromCtx(request), groupsClaim);
+        log.warn(msg);
         return roles;
       }
       log.info("List of user's groups = {}", groups.toString());
@@ -204,6 +212,7 @@ public class ThirdPartyLoginHandler {
    * @return The list of group names.
    */
   private List<String> getMsGroupsList(String userID, String authHeader) {
+    log.info("Trying to fetch group memberships from Microsoft endpoint.");
     String url = String.format(MS_MEMBEROF_API, userID);
     Map<String, String> headers = new HashMap<>();
     headers.put("Authorization", authHeader);
@@ -255,26 +264,26 @@ public class ThirdPartyLoginHandler {
   }
 
   void invalidateSession(Request request) {
-    final PlayWebContext context = new PlayWebContext(request, sessionStore);
-    final ProfileManager<CommonProfile> profileManager = new ProfileManager<>(context);
-    profileManager.logout();
+    final PlayWebContext context = new PlayWebContext(request);
+    final ProfileManager profileManager = new ProfileManager(context, sessionStore);
+    profileManager.removeProfiles();
     sessionStore.destroySession(context);
   }
 
   public CommonProfile getProfile(Request request) {
-    final PlayWebContext context = new PlayWebContext(request, sessionStore);
-    final ProfileManager<CommonProfile> profileManager = new ProfileManager<>(context);
+    final PlayWebContext context = new PlayWebContext(request);
+    final ProfileManager profileManager = new ProfileManager(context, sessionStore);
     return profileManager
-        .get(true)
+        .getProfile(CommonProfile.class)
         .orElseThrow(
             () ->
                 new PlatformServiceException(
                     Status.INTERNAL_SERVER_ERROR, "Unable to get profile"));
   }
 
-  public ProfileManager<CommonProfile> getProfileManager(Request request) {
-    final PlayWebContext context = new PlayWebContext(request, sessionStore);
-    final ProfileManager<CommonProfile> profileManager = new ProfileManager<>(context);
+  public ProfileManager getProfileManager(Request request) {
+    final PlayWebContext context = new PlayWebContext(request);
+    final ProfileManager profileManager = new ProfileManager(context, sessionStore);
 
     return profileManager;
   }

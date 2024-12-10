@@ -49,23 +49,21 @@ class PgPartmanTest : public MiniClusterTestWithClient<ExternalMiniCluster> {
     out = ASSERT_RESULT(conn_->FetchRows<std::string>("SHOW listen_addresses"));
     ip_address_ = out[0];
 
-    ASSERT_OK(CreateYsqlshBinPath());
-    ASSERT_OK(InitializeTestCommand());
-
-    ASSERT_OK(CreateTestDir());
+    InitYsqlshBinPath();
+    InitializeTestCommand();
+    InitTestDir();
     ASSERT_OK(CreatePartmanSchema());
     ASSERT_OK(CreatePgPartmanExtension());
     ASSERT_OK(CreatePgTapExtension());
   }
 
-  Status InitializeTestCommand(std::string user = "") {
+  void InitializeTestCommand(std::string user = "") {
     if (user.empty()) {
         user = user_;
     }
     test_command_ = Format(
         "pg_prove --psql-bin $0 -U $1 -d $2 -h $4 -p $3", ysql_bin_path_, user, database_,
         port_, ip_address_);
-    return Status::OK();
   }
 
   Status CreatePgPartmanExtension(pgwrapper::PGConn* conn = nullptr) {
@@ -80,18 +78,16 @@ class PgPartmanTest : public MiniClusterTestWithClient<ExternalMiniCluster> {
     return ExecuteQuery(conn, "CREATE EXTENSION pgtap");
   }
 
-  Status CreateTestDir(pgwrapper::PGConn* conn = nullptr) {
+  void InitTestDir(pgwrapper::PGConn* conn = nullptr) {
     auto root_dir = env_util::GetRootDir("bin");
     test_dir_ = JoinPathSegments(root_dir, "postgres_build/third-party-extensions/pgtap/test/sql");
     test_dir_partman_ =
         JoinPathSegments(root_dir, "postgres_build/third-party-extensions/pg_partman/test");
-    return Status::OK();
   }
 
-    Status CreateYsqlshBinPath(pgwrapper::PGConn* conn = nullptr) {
+  void InitYsqlshBinPath() {
     auto root_dir = env_util::GetRootDir("bin");
     ysql_bin_path_ = JoinPathSegments(root_dir, "postgres/bin/ysqlsh");
-    return Status::OK();
   }
 
   Status ExecuteQuery(pgwrapper::PGConn* conn, const std::string& query) {
@@ -105,10 +101,8 @@ class PgPartmanTest : public MiniClusterTestWithClient<ExternalMiniCluster> {
 
   void RunAndAssertTest(const std::string& test_file_name) {
     std::string test_file = JoinPathSegments(test_dir_partman_, test_file_name);
-    std::string output;
-    auto flag = RunShellProcess(Format("$0 $1", test_command_, test_file), &output);
-    LOG(INFO) << "pg_prove output for "<< test_file_name <<": "  << output;
-    ASSERT_EQ(flag, true);
+    auto output = ASSERT_RESULT(RunShellProcess(Format("$0 $1", test_command_, test_file)));
+    LOG(INFO) << "pg_prove output for "<< test_file_name << ": "  << output;
   }
 
   std::unique_ptr<pgwrapper::PGConn> conn_;
@@ -186,7 +180,7 @@ TEST_F(PgPartmanTest, TestIdProcedureSourceTable) {
 }
 
 TEST_F(PgPartmanTest, TestTimeProcedureEpochWeeklyNative) {
-  RunAndAssertTest("test_procedure/test-time-procedure-epoch-weekly-native-part1.sql");
+  RunAndAssertTest("test_procedure/yb_pg_test-time-procedure-epoch-weekly-native-part1.sql");
 
   ASSERT_OK(conn_->Execute(
       "CALL partman.partition_data_proc('partman_test.time_taptest_table', p_wait := 0, "
@@ -200,21 +194,21 @@ TEST_F(PgPartmanTest, TestTimeProcedureEpochWeeklyNative) {
 }
 
 TEST_F(PgPartmanTest, TestTimeProcedureSourceTable) {
-  RunAndAssertTest("test_procedure/test-time-procedure-source-table-part1.sql");
+  RunAndAssertTest("test_procedure/yb_pg_test-time-procedure-source-table-part1.sql");
 
   ASSERT_OK(conn_->Execute(
       "CALL partman.partition_data_proc('partman_test.time_taptest_table', p_wait := 0, "
       "p_source_table := 'partman_test.time_taptest_table_source')"));
 
-  RunAndAssertTest("test_procedure/test-time-procedure-source-table-part2.sql");
+  RunAndAssertTest("test_procedure/yb_pg_test-time-procedure-source-table-part2.sql");
 
   ASSERT_OK(conn_->Execute("CALL partman.run_maintenance_proc();"));
 
-  RunAndAssertTest("test_procedure/test-time-procedure-source-table-part3.sql");
+  RunAndAssertTest("test_procedure/yb_pg_test-time-procedure-source-table-part3.sql");
 }
 
 TEST_F(PgPartmanTest, TestTimeProcedureWeekly) {
-  RunAndAssertTest("test_procedure/test-time-procedure-weekly-part1.sql");
+  RunAndAssertTest("test_procedure/yb_pg_test-time-procedure-weekly-part1.sql");
 
   ASSERT_OK(
       conn_->Execute("CALL partman.reapply_constraints_proc('partman_test.time_taptest_table', "
@@ -227,10 +221,10 @@ TEST_F(PgPartmanTest, TestIdNonSuperUser) {
   RunAndAssertTest("test_native/test_nonsuperuser/test-nonsuperuser-part1.sql");
 
   std::string owner = "partman_owner";
-  ASSERT_OK(InitializeTestCommand(owner));
+  InitializeTestCommand(owner);
   RunAndAssertTest("test_native/test_nonsuperuser/yb_pg_test-id-nonsuperuser-part2.sql");
 
-  ASSERT_OK(InitializeTestCommand());
+  InitializeTestCommand();
   RunAndAssertTest("test_native/test_nonsuperuser/test-nonsuperuser-part3.sql");
 }
 
@@ -238,9 +232,29 @@ TEST_F(PgPartmanTest, TestTimeHourlyNonSuperUser) {
   RunAndAssertTest("test_native/test_nonsuperuser/test-nonsuperuser-part1.sql");
 
   std::string owner = "partman_basic";
-  ASSERT_OK(InitializeTestCommand(owner));
+  InitializeTestCommand(owner);
   RunAndAssertTest("test_native/test_nonsuperuser/yb_pg_test-time-hourly-nonsuperuser-part2.sql");
 
+}
+
+TEST_F(PgPartmanTest, TestExceptionWithColocation) {
+  constexpr auto db_name = "db1";
+  ASSERT_OK(conn_->ExecuteFormat("CREATE DATABASE $0 with colocation=true", db_name));
+
+  auto new_db_conn = ASSERT_RESULT(cluster_->ConnectToDB(db_name));
+  ASSERT_OK(new_db_conn.Execute("CREATE SCHEMA partman"));
+  ASSERT_OK(new_db_conn.Execute("CREATE EXTENSION pg_partman WITH SCHEMA partman"));
+
+  ASSERT_OK(
+      new_db_conn.Execute("CREATE TABLE orders (order_id SERIAL,order_date DATE NOT "
+                          "NULL,customer_id INT) PARTITION BY RANGE (order_date)"));
+
+  ASSERT_NOK_STR_CONTAINS(
+      new_db_conn.FetchRow<pgwrapper::PGUint64>(
+          "SELECT partman.create_parent( p_parent_table => 'public.orders', p_control => "
+          "'order_date', "
+          "p_type => 'native',p_interval =>'monthly', p_premake => 5)"),
+      "is a colocated table hence registering it to pg_partman maintenance is not supported");
 }
 
 }; // namespace yb

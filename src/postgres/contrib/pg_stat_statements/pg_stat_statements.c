@@ -633,6 +633,12 @@ _PG_init(void)
 	 * to get normalized query text.
 	 */
 	yb_get_normalized_query = &YbGetPgssNormalizedQueryText;
+
+	/*
+	 * Initialize the function pointer required by yb_query_diagnostics.c
+	 * to get constant lengths in the query text.
+	 */
+	yb_qd_fill_in_constant_lengths = &fill_in_constant_lengths;
 }
 
 /*
@@ -1950,6 +1956,9 @@ done:
 Datum
 pg_stat_statements_reset_1_7(PG_FUNCTION_ARGS)
 {
+	if (YBIsQueryDiagnosticsEnabled())
+		*yb_pgss_last_reset_time = GetCurrentTimestamp();
+
 	Oid			userid;
 	Oid			dbid;
 	uint64		queryid;
@@ -2771,7 +2780,7 @@ qtext_load_file(Size *buffer_size)
 
 	/* Allocate buffer; beware that off_t might be wider than size_t */
 	if ((yb_qtext_size_limit >= 0 && stat.st_size > yb_qtext_size_limit * 1024) ||
-	     !AllocHugeSizeIsValid(stat.st_size))
+		 !AllocHugeSizeIsValid(stat.st_size))
 		buf = NULL;
 	else
 		buf = (char *) malloc(stat.st_size);
@@ -3109,7 +3118,7 @@ yb_lwlock_crash_after_acquire_pg_stat_statements_reset()
 	if (cached_value == -1)
 	{
 		cached_value = YBCIsEnvVarTrue(
-		    "FLAGS_TEST_yb_lwlock_crash_after_acquire_pg_stat_statements_reset");
+			"FLAGS_TEST_yb_lwlock_crash_after_acquire_pg_stat_statements_reset");
 	}
 	return cached_value;
 
@@ -3624,6 +3633,12 @@ yb_track_nested_queries(void)
 	return pgss_track == PGSS_TRACK_ALL;
 }
 
+/*
+ * Get the normalized query text from the pgss_query_texts.stat file
+ * and copy it to the normalized_query buffer.
+ * Note that normalized_query is expected to be a buffer of at least
+ * query_len + 1 bytes.
+ */
 static void
 YbGetPgssNormalizedQueryText(Size query_offset, int query_len, char *normalized_query)
 {

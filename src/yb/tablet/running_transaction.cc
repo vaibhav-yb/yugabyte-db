@@ -196,8 +196,14 @@ void RunningTransaction::Abort(client::YBClient* client,
           nullptr /* tablet */,
           client,
           &req,
-          std::bind(&RunningTransaction::AbortReceived, this, status_tablet,
-                    _1, _2, shared_from_this())),
+          [status_tablet, self = shared_from_this(), weak_context = context_.RetainWeak()](
+              const Status& status, const tserver::AbortTransactionResponsePB& response) {
+            auto context_lock = weak_context.lock();
+            if (!context_lock) {
+              return;
+            }
+            self->AbortReceived(status_tablet, status, response);
+          }),
       &abort_handle_);
 }
 
@@ -367,6 +373,7 @@ void RunningTransaction::DoStatusReceived(const TabletId& status_tablet,
   const bool ok = status.ok();
   int64_t new_request_id = -1;
   TabletId current_status_tablet;
+  bool did_abort_txn = false;
   {
     MinRunningNotifier min_running_notifier(&context_.applier_);
     std::unique_lock<std::mutex> lock(context_.mutex_);
@@ -414,7 +421,7 @@ void RunningTransaction::DoStatusReceived(const TabletId& status_tablet,
         << response.ShortDebugString();
     auto coordinator_safe_time = response.coordinator_safe_time().size() == 1
         ? HybridTime::FromPB(response.coordinator_safe_time(0)) : HybridTime();
-    auto did_abort_txn = UpdateStatus(
+    did_abort_txn = UpdateStatus(
         status_tablet, transaction_status, time_of_status, coordinator_safe_time,
         aborted_subtxn_set, expected_deadlock_status);
     if (did_abort_txn) {
@@ -441,6 +448,9 @@ void RunningTransaction::DoStatusReceived(const TabletId& status_tablet,
   NotifyWaiters(
       serial_no, time_of_status, transaction_status, aborted_subtxn_set, status_waiters,
       expected_deadlock_status);
+  if (did_abort_txn) {
+    context_.SignalAborted(id());
+  }
 }
 
 std::vector<StatusRequest> RunningTransaction::ExtractFinishedStatusWaitersUnlocked(
@@ -519,8 +529,7 @@ Result<TransactionStatusResult> RunningTransaction::MakeAbortResult(
 
 void RunningTransaction::AbortReceived(const TabletId& status_tablet,
                                        const Status& status,
-                                       const tserver::AbortTransactionResponsePB& response,
-                                       const RunningTransactionPtr& shared_self) {
+                                       const tserver::AbortTransactionResponsePB& response) {
   if (response.has_propagated_hybrid_time()) {
     context_.participant_context_.UpdateClock(HybridTime(response.propagated_hybrid_time()));
   }
@@ -528,8 +537,9 @@ void RunningTransaction::AbortReceived(const TabletId& status_tablet,
   decltype(abort_waiters_) abort_waiters;
   auto result = MakeAbortResult(status, response);
 
-  VLOG_WITH_PREFIX(3) << "AbortReceived: " << yb::ToString(result);
+  VLOG_WITH_PREFIX(3) << "AbortReceived: " << AsString(result);
 
+  bool did_abort_txn = false;
   {
     MinRunningNotifier min_running_notifier(&context_.applier_);
     std::lock_guard lock(context_.mutex_);
@@ -538,7 +548,7 @@ void RunningTransaction::AbortReceived(const TabletId& status_tablet,
         << "inconsistentcy issues in case of Geo-Partition workloads.";
     abort_request_in_progress_ = false;
 
-    LOG_IF(DFATAL, status_tablet != shared_self->status_tablet())
+    LOG_IF(DFATAL, status_tablet != this->status_tablet())
         << "Status Tablet switched while Abort txn request was in progress. This might lead "
         << "to data consistency issues.";
 
@@ -548,9 +558,10 @@ void RunningTransaction::AbortReceived(const TabletId& status_tablet,
     // So we could use it as reply to Abort, but cannot store it as transaction status.
     if (result.ok() && result->status_time != HybridTime::kMax) {
       auto coordinator_safe_time = HybridTime::FromPB(response.coordinator_safe_time());
-      if (UpdateStatus(
+      did_abort_txn = UpdateStatus(
           status_tablet, result->status, result->status_time, coordinator_safe_time,
-          result->aborted_subtxn_set, result->expected_deadlock_status)) {
+          result->aborted_subtxn_set, result->expected_deadlock_status);
+      if (did_abort_txn) {
         context_.NotifyAbortedTransactionIncrement(id());
         context_.EnqueueRemoveUnlocked(
             id(), RemoveReason::kAbortReceived, &min_running_notifier,
@@ -560,6 +571,9 @@ void RunningTransaction::AbortReceived(const TabletId& status_tablet,
   }
   for (const auto& waiter : abort_waiters) {
     waiter(result);
+  }
+  if (did_abort_txn) {
+    context_.SignalAborted(id());
   }
 }
 
@@ -649,6 +663,14 @@ void RunningTransaction::UpdateAbortCheckHT(HybridTime now, UpdateAbortCheckHTMo
       ? FLAGS_transaction_abort_check_timeout_ms
       : FLAGS_transaction_abort_check_interval_ms;
   abort_check_ht_ = now.AddDelta(1ms * delta_ms);
+}
+
+void RunningTransaction::SetTxnLoadedWithCDC() {
+  is_txn_loaded_with_cdc_ = true;
+}
+
+bool RunningTransaction::IsTxnLoadedWithCDC() const {
+  return is_txn_loaded_with_cdc_;
 }
 
 } // namespace tablet

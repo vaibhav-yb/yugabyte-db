@@ -307,6 +307,8 @@ class YBClientBuilder {
   DISALLOW_COPY_AND_ASSIGN(YBClientBuilder);
 };
 
+YB_STRONGLY_TYPED_BOOL(SkipHidden);
+
 // The YBClient represents a connection to a cluster. From the user
 // perspective, they should only need to create one of these in their
 // application, likely a singleton -- but it's not a singleton in YB in any
@@ -550,6 +552,8 @@ class YBClient {
   Result<bool> NamespaceIdExists(const std::string& namespace_id,
                                  const std::optional<YQLDatabase>& database_type = std::nullopt);
 
+  Status ListClones(master::ListClonesResponsePB* resp);
+
   Status CreateTablegroup(const std::string& namespace_name,
                           const std::string& namespace_id,
                           const std::string& tablegroup_id,
@@ -734,8 +738,7 @@ class YBClient {
 
   void GetTableLocations(
       const TableId& table_id, int32_t max_tablets, RequireTabletsRunning require_tablets_running,
-      PartitionsOnly partitions_only, GetTableLocationsCallback callback,
-      master::IncludeInactive = master::IncludeInactive::kFalse);
+      PartitionsOnly partitions_only, GetTableLocationsCallback callback);
 
   // Find the number of tservers. This function should not be called frequently for reading or
   // writing actual data. Currently, it is called only for SQL DDL statements.
@@ -767,7 +770,7 @@ class YBClient {
       const std::string& filter = "",
       bool exclude_ysql = false,
       const std::string& ysql_db_filter = "",
-      bool skip_hidden = false);
+      SkipHidden skip_hidden = SkipHidden::kFalse);
 
   // List tables in a namespace.
   //
@@ -827,19 +830,23 @@ class YBClient {
   Result<int> WaitForYsqlBackendsCatalogVersion(
       const std::string& database_name,
       uint64_t version,
-      const MonoDelta& timeout = MonoDelta());
+      const MonoDelta& timeout = MonoDelta(),
+      pid_t requestor_pg_backend_pid = -1);
   Result<int> WaitForYsqlBackendsCatalogVersion(
       const std::string& database_name,
       uint64_t version,
-      const CoarseTimePoint& deadline);
+      const CoarseTimePoint& deadline,
+      pid_t requestor_pg_backend_pid = -1);
   Result<int> WaitForYsqlBackendsCatalogVersion(
       PgOid database_oid,
       uint64_t version,
-      const MonoDelta& timeout = MonoDelta());
+      const MonoDelta& timeout = MonoDelta(),
+      pid_t requestor_pg_backend_pid = -1);
   Result<int> WaitForYsqlBackendsCatalogVersion(
       PgOid database_oid,
       uint64_t version,
-      const CoarseTimePoint& deadline);
+      const CoarseTimePoint& deadline,
+      pid_t requestor_pg_backend_pid = -1);
 
   // Get the list of master uuids. Can be enhanced later to also return port/host info.
   Status ListMasters(
@@ -848,7 +855,7 @@ class YBClient {
 
   // Check if the table given by 'table_name' exists. 'skip_hidden' indicates whether to consider
   // hidden tables. Result value is set only on success.
-  Result<bool> TableExists(const YBTableName& table_name, bool skip_hidden = false);
+  Result<bool> TableExists(const YBTableName& table_name);
 
   Result<bool> IsLoadBalanced(uint32_t num_servers);
   Result<bool> IsLoadBalancerIdle();
@@ -871,11 +878,12 @@ class YBClient {
   Status OpenTable(const YBTableName& table_name, YBTablePtr* table);
   Status OpenTable(
       const TableId& table_id, YBTablePtr* table,
-      master::IncludeInactive include_inactive = master::IncludeInactive::kFalse,
+      master::IncludeHidden include_hidden = master::IncludeHidden::kFalse,
       master::GetTableSchemaResponsePB* resp = nullptr);
 
   void OpenTableAsync(const YBTableName& table_name, const OpenTableAsyncCallback& callback);
   void OpenTableAsync(const TableId& table_id, const OpenTableAsyncCallback& callback,
+                      master::IncludeHidden include_hidden = master::IncludeHidden::kFalse,
                       master::GetTableSchemaResponsePB* resp = nullptr);
 
   Result<YBTablePtr> OpenTable(const TableId& table_id);
@@ -977,7 +985,7 @@ class YBClient {
 
   void LookupTabletById(const std::string& tablet_id,
                         const std::shared_ptr<const YBTable>& table,
-                        master::IncludeInactive include_inactive,
+                        master::IncludeHidden include_hidden,
                         master::IncludeDeleted include_deleted,
                         CoarseTimePoint deadline,
                         LookupTabletCallback callback,
@@ -1061,6 +1069,8 @@ class YBClient {
 
   int64_t GetRaftConfigOpidIndex(const TabletId& tablet_id);
 
+  void RequestAbortAllRpcs();
+
  private:
   class Data;
 
@@ -1104,18 +1114,17 @@ class YBClient {
   template <class Id>
   Status DoOpenTable(
       const Id& id, YBTablePtr* table,
-      master::IncludeInactive include_inactive = master::IncludeInactive::kFalse,
+      master::IncludeHidden include_hidden = master::IncludeHidden::kFalse,
       master::GetTableSchemaResponsePB* resp = nullptr);
 
   template <class Id>
   void DoOpenTableAsync(
       const Id& id, const OpenTableAsyncCallback& callback,
-      master::IncludeInactive include_inactive = master::IncludeInactive::kFalse,
+      master::IncludeHidden include_hidden = master::IncludeHidden::kFalse,
       master::GetTableSchemaResponsePB* resp = nullptr);
 
   void GetTableSchemaCallback(
-      std::shared_ptr<YBTableInfo> info, const OpenTableAsyncCallback& callback,
-      master::IncludeInactive include_inactive, const Status& s);
+      std::shared_ptr<YBTableInfo> info, const OpenTableAsyncCallback& callback, const Status& s);
 
   CoarseTimePoint PatchAdminDeadline(CoarseTimePoint deadline) const;
 

@@ -130,6 +130,11 @@ void ReleaseCachedEntry(void* arg, void* h) {
   cache->Release(handle);
 }
 
+template <class TValue>
+void DestroyCachedEntry(void* arg, void* h) {
+  delete reinterpret_cast<TValue*>(arg);
+}
+
 Cache::Handle* GetEntryFromCache(Cache* block_cache, const Slice& key,
                                  Tickers block_cache_miss_ticker,
                                  Tickers block_cache_hit_ticker,
@@ -203,25 +208,33 @@ struct BlockBasedTable::FileReaderWithCachePrefix {
 //    was not read from cache, `cache_handle` will be nullptr.
 template <class TValue>
 struct BlockBasedTable::CachableEntry {
-  CachableEntry(TValue* _value, Cache::Handle* _cache_handle)
-      : value(_value), cache_handle(_cache_handle) {}
-  CachableEntry() : CachableEntry(nullptr, nullptr) {}
+  CachableEntry(TValue* _value, Cache::Handle& _cache_handle)
+      : value(_value), cache_handle(&_cache_handle) {}
+
+  CachableEntry(TValue* _value, bool _owns)
+      : value(_value), owns(_owns) {}
+
+  CachableEntry() = default;
+
   void Release(Cache* cache) {
     if (cache_handle) {
       cache->Release(cache_handle);
       value = nullptr;
       cache_handle = nullptr;
+    } else if (owns) {
+      delete value;
     }
   }
 
   TValue* value = nullptr;
   // if the entry is from the cache, cache_handle will be populated.
   Cache::Handle* cache_handle = nullptr;
+  bool owns = false;
 };
 
 struct BlockBasedTable::Rep {
   struct NotMatchingFilterEntry : public CachableEntry<FilterBlockReader> {
-    NotMatchingFilterEntry() : CachableEntry(&filter, nullptr) {}
+    NotMatchingFilterEntry() : CachableEntry(&filter, false) {}
     NotMatchingFilterBlockReader filter;
   };
 
@@ -285,6 +298,8 @@ struct BlockBasedTable::Rep {
 
   DataIndexLoadMode data_index_load_mode = static_cast<DataIndexLoadMode>(0);
   yb::MemTrackerPtr mem_tracker;
+  // The checksum of the meta block used to construct block cache key prefix.
+  uint32_t meta_block_checksum;
 };
 
 struct BlockBasedTable::BlockRetrievalInfo {
@@ -472,12 +487,12 @@ void BlockBasedTable::SetupCacheKeyPrefix(Rep* rep,
   reader_with_cache_prefix->compressed_cache_key_prefix.size = 0;
   if (rep->table_options.block_cache != nullptr) {
     GenerateCachePrefix(rep->table_options.block_cache.get(),
-        reader_with_cache_prefix->reader->file(),
+        reader_with_cache_prefix->reader->file(), rep->meta_block_checksum,
         &reader_with_cache_prefix->cache_key_prefix);
   }
   if (rep->table_options.block_cache_compressed != nullptr) {
     GenerateCachePrefix(rep->table_options.block_cache_compressed.get(),
-        reader_with_cache_prefix->reader->file(),
+        reader_with_cache_prefix->reader->file(), rep->meta_block_checksum,
         &reader_with_cache_prefix->compressed_cache_key_prefix);
   }
 }
@@ -588,13 +603,15 @@ Status BlockBasedTable::Open(const ImmutableCFOptions& ioptions,
   rep->footer = footer;
   rep->index_type = table_options.index_type;
   rep->hash_index_allow_collision = table_options.hash_index_allow_collision;
-  SetupCacheKeyPrefix(rep, rep->base_reader_with_cache_prefix.get());
   unique_ptr<BlockBasedTable> new_table(new BlockBasedTable(rep));
 
   // Read meta index
   std::unique_ptr<Block> meta;
   std::unique_ptr<InternalIterator> meta_iter;
   RETURN_NOT_OK(ReadMetaBlock(rep, &meta, &meta_iter));
+
+  // cache key prefix needs the checksum of meta-block populated by ReadMetaBlock
+  SetupCacheKeyPrefix(rep, rep->base_reader_with_cache_prefix.get());
 
   RETURN_NOT_OK(new_table->ReadPropertiesBlock(meta_iter.get()));
 
@@ -890,6 +907,16 @@ Status BlockBasedTable::ReadMetaBlock(Rep* rep,
     return s;
   }
 
+  // Instead of reading the checksum of the meta-block from disk, it is simpler and more
+  // efficient to compute it based on the block data. Some benefits include:
+  // (1) Minimizing changes: Reading the checksum from disk would require modifications in many
+  //     functions.
+  // (2) The function is executed only once when a file is opened, so the overhead is minimal.
+  // (3) Checksum calculation is limited to the meta-block, ensuring that reading other blocks
+  //     remains unaffected.
+  rep->meta_block_checksum = block_based_table::ComputeChecksumForBlockCacheKey(
+      rep->table_options.checksum, Slice(meta->data(), meta->size()));
+
   *meta_block = std::move(meta);
   // meta block uses bytewise comparator.
   iter->reset(
@@ -1170,7 +1197,7 @@ BlockBasedTable::CachableEntry<FilterBlockReader> BlockBasedTable::GetFilter(
   // prefetch_index_and_filter == false. That means bloom filters are not be used if
   // both prefetch_index_and_filter and table_options.cache_index_and_filter_blocks are false.
   if (!rep_->table_options.cache_index_and_filter_blocks && !is_fixed_size_filter) {
-    return {rep_->filter.get(), nullptr /* cache handle */};
+    return {rep_->filter.get(), false};
   }
 
   PERF_TIMER_GUARD(read_filter_block_nanos);
@@ -1181,7 +1208,7 @@ BlockBasedTable::CachableEntry<FilterBlockReader> BlockBasedTable::GetFilter(
     // If we get here, we have:
     // table_options.cache_index_and_filter_blocks || is_fixed_size_filter
     // table_options.block_cache == nullptr
-    return {nullptr /* filter */, nullptr /* cache handle */};
+    return {};
   }
 
   const BlockHandle* filter_block_handle;
@@ -1202,7 +1229,7 @@ BlockBasedTable::CachableEntry<FilterBlockReader> BlockBasedTable::GetFilter(
       RLOG(InfoLogLevel::ERROR_LEVEL, rep_->ioptions.info_log,
           "Failed to decode fixed-size filter block handle from filter index.");
       FAIL_IF_NOT_PRODUCTION();
-      return {nullptr /* filter */, nullptr /* cache handle */};
+      return {};
     }
   } else {
     filter_block_handle = &rep_->filter_handle;
@@ -1241,7 +1268,7 @@ BlockBasedTable::CachableEntry<FilterBlockReader> BlockBasedTable::GetFilter(
     }
   }
 
-  return { filter, cache_handle };
+  return { filter, *cache_handle };
 }
 
 yb::Result<BlockBasedTable::CachableEntry<IndexReader>> BlockBasedTable::GetIndexReader(
@@ -1249,7 +1276,7 @@ yb::Result<BlockBasedTable::CachableEntry<IndexReader>> BlockBasedTable::GetInde
   auto* index_reader = rep_->data_index_reader.get(std::memory_order_acquire);
   if (index_reader) {
     // Index reader has already been pre-populated.
-    return BlockBasedTable::CachableEntry<IndexReader>{index_reader, /* cache_handle =*/ nullptr};
+    return BlockBasedTable::CachableEntry<IndexReader>{index_reader, false};
   }
   PERF_TIMER_GUARD(read_index_block_nanos);
 
@@ -1280,11 +1307,14 @@ yb::Result<BlockBasedTable::CachableEntry<IndexReader>> BlockBasedTable::GetInde
       RETURN_NOT_OK(block_cache->Insert(
           key, read_options.query_id, index_reader_unique.get(), index_reader_unique->usable_size(),
           &DeleteCachedEntry<IndexReader>, &cache_handle, statistics));
-      assert(cache_handle);
+      DCHECK(cache_handle || read_options.query_id == kNoCacheQueryId);
       index_reader = index_reader_unique.release();
+      if (!cache_handle) {
+        return BlockBasedTable::CachableEntry<IndexReader>{index_reader, true};
+      }
     }
 
-    return BlockBasedTable::CachableEntry<IndexReader>{index_reader, cache_handle};
+    return BlockBasedTable::CachableEntry<IndexReader>{index_reader, *cache_handle};
   } else {
     if (no_io) {
       return ReturnNoIOError();
@@ -1303,9 +1333,28 @@ yb::Result<BlockBasedTable::CachableEntry<IndexReader>> BlockBasedTable::GetInde
       index_reader = index_reader_holder.release();
       rep_->data_index_reader.reset(index_reader, std::memory_order_acq_rel);
     }
-    return BlockBasedTable::CachableEntry<IndexReader>{index_reader, /* cache_handle =*/ nullptr};
+    return BlockBasedTable::CachableEntry<IndexReader>{index_reader, false};
   }
 }
+
+template <typename IndexIteratorType>
+void BlockBasedTable::RegisterCleanupForIndexIterator(
+    const CachableEntry<IndexReader>& index_reader_entry, IndexIteratorType* iter) {
+  if (index_reader_entry.cache_handle) {
+    iter->RegisterCleanup(
+        &ReleaseCachedEntry, rep_->table_options.block_cache.get(),
+        index_reader_entry.cache_handle);
+  } else if (index_reader_entry.owns) {
+    iter->RegisterCleanup(
+        &DestroyCachedEntry<IndexReader>, index_reader_entry.value, nullptr);
+  }
+}
+
+namespace {
+
+constexpr bool kSkipFiltersForIndex = true;
+
+} // namespace
 
 // TODO: consider allocating index iterator on arena, try and measure potential performance
 // improvements.
@@ -1316,26 +1365,39 @@ InternalIterator* BlockBasedTable::NewIndexIterator(
     return ReturnErrorIterator(index_reader_result.status(), input_iter);
   }
 
-  const bool skip_filters_for_index = true;
-
   auto* new_iter = index_reader_result->value->NewIterator(
       input_iter,
       std::make_unique<BlockEntryIteratorState>(
-          this, ReadOptions::kDefault, skip_filters_for_index, BlockType::kIndex),
+          this, ReadOptions::kDefault, kSkipFiltersForIndex, BlockType::kIndex),
       read_options.total_order_seek);
 
-  if (index_reader_result->cache_handle) {
-    auto iter = new_iter ? new_iter : input_iter;
-    iter->RegisterCleanup(
-        &ReleaseCachedEntry, rep_->table_options.block_cache.get(),
-        index_reader_result->cache_handle);
-  }
+  auto* iter = new_iter ? new_iter : input_iter;
+  RegisterCleanupForIndexIterator(index_reader_result.get(), iter);
 
   return new_iter;
 }
 
 InternalIterator* BlockBasedTable::NewIndexIterator(const ReadOptions& read_options) {
   return NewIndexIterator(read_options, /* input_iter = */ nullptr);
+}
+
+DataBlockAwareIndexInternalIterator* BlockBasedTable::NewDataBlockAwareIndexIterator(
+    const ReadOptions& read_options) {
+  const auto index_reader_result = GetIndexReader(read_options);
+  if (!index_reader_result.ok()) {
+    return NewErrorIterator<DataBlockAwareIndexInternalIterator>(index_reader_result.status());
+  }
+
+  auto* iter = index_reader_result->value->NewDataBlockAwareIterator(
+      /* iter = */ nullptr,
+      std::make_unique<BlockEntryIteratorState>(
+          this, ReadOptions::kDefault, kSkipFiltersForIndex, BlockType::kIndex),
+      std::make_unique<BlockEntryIteratorState>(
+          this, ReadOptions::kDefault, /* skip_filters = */ false, BlockType::kData),
+      read_options.total_order_seek);
+
+  RegisterCleanupForIndexIterator(index_reader_result.get(), iter);
+  return iter;
 }
 
 // Using status return value because returning Result<BlockBasedTable::BlockRetrievalInfo> leads to

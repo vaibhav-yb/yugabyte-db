@@ -253,6 +253,7 @@ class ThreadMgr {
   void RemoveThread(const pthread_t& pthread_id, const string& category);
 
   void RenderThreadGroup(const std::string& group, std::ostream& output);
+  uint64_t ReadThreadsRunning();
 
  private:
   // Container class for any details we want to capture about a thread
@@ -305,7 +306,6 @@ class ThreadMgr {
 
   // Metric callbacks.
   uint64_t ReadThreadsStarted();
-  uint64_t ReadThreadsRunning();
 
   // Webpage callback; prints all threads by category
   void ThreadPathHandler(const WebCallbackRegistry::WebRequest& args,
@@ -601,30 +601,34 @@ void InitThreadingInternal() {
 }
 
 // Thread local prefix used in tests to display the daemon name.
-std::string* TEST_GetThreadFormattedLogPrefix() {
+std::string* AccessThreadFormattedLogPrefix() {
   BLOCK_STATIC_THREAD_LOCAL(std::string, log_prefix);
   return log_prefix;
 }
 
-std::string* TEST_GetThreadUnformattedLogPrefix() {
+std::string* AccessThreadUnformattedLogPrefix() {
   BLOCK_STATIC_THREAD_LOCAL(std::string, log_prefix_unformatted);
   return log_prefix_unformatted;
 }
 
 void TEST_FormatAndSetThreadLogPrefix(const std::string& new_prefix) {
-  *TEST_GetThreadUnformattedLogPrefix() = new_prefix;
-  *TEST_GetThreadFormattedLogPrefix() =
+  *AccessThreadUnformattedLogPrefix() = new_prefix;
+  *AccessThreadFormattedLogPrefix() =
       new_prefix.empty() ? new_prefix : Format("[$0] ", new_prefix);
 }
 
 } // anonymous namespace
 
 const char* TEST_GetThreadLogPrefix() {
-  return TEST_GetThreadFormattedLogPrefix()->c_str();
+  return AccessThreadFormattedLogPrefix()->c_str();
+}
+
+std::string TEST_GetThreadUnformattedLogPrefix() {
+  return *AccessThreadUnformattedLogPrefix();
 }
 
 TEST_SetThreadPrefixScoped::TEST_SetThreadPrefixScoped(const std::string& prefix)
-    : old_prefix_(*TEST_GetThreadUnformattedLogPrefix()) {
+    : old_prefix_(*AccessThreadUnformattedLogPrefix()) {
   TEST_FormatAndSetThreadLogPrefix(
       Format("$0$1$2", old_prefix_, old_prefix_.empty() ? "" : "-", prefix));
 }
@@ -694,10 +698,17 @@ Status ThreadJoiner::Join() {
 
   MonoDelta waited = MonoDelta::kZero;
   bool keep_trying = true;
+  int stack_trace_report_counter = -5;
   while (keep_trying) {
     if (waited >= warn_after_) {
       LOG(WARNING) << Format("Waited for $0 trying to join with $1 (tid $2)",
                              waited, thread_->name_, thread_->tid_);
+      if (++stack_trace_report_counter == 0) {
+        auto stack_trace = ThreadStack(thread_->tid_for_stack());
+        if (stack_trace.ok()) {
+          LOG(WARNING) << "Stack trace for " << thread_->tid_ << ":\n" << stack_trace->Symbolize();
+        }
+      }
     }
 
     auto remaining_before_giveup = give_up_after_;
@@ -739,7 +750,7 @@ Thread::Thread(std::string category, std::string name, ThreadFunctor functor)
     : thread_(0),
       category_(std::move(category)),
       name_(std::move(name)),
-      TEST_log_prefix_(*TEST_GetThreadUnformattedLogPrefix()),
+      TEST_log_prefix_(*AccessThreadUnformattedLogPrefix()),
       tid_(CHILD_WAITING_TID),
       functor_(std::move(functor)),
       done_(1),
@@ -888,7 +899,8 @@ void* Thread::SuperviseThread(void* arg) {
 }
 
 void Thread::Join() {
-  WARN_NOT_OK(ThreadJoiner(this).Join(), "Thread join failed");
+  auto status = ThreadJoiner(this).Join();
+  LOG_IF(DFATAL, !status.ok()) << "Thread join failed: " << status;
 }
 
 void Thread::FinishThread(void* arg) {
@@ -916,6 +928,23 @@ void Thread::FinishThread(void* arg) {
   CHECK_OK(ThreadSignalMaskBlock({GetStackTraceSignal()}));
 }
 
+Status Thread::SendSignal(ThreadIdForStack tid, int signal) {
+  // We use the raw syscall here instead of kill() to ensure that we don't accidentally
+  // send a signal to some other process in the case that the thread has exited and
+  // the TID been recycled.
+#if defined(__linux__)
+  int res = narrow_cast<int>(syscall(SYS_tgkill, getpid(), tid, signal));
+#else
+  int res = pthread_kill(tid, signal);
+#endif
+  if (res != 0) {
+    static const Status status = STATUS(
+        RuntimeError, "Unable to deliver signal: process may have exited");
+    return status;
+  }
+  return Status::OK();
+}
+
 CDSAttacher::CDSAttacher() {
   cds::threading::Manager::attachThread();
 }
@@ -926,6 +955,10 @@ CDSAttacher::~CDSAttacher() {
 
 void RenderAllThreadStacks(std::ostream& output) {
   thread_manager->RenderThreadGroup(kAllGroups, output);
+}
+
+size_t CountManagedThreads() {
+  return thread_manager->ReadThreadsRunning();
 }
 
 } // namespace yb

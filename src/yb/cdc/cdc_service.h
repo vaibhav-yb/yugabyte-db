@@ -104,6 +104,7 @@ using TableIdToStreamIdMap =
     std::unordered_map<TableId, std::pair<TabletId, std::unordered_set<xrepl::StreamId>>>;
 using RollBackTabletIdCheckpointMap =
     std::unordered_map<const std::string*, std::pair<int64_t, OpId>>;
+
 class CDCServiceImpl : public CDCServiceIf {
  public:
   CDCServiceImpl(
@@ -307,6 +308,9 @@ class CDCServiceImpl : public CDCServiceIf {
   Status CheckTabletNotOfInterest(
       const TabletStreamInfo& producer_tablet, int64_t last_active_time_passed = 0,
       bool deletion_check = false);
+
+  bool CheckTabletExpiredOrNotOfInterest(
+      const TabletStreamInfo& producer_tablet, int64_t last_active_time_passed);
 
   Result<int64_t> GetLastActiveTime(
       const TabletStreamInfo& producer_tablet, bool ignore_cache = false);

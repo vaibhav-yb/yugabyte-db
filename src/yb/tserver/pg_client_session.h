@@ -29,6 +29,8 @@
 #include <boost/preprocessor/seq/for_each.hpp>
 #include <boost/range/iterator_range.hpp>
 
+#include "yb/ash/wait_state.h"
+
 #include "yb/client/client_fwd.h"
 
 #include "yb/common/consistent_read_point.h"
@@ -147,11 +149,13 @@ class PgClientSession {
       PgSequenceCache* sequence_cache, PgSharedMemoryPool& shared_mem_pool,
       const EventStatsPtr& stats_exchange_response_size, rpc::Scheduler& scheduler);
 
+  virtual ~PgClientSession() = default;
+
   uint64_t id() const { return id_; }
 
   Status Perform(PgPerformRequestPB* req, PgPerformResponsePB* resp, rpc::RpcContext* context);
 
-  std::shared_ptr<CountDownLatch> ProcessSharedRequest(size_t size, SharedExchange* exchange);
+  void ProcessSharedRequest(size_t size, SharedExchange* exchange);
 
   #define PG_CLIENT_SESSION_METHOD_DECLARE(r, data, method) \
   Status method( \
@@ -172,8 +176,8 @@ class PgClientSession {
 
   std::pair<uint64_t, std::byte*> ObtainBigSharedMemorySegment(size_t size);
 
-  void StartShutdown();
-  void CompleteShutdown();
+  virtual void StartShutdown();
+  virtual void CompleteShutdown();
 
  private:
   struct SetupSessionResult {
@@ -227,10 +231,6 @@ class PgClientSession {
 
   const client::YBSessionPtr& Session(PgClientSessionKind kind) const {
     return GetSessionData(kind).session;
-  }
-
-  client::YBTransactionPtr& Transaction(PgClientSessionKind kind) {
-    return GetSessionData(kind).transaction;
   }
 
   const client::YBTransactionPtr& Transaction(PgClientSessionKind kind) const {
@@ -340,5 +340,33 @@ class PgClientSession {
   simple_spinlock pending_data_mutex_;
   std::vector<WriteBuffer> pending_data_ GUARDED_BY(pending_data_mutex_);
 };
+
+template <class Pb>
+concept PbWith_AshMetadataPB = requires (const Pb& t) {
+  t.ash_metadata();
+}; // NOLINT
+
+template <PbWith_AshMetadataPB Pb>
+void TryUpdateAshWaitState(const Pb& req) {
+  if (req.has_ash_metadata()) {
+    ash::WaitStateInfo::UpdateMetadataFromPB(req.ash_metadata());
+  }
+}
+
+// Overloads for RPCs which intentionally doesn't have the ash_metadata
+// field, either because they are deprecated, or they are async RPCs, or
+// they are called before ASH is able to sample them as of 08-10-2024
+//
+// NOTE: New sync RPCs should have ASH metadata along with it, and it shouldn't
+// be overloaded here.
+inline void TryUpdateAshWaitState(const PgHeartbeatRequestPB&) {}
+inline void TryUpdateAshWaitState(const PgActiveSessionHistoryRequestPB&) {}
+inline void TryUpdateAshWaitState(const PgFetchDataRequestPB&) {}
+inline void TryUpdateAshWaitState(const PgGetCatalogMasterVersionRequestPB&) {}
+inline void TryUpdateAshWaitState(const PgGetReplicationSlotStatusRequestPB&) {}
+inline void TryUpdateAshWaitState(const PgSetActiveSubTransactionRequestPB&) {}
+inline void TryUpdateAshWaitState(const PgGetDatabaseInfoRequestPB&) {}
+inline void TryUpdateAshWaitState(const PgIsInitDbDoneRequestPB&) {}
+inline void TryUpdateAshWaitState(const PgCreateSequencesDataTableRequestPB&) {}
 
 }  // namespace yb::tserver

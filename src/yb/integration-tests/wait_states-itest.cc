@@ -34,7 +34,6 @@
 
 using namespace std::literals;
 
-DECLARE_bool(ysql_yb_ash_enable_infra);
 DECLARE_bool(ysql_yb_enable_ash);
 DECLARE_int32(ysql_yb_ash_sample_size);
 DECLARE_int32(ysql_yb_ash_sampling_interval_ms);
@@ -121,7 +120,6 @@ class WaitStateITest : public pgwrapper::PgMiniTestBase {
 
   void SetUp() override {
     ANNOTATE_UNPROTECTED_WRITE(FLAGS_rpc_slow_query_threshold_ms) = kTimeMultiplier * 10000;
-    ANNOTATE_UNPROTECTED_WRITE(FLAGS_ysql_yb_ash_enable_infra) = true;
     ANNOTATE_UNPROTECTED_WRITE(FLAGS_ysql_yb_enable_ash) = true;
     ANNOTATE_UNPROTECTED_WRITE(FLAGS_TEST_export_wait_state_names) = true;
     ANNOTATE_UNPROTECTED_WRITE(FLAGS_TEST_ash_fetch_wait_states_for_raft_log) = true;
@@ -593,7 +591,7 @@ class AshTestPg : public WaitStateTestCheckMethodCounts {
   }
 };
 
-TEST_F_EX(WaitStateITest, YB_DISABLE_TEST_IN_TSAN(AshPg), AshTestPg) {
+TEST_F_EX(WaitStateITest, AshPg, AshTestPg) {
   RunTestsAndFetchAshMethodCounts();
 }
 
@@ -619,7 +617,7 @@ class AshTestCql : public WaitStateTestCheckMethodCounts {
   }
 };
 
-TEST_F_EX(WaitStateITest, YB_DISABLE_TEST_IN_TSAN(AshCql), AshTestCql) {
+TEST_F_EX(WaitStateITest, AshCql, AshTestCql) {
   RunTestsAndFetchAshMethodCounts();
 }
 
@@ -685,7 +683,7 @@ void AshTestWithCompactions::DoCompactionsAndFlushes(std::atomic<bool>& stop) {
   }
 }
 
-TEST_F_EX(WaitStateITest, YB_DISABLE_TEST_IN_TSAN(AshFlushAndCompactions), AshTestWithCompactions) {
+TEST_F_EX(WaitStateITest, AshFlushAndCompactions, AshTestWithCompactions) {
   RunTestsAndFetchAshMethodCounts();
 }
 
@@ -914,7 +912,7 @@ INSTANTIATE_TEST_SUITE_P(
       ash::WaitStateCode::kYBClient_LookingUpTablet
       ), WaitStateCodeToString);
 
-TEST_P(AshTestVerifyOccurrence, YB_DISABLE_TEST_IN_TSAN(VerifyWaitStateEntered)) {
+TEST_P(AshTestVerifyOccurrence, VerifyWaitStateEntered) {
   RunTestsAndFetchAshMethodCounts();
 }
 
@@ -967,7 +965,7 @@ INSTANTIATE_TEST_SUITE_P(
         ::testing::Bool()),
     WaitStateCodeAndBoolToString);
 
-TEST_P(AshTestWithPriorityQueue, YB_DISABLE_TEST_IN_TSAN(VerifyWaitStateEntered)) {
+TEST_P(AshTestWithPriorityQueue, VerifyWaitStateEntered) {
   RunTestsAndFetchAshMethodCounts();
 }
 
@@ -1064,10 +1062,11 @@ INSTANTIATE_TEST_SUITE_P(
       ash::WaitStateCode::kStorageFlush,
       ash::WaitStateCode::kCatalogWrite,
       ash::WaitStateCode::kIndexWrite,
-      ash::WaitStateCode::kTableWrite
+      ash::WaitStateCode::kTableWrite,
+      ash::WaitStateCode::kWaitingOnTServer
       ), WaitStateCodeToString);
 
-TEST_P(AshTestVerifyPgOccurrence, YB_DISABLE_TEST_IN_TSAN(VerifyWaitStateEntered)) {
+TEST_P(AshTestVerifyPgOccurrence, VerifyWaitStateEntered) {
   RunTestsAndFetchAshMethodCounts();
 }
 

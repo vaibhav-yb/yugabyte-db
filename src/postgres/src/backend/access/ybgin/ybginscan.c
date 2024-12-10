@@ -104,7 +104,6 @@ ybginrescan(IndexScanDesc scan, ScanKey scankey, int nscankeys,
 	YBCPgPrepareParameters prepare_params = {
 		.index_relfilenode_oid = YbGetRelfileNodeId(scan->indexRelation),
 		.index_only_scan = scan->xs_want_itup,
-		.use_secondary_index = true, /* can't have ybgin primary index */
 		.querying_colocated_table = querying_colocated_table,
 	};
 	HandleYBStatus(YBCPgNewSelect(YBCGetDatabaseOid(scan->heapRelation),
@@ -113,27 +112,8 @@ ybginrescan(IndexScanDesc scan, ScanKey scankey, int nscankeys,
 								  YBCIsRegionLocal(scan->heapRelation),
 								  &ybso->handle));
 
-	/* Add any pushdown expression to the main table scan. */
-	if (scan->yb_rel_pushdown != NULL)
-	{
-		YbDmlAppendQuals(scan->yb_rel_pushdown->quals,
-						 true /* is_primary */,
-						 ybso->handle);
-		YbDmlAppendColumnRefs(scan->yb_rel_pushdown->colrefs,
-							  true /* is_primary */,
-							  ybso->handle);
-	}
-
-	/* Add any pushdown expression to the index relation scan. */
-	if (scan->yb_idx_pushdown != NULL)
-	{
-		YbDmlAppendQuals(scan->yb_idx_pushdown->quals,
-						 false /* is_primary */,
-						 ybso->handle);
-		YbDmlAppendColumnRefs(scan->yb_idx_pushdown->colrefs,
-							  false /* is_primary */,
-							  ybso->handle);
-	}
+	YbApplyPrimaryPushdown(ybso->handle, scan->yb_rel_pushdown);
+	YbApplySecondaryIndexPushdown(ybso->handle, scan->yb_idx_pushdown);
 
 	/* Initialize ybgin scan opaque is_exec_done. */
 	ybso->is_exec_done = false;

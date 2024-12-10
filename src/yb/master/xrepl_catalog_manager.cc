@@ -28,6 +28,7 @@
 
 #include "yb/docdb/docdb_pgapi.h"
 
+#include "yb/master/async_rpc_tasks.h"
 #include "yb/master/catalog_entity_info.h"
 #include "yb/master/catalog_manager-internal.h"
 #include "yb/master/catalog_manager.h"
@@ -143,7 +144,6 @@ DECLARE_bool(yb_enable_cdc_consistent_snapshot_streams);
 DECLARE_bool(ysql_yb_enable_replica_identity);
 DECLARE_uint32(cdc_wal_retention_time_secs);
 DECLARE_bool(cdcsdk_enable_dynamic_table_addition_with_table_cleanup);
-DECLARE_bool(ysql_yb_allow_replication_slot_lsn_types);
 
 
 
@@ -1014,8 +1014,9 @@ Status CatalogManager::CreateNewCdcsdkStream(
   if (FLAGS_ysql_yb_allow_replication_slot_lsn_types &&
       req.has_cdcsdk_ysql_replication_slot_name() && req.has_cdcsdk_stream_create_options()) {
     RSTATUS_DCHECK(
-      req.cdcsdk_stream_create_options().has_lsn_type(),
-      InvalidArgument, "LSN type not present CDC stream creation request");
+        req.cdcsdk_stream_create_options().has_lsn_type() &&
+            req.cdcsdk_stream_create_options().lsn_type() != ReplicationSlotLsnType_UNSPECIFIED,
+        InvalidArgument, "LSN type not present CDC stream creation request");
 
     metadata->set_cdcsdk_ysql_replication_slot_lsn_type(
         req.cdcsdk_stream_create_options().lsn_type());
@@ -1983,7 +1984,8 @@ Status CatalogManager::ValidateCDCSDKRequestProperties(
   if (!FLAGS_ysql_yb_allow_replication_slot_lsn_types && req.has_cdcsdk_stream_create_options() &&
       req.cdcsdk_stream_create_options().has_lsn_type()) {
     RETURN_INVALID_REQUEST_STATUS(
-        "Creation of CDCSDK stream with a replication slot having LSN type is disallowed");
+        "Creation of CDCSDK stream with a replication slot having LSN type is disallowed because "
+        "the flag ysql_yb_allow_replication_slot_lsn_types is disabled");
   }
 
   // TODO: Validate that the replication slot output plugin name is provided if
@@ -2619,6 +2621,7 @@ Status CatalogManager::CleanupCDCSDKDroppedTablesFromStreamInfo(
         if (table_id_iter != ltm->table_id().end()) {
           need_to_update_stream = true;
           ltm.mutable_data()->pb.mutable_table_id()->erase(table_id_iter);
+          ltm.mutable_data()->pb.mutable_replica_identity_map()->erase(table_id);
         }
 
         if (ltm->pb.unqualified_table_id_size() > 0) {
@@ -2627,6 +2630,7 @@ Status CatalogManager::CleanupCDCSDKDroppedTablesFromStreamInfo(
           if (unqualified_table_id_iter != ltm->unqualified_table_id().end()) {
             need_to_update_stream = true;
             ltm.mutable_data()->pb.mutable_unqualified_table_id()->erase(unqualified_table_id_iter);
+            ltm.mutable_data()->pb.mutable_replica_identity_map()->erase(table_id);
           }
         }
       }
@@ -2859,15 +2863,17 @@ Status CatalogManager::GetCDCStream(
       stream_id = VERIFY_RESULT(xrepl::StreamId::FromString(req->stream_id()));
     } else {
       auto replication_slot_name = ReplicationSlotName(req->cdcsdk_ysql_replication_slot_name());
-        if (!cdcsdk_replication_slots_to_stream_map_.contains(replication_slot_name)) {
-          return STATUS(
+      if (!cdcsdk_replication_slots_to_stream_map_.contains(replication_slot_name)) {
+        LOG_WITH_FUNC(WARNING) << "Did not find replication_slot_name: " << replication_slot_name
+                     << " in cdcsdk_replication_slots_to_stream_map_.";
+        return STATUS(
               NotFound, "Could not find CDC stream", req->ShortDebugString(),
-              MasterError(MasterErrorPB::OBJECT_NOT_FOUND));
-        }
-        stream_id = cdcsdk_replication_slots_to_stream_map_.at(replication_slot_name);
+            MasterError(MasterErrorPB::OBJECT_NOT_FOUND));
+      }
+      stream_id = cdcsdk_replication_slots_to_stream_map_.at(replication_slot_name);
     }
 
-    stream = FindPtrOrNull(cdc_stream_map_, stream_id);
+      stream = FindPtrOrNull(cdc_stream_map_, stream_id);
   }
 
   if (stream == nullptr || stream->LockForRead()->is_deleting()) {
@@ -3001,10 +3007,12 @@ Status CatalogManager::GetCDCDBStreamInfo(
 
 Status CatalogManager::ListCDCStreams(
     const ListCDCStreamsRequestPB* req, ListCDCStreamsResponsePB* resp) {
-  scoped_refptr<TableInfo> table;
   bool filter_table = req->has_table_id();
+  TableId table_id;
   if (filter_table) {
-    table = VERIFY_RESULT(FindTableById(req->table_id()));
+    table_id = req->table_id();
+    auto stripped_table_id = xcluster::StripSequencesDataAliasIfPresent(table_id);
+    RETURN_NOT_OK(FindTableById(stripped_table_id));
   }
 
   SharedLock lock(mutex_);
@@ -3019,7 +3027,7 @@ Status CatalogManager::ListCDCStreams(
     }
 
     if (filter_table && entry.second->table_id().size() > 0 &&
-        table->id() != entry.second->table_id().Get(0)) {
+        table_id != entry.second->table_id().Get(0)) {
       continue;  // Skip deleting/deleted streams and streams from other tables.
     }
 
@@ -3531,7 +3539,7 @@ Status CatalogManager::BootstrapProducer(
   }
 
   cdc::BootstrapProducerRequestPB bootstrap_req;
-  master::TSDescriptor* ts = nullptr;
+  master::TSDescriptorPtr ts = nullptr;
   for (int i = 0; i < req->table_name_size(); i++) {
     string pg_schema_name = pg_database_type ? req->pg_schema_name(i) : "";
     auto table_info = GetTableInfoFromNamespaceNameAndTableName(
@@ -3608,65 +3616,6 @@ Status CatalogManager::SetUniverseReplicationInfoEnabled(
         "updating universe replication info in sys-catalog"));
     l.Commit();
   }
-  return Status::OK();
-}
-
-Status CatalogManager::SetConsumerRegistryEnabled(
-    const xcluster::ReplicationGroupId& replication_group_id, bool is_enabled,
-    ClusterConfigInfo::WriteLock* l) {
-  // Modify the Consumer Registry, which will fan out this info to all TServers on heartbeat.
-  {
-    auto replication_group_map =
-        l->mutable_data()->pb.mutable_consumer_registry()->mutable_producer_map();
-    {
-      auto it = replication_group_map->find(replication_group_id.ToString());
-      if (it == replication_group_map->end()) {
-        LOG(WARNING) << "Valid Producer Universe not in Consumer Registry: "
-                     << replication_group_id;
-        return STATUS(
-            NotFound, "Could not find CDC producer universe", replication_group_id,
-            MasterError(MasterErrorPB::OBJECT_NOT_FOUND));
-      }
-      (*it).second.set_disable_stream(!is_enabled);
-    }
-  }
-  return Status::OK();
-}
-
-Status CatalogManager::SetUniverseReplicationEnabled(
-    const SetUniverseReplicationEnabledRequestPB* req,
-    SetUniverseReplicationEnabledResponsePB* resp,
-    rpc::RpcContext* rpc) {
-  LOG(INFO) << "Servicing SetUniverseReplicationEnabled request from " << RequestorString(rpc)
-            << ": " << req->ShortDebugString();
-
-  // Sanity Checking Cluster State and Input.
-  if (!req->has_replication_group_id()) {
-    return STATUS(
-        InvalidArgument, "Producer universe ID must be provided", req->ShortDebugString(),
-        MasterError(MasterErrorPB::INVALID_REQUEST));
-  }
-  if (!req->has_is_enabled()) {
-    return STATUS(
-        InvalidArgument, "Must explicitly set whether to enable", req->ShortDebugString(),
-        MasterError(MasterErrorPB::INVALID_REQUEST));
-  }
-
-  const auto is_enabled = req->is_enabled();
-  // When updating the cluster config, make sure that the change to the user replication and
-  // system replication commit atomically by using the same lock.
-  auto cluster_config = ClusterConfig();
-  auto l = cluster_config->LockForWrite();
-  RETURN_NOT_OK(SetConsumerRegistryEnabled(
-      xcluster::ReplicationGroupId(req->replication_group_id()), is_enabled, &l));
-  l.mutable_data()->pb.set_version(l.mutable_data()->pb.version() + 1);
-  RETURN_NOT_OK(CheckStatus(
-      sys_catalog_->Upsert(leader_ready_term(), cluster_config.get()),
-      "updating cluster config in sys-catalog"));
-  l.Commit();
-
-  xcluster_manager_->CreateXClusterSafeTimeTableAndStartService();
-
   return Status::OK();
 }
 
@@ -3825,9 +3774,6 @@ Status CatalogManager::UpdateConsumerOnProducerMetadata(
   SCHECK(
       stream_entry, NotFound,
       Format("Missing replication group $0, stream $1", replication_group_id, stream_id));
-  auto schema_cached = stream_entry->mutable_producer_schema();
-  // Clear out any cached schema version
-  schema_cached->Clear();
 
   cdc::SchemaVersionsPB* schema_versions_pb = nullptr;
   bool schema_versions_updated = false;
@@ -3991,7 +3937,8 @@ Status CatalogManager::WaitForReplicationDrain(
         proxy_to_request;
     for (const auto& stream : streams) {
       for (const auto& table_id : stream->table_id()) {
-        auto table_info = VERIFY_RESULT(FindTableById(table_id));
+        auto stripped_table_id = xcluster::StripSequencesDataAliasIfPresent(table_id);
+        auto table_info = VERIFY_RESULT(FindTableById(stripped_table_id));
         RSTATUS_DCHECK(table_info != nullptr, NotFound, "Table ID not found: " + table_id);
 
         for (const auto& tablet : VERIFY_RESULT(table_info->GetTablets())) {

@@ -172,13 +172,19 @@ public class DrConfig extends Model {
               "DrConfig %s(%s) does not have any corresponding xCluster config",
               this.name, this.uuid));
     }
-    if (xClusterConfigs.size() == 1) {
-      return xClusterConfigs.get(0);
-    }
+
     return xClusterConfigs.stream()
         .filter(xClusterConfig -> !xClusterConfig.isSecondary())
         .findFirst()
         .orElseThrow(() -> new IllegalStateException("No active xCluster config found"));
+  }
+
+  public boolean hasActiveXClusterConfig() {
+    if (xClusterConfigs.isEmpty()) {
+      return false;
+    }
+
+    return xClusterConfigs.stream().anyMatch(config -> !config.isSecondary());
   }
 
   @JsonIgnore

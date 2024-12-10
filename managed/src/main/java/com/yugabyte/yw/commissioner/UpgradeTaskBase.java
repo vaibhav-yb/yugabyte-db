@@ -15,6 +15,8 @@ import com.yugabyte.yw.commissioner.tasks.upgrade.SoftwareUpgrade;
 import com.yugabyte.yw.commissioner.tasks.upgrade.SoftwareUpgradeYB;
 import com.yugabyte.yw.common.PlacementInfoUtil;
 import com.yugabyte.yw.common.PlatformServiceException;
+import com.yugabyte.yw.common.config.RuntimeConfGetter;
+import com.yugabyte.yw.common.config.UniverseConfKeys;
 import com.yugabyte.yw.common.gflags.GFlagsUtil;
 import com.yugabyte.yw.common.kms.util.EncryptionAtRestUtil;
 import com.yugabyte.yw.forms.RollMaxBatchSize;
@@ -416,6 +418,15 @@ public abstract class UpgradeTaskBase extends UniverseDefinitionTaskBase {
     return result;
   }
 
+  public static boolean isBatchRollEnabled(Universe universe, RuntimeConfGetter confGetter) {
+    boolean isK8s =
+        universe.getUniverseDetails().getPrimaryCluster().userIntent.providerType
+            == Common.CloudType.kubernetes;
+    return isK8s
+        ? confGetter.getConfForScope(universe, UniverseConfKeys.upgradeBatchRollK8sEnabled)
+        : confGetter.getConfForScope(universe, UniverseConfKeys.upgradeBatchRollEnabled);
+  }
+
   /**
    * Method to split list of nodes into the list of chunks. Nodes in chunk are having the same set
    * of server types and the same az. Also each chunk cannot contain more than one master. Max chunk
@@ -604,7 +615,8 @@ public abstract class UpgradeTaskBase extends UniverseDefinitionTaskBase {
         rollingUpgradeLambda.run(nodeList, processTypes);
       }
 
-      if (isYbcPresent) {
+      // Stop yb-controller only if master server on node is in active role.
+      if (isYbcPresent && activeRole) {
         createServerControlTasks(nodeList, ServerType.CONTROLLER, "stop")
             .setSubTaskGroupType(subGroupType);
       }
@@ -770,7 +782,8 @@ public abstract class UpgradeTaskBase extends UniverseDefinitionTaskBase {
       nonRollingUpgradeLambda.run(nodes, Collections.singleton(processType));
     }
 
-    if (isYbcPresent) {
+    // Stop yb-controller only if master server on node is in active role.
+    if (isYbcPresent && activeRole) {
       createServerControlTasks(nodes, ServerType.CONTROLLER, "stop")
           .setSubTaskGroupType(subGroupType);
     }

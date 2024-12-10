@@ -52,6 +52,8 @@
 
 #include "yb/server/server_base_options.h"
 
+#include "yb/tserver/tserver_fwd.h"
+
 #include "yb/util/atomic.h"
 #include "yb/util/backoff_waiter.h"
 #include "yb/util/locks.h"
@@ -66,6 +68,11 @@ class HostPort;
 namespace client {
 
 YB_STRONGLY_TYPED_BOOL(Retry);
+
+// Checks if the Tablet locations are valid - Partition keys are sorted with no overlaps.
+Status CheckTabletLocations(
+    const google::protobuf::RepeatedPtrField<master::TabletLocationsPB>& locations,
+    tserver::AllowSplitTablet allow_split_tablets);
 
 class YBClient::Data {
  public:
@@ -268,21 +275,21 @@ class YBClient::Data {
                         const TableId& table_id,
                         CoarseTimePoint deadline,
                         YBTableInfo* info,
-                        master::IncludeInactive include_inactive = master::IncludeInactive::kFalse,
+                        master::IncludeHidden include_hidden = master::IncludeHidden::kFalse,
                         master::GetTableSchemaResponsePB* resp = nullptr);
   Status GetTableSchema(YBClient* client,
                         const YBTableName& table_name,
                         CoarseTimePoint deadline,
                         std::shared_ptr<YBTableInfo> info,
                         StatusCallback callback,
-                        master::IncludeInactive include_inactive = master::IncludeInactive::kFalse,
+                        master::IncludeHidden include_hidden = master::IncludeHidden::kFalse,
                         master::GetTableSchemaResponsePB* resp_ignored = nullptr);
   Status GetTableSchema(YBClient* client,
                         const TableId& table_id,
                         CoarseTimePoint deadline,
                         std::shared_ptr<YBTableInfo> info,
                         StatusCallback callback,
-                        master::IncludeInactive include_inactive = master::IncludeInactive::kFalse,
+                        master::IncludeHidden include_hidden = master::IncludeHidden::kFalse,
                         master::GetTableSchemaResponsePB* resp = nullptr);
   Status GetTablegroupSchemaById(YBClient* client,
                                  const TablegroupId& tablegroup_id,
@@ -357,8 +364,7 @@ class YBClient::Data {
   void GetTableLocations(
       YBClient* client, const TableId& table_id, int32_t max_tablets,
       RequireTabletsRunning require_tablets_running, PartitionsOnly partitions_only,
-      CoarseTimePoint deadline, GetTableLocationsCallback callback,
-      master::IncludeInactive include_inactive = master::IncludeInactive::kFalse);
+      CoarseTimePoint deadline, GetTableLocationsCallback callback);
 
   bool IsTabletServerLocal(const internal::RemoteTabletServer& rts) const;
 
@@ -512,9 +518,7 @@ class YBClient::Data {
 
   bool IsMultiMaster();
 
-  void StartShutdown();
-
-  void CompleteShutdown();
+  void Shutdown();
 
   void DoSetMasterServerProxy(
       CoarseTimePoint deadline, bool skip_resolution, bool wait_for_leader_election);

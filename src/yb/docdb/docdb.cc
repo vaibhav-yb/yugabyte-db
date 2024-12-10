@@ -78,6 +78,9 @@ using namespace std::placeholders;
 DEFINE_UNKNOWN_int32(cdc_max_stream_intent_records, 1680,
              "Max number of intent records allowed in single cdc batch. ");
 
+DEFINE_RUNTIME_bool(cdc_cache_intent_block, false,
+                    "When set to true, cache the intent block read for CDC.");
+
 namespace yb {
 namespace docdb {
 
@@ -376,12 +379,14 @@ Result<ApplyTransactionState> GetIntentsBatch(
 
   auto reverse_index_iter = CreateRocksDBIterator(
       intents_db, &KeyBounds::kNoBounds, BloomFilterMode::DONT_USE_BLOOM_FILTER, boost::none,
-      rocksdb::kDefaultQueryId, /* file_filter = */ nullptr, &reverse_index_upperbound,
+      !FLAGS_cdc_cache_intent_block ? rocksdb::kNoCacheQueryId : rocksdb::kDefaultQueryId,
+      /* file_filter = */ nullptr, &reverse_index_upperbound,
       rocksdb::CacheRestartBlockKeys::kFalse);
 
   BoundedRocksDbIterator intent_iter = CreateRocksDBIterator(
       intents_db, key_bounds, BloomFilterMode::DONT_USE_BLOOM_FILTER, boost::none,
-      rocksdb::kDefaultQueryId, /* file_filter = */ nullptr, /* iterate_upper_bound = */ nullptr,
+      !FLAGS_cdc_cache_intent_block ? rocksdb::kNoCacheQueryId : rocksdb::kDefaultQueryId,
+      /* file_filter = */ nullptr, /* iterate_upper_bound = */ nullptr,
       rocksdb::CacheRestartBlockKeys::kFalse);
 
   reverse_index_iter.Seek(key_prefix);
@@ -427,7 +432,8 @@ Result<ApplyTransactionState> GetIntentsBatch(
             return ApplyTransactionState{};
           }
 
-          auto intent = VERIFY_RESULT(ParseIntentKey(intent_iter.key(), transaction_id_slice));
+          auto intent = VERIFY_RESULT(dockv::ParseIntentKey(
+              intent_iter.key(), transaction_id_slice));
 
           if (intent.types.Test(dockv::IntentType::kStrongWrite)) {
             auto decoded_value = VERIFY_RESULT(dockv::DecodeIntentValue(

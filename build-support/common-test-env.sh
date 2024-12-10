@@ -826,17 +826,19 @@ determine_test_timeout() {
   if [[ -n ${YB_TEST_TIMEOUT:-} ]]; then
     timeout_sec=$YB_TEST_TIMEOUT
   else
-    if [[ ( $rel_test_binary == "tests-pgwrapper/create_initial_sys_catalog_snapshot" || \
-            $rel_test_binary == "tests-pgwrapper/pg_libpq-test" || \
-            $rel_test_binary == "tests-pgwrapper/pg_libpq_err-test" || \
-            $rel_test_binary == "tests-pgwrapper/pg_mini-test" || \
-            $rel_test_binary == "tests-pgwrapper/pg_wrapper-test" || \
+    if [[ ( $rel_test_binary == "tests-pgwrapper/create_initial_sys_catalog_snapshot" ||
+            $rel_test_binary == "tests-pgwrapper/pg_libpq-test" ||
+            $rel_test_binary == "tests-pgwrapper/pg_libpq_err-test" ||
+            $rel_test_binary == "tests-pgwrapper/pg_mini-test" ||
+            $rel_test_binary == "tests-pgwrapper/pg_wrapper-test" ||
             $rel_test_binary == "tests-tools/yb-admin-snapshot-schedule-test" ) ||
-          ( $build_root_basename =~ ^tsan && \
-            ( $rel_test_binary == "tests-pgwrapper/geo_transactions-test" || \
-              $rel_test_binary == "tests-pgwrapper/pg_ddl_atomicity-test" || \
-              $rel_test_binary == "tests-pgwrapper/pg_mini-test" || \
-              $rel_test_binary == "tests-pgwrapper/pg_wait_on_conflict-test" || \
+          ( $build_root_basename =~ ^asan &&
+            ( $rel_test_binary == "tests-integration-tests/pg_partman-test" )) ||
+          ( $build_root_basename =~ ^tsan &&
+            ( $rel_test_binary == "tests-pgwrapper/geo_transactions-test" ||
+              $rel_test_binary == "tests-pgwrapper/pg_ddl_atomicity-test" ||
+              $rel_test_binary == "tests-pgwrapper/pg_mini-test" ||
+              $rel_test_binary == "tests-pgwrapper/pg_wait_on_conflict-test" ||
               $rel_test_binary == "tests-pgwrapper/colocation-test" ) ) ]]; then
       timeout_sec=$INCREASED_TEST_TIMEOUT_SEC
     else
@@ -1339,6 +1341,14 @@ spark_available() {
   fi
   log "File $spark_submit_cmd_path not found or not executable, Spark is unavailable"
   return 1  # false
+}
+
+# Build archive that is sent to workers, but don't run any tests.
+# The archive should be automatically re-used by run_tests_on_spark()
+prep_spark_archive() {
+  touch "${BUILD_ROOT}/empty_test_list"
+  "$YB_SCRIPT_PATH_RUN_TESTS_ON_SPARK" --build-root "$BUILD_ROOT" --send_archive_to_workers \
+     --java --cpp --test_list "${BUILD_ROOT}/empty_test_list"
 }
 
 run_tests_on_spark() {

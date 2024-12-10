@@ -136,6 +136,7 @@ YB_DEFINE_TYPED_ENUM(WaitStateCode, uint32_t,
     (kCatalogWrite)
     (kIndexWrite)
     (kTableWrite)
+    (kWaitingOnTServer)
 
     // Common wait states
     ((kOnCpu_Active, YB_ASH_MAKE_EVENT(Common)))
@@ -199,8 +200,9 @@ YB_DEFINE_TYPED_ENUM(FixedQueryId, uint8_t,
   ((kQueryIdForFlush, 2))
   ((kQueryIdForCompaction, 3))
   ((kQueryIdForRaftUpdateConsensus, 4))
-  ((kQueryIdForCatalogRequests, 5))
+  ((kQueryIdForUncomputedQueryId, 5))
   ((kQueryIdForLogBackgroundSync, 6))
+  ((kQueryIdForYSQLBackgroundWorker, 7))
 );
 
 YB_DEFINE_TYPED_ENUM(WaitStateType, uint8_t,
@@ -208,6 +210,57 @@ YB_DEFINE_TYPED_ENUM(WaitStateType, uint8_t,
   (kDiskIO)
   (kNetwork)
   (kWaitOnCondition)
+);
+
+// List of pggate sync RPCs instrumented (in pg_client.cc)
+// Make sure that kAsyncRPC is always 0
+YB_DEFINE_TYPED_ENUM(PggateRPC, uint16_t,
+  ((kNoRPC, 0))
+  (kAlterDatabase)
+  (kAlterTable)
+  (kBackfillIndex)
+  (kCreateDatabase)
+  (kCreateReplicationSlot)
+  (kCreateTable)
+  (kCreateTablegroup)
+  (kDropReplicationSlot)
+  (kDropDatabase)
+  (kDropTable)
+  (kDropTablegroup)
+  (kFinishTransaction)
+  (kGetLockStatus)
+  (kGetReplicationSlot)
+  (kListLiveTabletServers)
+  (kListReplicationSlots)
+  (kGetIndexBackfillProgress)
+  (kOpenTable)
+  (kGetTablePartitionList)
+  (kReserveOids)
+  (kRollbackToSubTransaction)
+  (kTabletServerCount)
+  (kTruncateTable)
+  (kValidatePlacement)
+  (kGetTableDiskSize)
+  (kWaitForBackendsCatalogVersion)
+  (kInsertSequenceTuple)
+  (kUpdateSequenceTuple)
+  (kFetchSequenceTuple)
+  (kReadSequenceTuple)
+  (kDeleteSequenceTuple)
+  (kDeleteDBSequences)
+  (kCheckIfPitrActive)
+  (kIsObjectPartOfXRepl)
+  (kGetTserverCatalogVersionInfo)
+  (kCancelTransaction)
+  (kGetActiveTransactionList)
+  (kGetTableKeyRanges)
+  (kGetNewObjectId)
+  (kTabletsMetadata)
+  (kYCQLStatementStats)
+  (kServersMetrics)
+  (kListClones)
+  (kCronGetLastMinute)
+  (kCronSetLastMinute)
 );
 
 struct WaitStatesDescription {

@@ -57,22 +57,15 @@ namespace yb::pggate {
 
 class PgDmlRead : public PgDml {
  public:
-  PgDmlRead(
-      PgSession::ScopedRefPtr pg_session, const PgObjectId& table_id,
-      bool is_region_local, const PrepareParameters& prepare_params = {},
-      const PgObjectId& index_id = {});
-
-  [[nodiscard]] StmtOp stmt_op() const override { return StmtOp::STMT_SELECT; }
-
-  virtual Status Prepare() = 0;
+  // Append a filter condition.
+  // Supported expression kind is serialized Postgres expression.
+  Status AppendQual(PgExpr* qual, bool is_primary);
 
   // Allocate binds.
   virtual void PrepareBinds();
 
   // Set forward (or backward) scan.
   void SetForwardScan(bool is_forward_scan);
-
-  [[nodiscard]] bool KeepOrder() const;
 
   // Set prefix length, in columns, of distinct index scans.
   void SetDistinctPrefixLength(int distinct_prefix_length);
@@ -115,7 +108,7 @@ class PgDmlRead : public PgDml {
   Status RetrieveYbctidsFromSecondaryIndex(
       const PgExecParameters* exec_params, std::vector<Slice>* ybctids, bool* exceeded_work_mem);
 
-  Status ANNBindVector(int vec_att_no, PgExpr* vector);
+  Status ANNBindVector(PgExpr* vector);
   Status ANNSetPrefetchSize(int32_t prefetch_size);
 
   void SetCatalogCacheVersion(std::optional<PgOid> db_oid, uint64_t version) override {
@@ -131,6 +124,8 @@ class PgDmlRead : public PgDml {
   [[nodiscard]] bool IsIndexOrderedScan() const;
 
  protected:
+  explicit PgDmlRead(const PgSession::ScopedRefPtr& pg_session);
+
   // Allocate column protobuf.
   Result<LWPgsqlExpressionPB*> AllocColumnBindPB(PgColumn* col, PgExpr* expr) override;
   LWPgsqlExpressionPB* AllocColumnBindConditionExprPB(PgColumn* col);
@@ -138,15 +133,6 @@ class PgDmlRead : public PgDml {
 
   // Allocate protobuf for target.
   LWPgsqlExpressionPB* AllocTargetPB() override;
-
-  // Allocate protobuf for a qual in the read request's where_clauses list.
-  LWPgsqlExpressionPB* AllocQualPB() override;
-
-  // Allocate protobuf for a column reference in the read request's col_refs list.
-  LWPgsqlColRefPB* AllocColRefPB() override;
-
-  // Clear the read request's col_refs list.
-  void ClearColRefPBs() override;
 
   // Allocate column expression.
   LWPgsqlExpressionPB* AllocColumnAssignPB(PgColumn* col) override;
@@ -158,6 +144,8 @@ class PgDmlRead : public PgDml {
   std::shared_ptr<LWPgsqlReadRequestPB> read_req_;
 
  private:
+  [[nodiscard]] ArenaList<LWPgsqlColRefPB>& ColRefPBs() override;
+
   // Indicates that current operation reads concrete row by specifying row's DocKey.
   [[nodiscard]] bool IsConcreteRowRead() const;
   Status ProcessEmptyPrimaryBinds();

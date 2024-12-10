@@ -122,7 +122,7 @@ class PgApiImpl {
  public:
   PgApiImpl(PgApiContext context, const YBCPgTypeEntity *YBCDataTypeTable, int count,
             YBCPgCallbacks pg_callbacks, std::optional<uint64_t> session_id,
-            const YBCPgAshConfig* ash_config);
+            const YBCPgAshConfig& ash_config);
   ~PgApiImpl();
 
   const YBCPgCallbacks* pg_callbacks() {
@@ -363,10 +363,12 @@ class PgApiImpl {
   Status GetTableDesc(const PgObjectId& table_id,
                       PgTableDesc **handle);
 
+  Result<tserver::PgListClonesResponsePB> GetDatabaseClones();
+
   Result<YBCPgColumnInfo> GetColumnInfo(YBCPgTableDesc table_desc,
                                         int16_t attr_number);
 
-  Status DmlModifiesRow(PgStatement *handle, bool *modifies_row);
+  Result<bool> DmlModifiesRow(PgStatement* handle);
 
   Status SetIsSysCatalogVersionChange(PgStatement *handle);
 
@@ -419,7 +421,7 @@ class PgApiImpl {
 
   Status ExecDropIndex(PgStatement *handle);
 
-  Result<int> WaitForBackendsCatalogVersion(PgOid dboid, uint64_t version);
+  Result<int> WaitForBackendsCatalogVersion(PgOid dboid, uint64_t version, pid_t pid);
 
   Status BackfillIndex(const PgObjectId& table_id);
 
@@ -471,7 +473,7 @@ class PgApiImpl {
   Status DmlBindColumnCondIsNotNull(PgStatement *handle, int attr_num);
   Status DmlBindRow(YBCPgStatement handle, uint64_t ybctid, YBCBindColumn* columns, int count);
 
-  void DmlBindHashCode(
+  Status DmlBindHashCode(
       PgStatement* handle, const std::optional<Bound>& start, const std::optional<Bound>& end);
 
   Status DmlBindRange(YBCPgStatement handle,
@@ -540,8 +542,7 @@ class PgApiImpl {
                    bool is_region_local,
                    PgStatement **handle,
                    YBCPgTransactionSetting transaction_setting =
-                       YBCPgTransactionSetting::YB_TRANSACTIONAL,
-                   PgStatement *block_insert_handle = nullptr);
+                       YBCPgTransactionSetting::YB_TRANSACTIONAL);
 
   Status ExecInsert(PgStatement *handle);
 
@@ -602,7 +603,7 @@ class PgApiImpl {
   Status FetchRequestedYbctids(PgStatement *handle, const PgExecParameters *exec_params,
                                ConstSliceVector ybctids);
 
-  Status DmlANNBindVector(PgStatement *handle, int vec_att_no, PgExpr *vector);
+  Status DmlANNBindVector(PgStatement *handle, PgExpr *vector);
 
   Status DmlANNSetPrefetchSize(PgStatement *handle, int prefetch_size);
 
@@ -628,13 +629,9 @@ class PgApiImpl {
 
   //------------------------------------------------------------------------------------------------
   // Analyze.
-  Status NewSample(const PgObjectId& table_id,
-                   const int targrows,
-                   bool is_region_local,
-                   PgStatement **handle);
-
-  Status InitRandomState(
-      PgStatement *handle, double rstate_w, uint64_t rand_state_s0, uint64_t rand_state_s1);
+  Status NewSample(
+      const PgObjectId& table_id, bool is_region_local, int targrows,
+      const SampleRandomState& rand_state, PgStatement **handle);
 
   Result<bool> SampleNextBlock(PgStatement* handle);
 
@@ -723,6 +720,18 @@ class PgApiImpl {
       PgExplicitRowLockErrorInfo& error_info);
   Status FlushExplicitRowLockIntents(PgExplicitRowLockErrorInfo& error_info);
 
+  // INSERT ... ON CONFLICT batching ---------------------------------------------------------------
+  Status AddInsertOnConflictKey(
+      PgOid table_id, const Slice& ybctid, const YBCPgInsertOnConflictKeyInfo& info);
+  YBCPgInsertOnConflictKeyState InsertOnConflictKeyExists(PgOid table_id, const Slice& ybctid);
+  Result<YBCPgInsertOnConflictKeyInfo> DeleteInsertOnConflictKey(
+      PgOid table_id, const Slice& ybctid);
+  Result<YBCPgInsertOnConflictKeyInfo> DeleteNextInsertOnConflictKey();
+  uint64_t GetInsertOnConflictKeyCount();
+  void AddInsertOnConflictKeyIntent(PgOid table_id, const Slice& ybctid);
+  void ClearInsertOnConflictCache();
+  //------------------------------------------------------------------------------------------------
+
   // Sets the specified timeout in the rpc service.
   void SetTimeout(int timeout_ms);
 
@@ -737,7 +746,8 @@ class PgApiImpl {
   void StopSysTablePrefetching();
   bool IsSysTablePrefetchingStarted() const;
   void RegisterSysTableForPrefetching(
-      const PgObjectId& table_id, const PgObjectId& index_id, int row_oid_filtering_attr);
+      const PgObjectId& table_id, const PgObjectId& index_id, int row_oid_filtering_attr,
+      bool fetch_ybctid);
   Status PrefetchRegisteredSysTables();
 
   //------------------------------------------------------------------------------------------------
@@ -805,6 +815,8 @@ class PgApiImpl {
   Result<tserver::PgServersMetricsResponsePB> ServersMetrics();
 
   bool IsCronLeader() const;
+  Status SetCronLastMinute(int64_t last_minute);
+  Result<int64_t> GetCronLastMinute();
 
   [[nodiscard]] uint64_t GetCurrentReadTimePoint() const;
   Status RestoreReadTimePoint(uint64_t read_time_point_handle);
@@ -838,6 +850,10 @@ class PgApiImpl {
 
   std::unique_ptr<rpc::ProxyCache> proxy_cache_;
 
+  YBCPgCallbacks pg_callbacks_;
+
+  const WaitEventWatcher wait_event_watcher_;
+
   // TODO Rename to client_ when YBClient is removed.
   PgClient pg_client_;
 
@@ -845,8 +861,6 @@ class PgApiImpl {
 
   // Local tablet-server shared memory segment handle.
   tserver::TServerSharedObject tserver_shared_object_;
-
-  YBCPgCallbacks pg_callbacks_;
 
   scoped_refptr<PgTxnManager> pg_txn_manager_;
 

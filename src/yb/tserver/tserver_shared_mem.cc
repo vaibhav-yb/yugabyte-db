@@ -145,7 +145,7 @@ class Semaphore {
 #endif
 
 YB_DEFINE_ENUM(SharedExchangeState,
-               (kIdle)(kRequestSent)(kResponseSent)(kShutdown));
+               (kIdle)(kRequestSent)(kProcessingRequest)(kResponseSent)(kShutdown));
 
 class SharedExchangeHeader {
  public:
@@ -205,7 +205,7 @@ class SharedExchangeHeader {
 
   void Respond(size_t size) {
     auto state = state_.load(std::memory_order_acquire);
-    if (state != SharedExchangeState::kRequestSent) {
+    if (state != SharedExchangeState::kProcessingRequest) {
       LOG_IF(DFATAL, state != SharedExchangeState::kShutdown)
           << "Respond in wrong state: " << AsString(state);
       return;
@@ -213,7 +213,7 @@ class SharedExchangeHeader {
 
     data_size_ = size;
     WARN_NOT_OK(
-        TransferState(SharedExchangeState::kRequestSent, SharedExchangeState::kResponseSent),
+        TransferState(SharedExchangeState::kProcessingRequest, SharedExchangeState::kResponseSent),
         "Transfer state failed");
     WARN_NOT_OK(response_semaphore_.Post(), "Respond failed");
   }
@@ -222,6 +222,8 @@ class SharedExchangeHeader {
     RETURN_NOT_OK(DoWait(
         SharedExchangeState::kRequestSent, std::chrono::system_clock::time_point::max(),
         &request_semaphore_));
+    RETURN_NOT_OK(TransferState(
+        SharedExchangeState::kRequestSent, SharedExchangeState::kProcessingRequest));
     return data_size_;
   }
 
@@ -372,17 +374,29 @@ class SharedExchange::Impl {
   bool failed_previous_request_ = false;
 };
 
-SharedExchange::SharedExchange(const std::string& instance_id, uint64_t session_id, Create create) {
+Result<SharedExchange> SharedExchange::Make(
+      const std::string& instance_id, uint64_t session_id, Create create) {
   try {
+    std::unique_ptr<Impl> impl;
     if (create) {
-      impl_ = std::make_unique<Impl>(boost::interprocess::create_only, instance_id, session_id);
+      impl = std::make_unique<Impl>(boost::interprocess::create_only, instance_id, session_id);
     } else {
-      impl_ = std::make_unique<Impl>(boost::interprocess::open_only, instance_id, session_id);
+      impl = std::make_unique<Impl>(boost::interprocess::open_only, instance_id, session_id);
     }
+    return SharedExchange(std::move(impl));
   } catch (boost::interprocess::interprocess_exception& exc) {
-    LOG(FATAL) << "Failed to create shared exchange for " << instance_id << "/" << session_id
-               << ", mode: " << create << ", error: " << exc.what();
+    auto result = STATUS_FORMAT(
+        RuntimeError, "Failed to create shared exchange for $0/$1, mode: $2, error: $3",
+        instance_id, session_id, create, exc.what());
+    LOG(DFATAL) << result;
+    return result;
   }
+}
+
+SharedExchange::SharedExchange(std::unique_ptr<Impl> impl) : impl_(std::move(impl)) {
+}
+
+SharedExchange::SharedExchange(SharedExchange&& rhs) : impl_(std::move(rhs.impl_)) {
 }
 
 SharedExchange::~SharedExchange() = default;
@@ -446,12 +460,11 @@ uint64_t SharedExchange::session_id() const {
 }
 
 SharedExchangeThread::SharedExchangeThread(
-    const std::string& instance_id, uint64_t session_id, Create create,
+    SharedExchange exchange,
     const SharedExchangeListener& listener)
-    : exchange_(instance_id, session_id, create) {
+    : exchange_(std::move(exchange)) {
   CHECK_OK(Thread::Create(
-      "shared_exchange", Format("sh_xchng_$0", session_id), [this, listener] {
-    CDSAttacher cdc_attacher;
+      "shared_exchange", Format("sh_xchng_$0", exchange_.session_id()), [this, listener] {
     for (;;) {
       auto query_size = exchange_.Poll();
       if (!query_size.ok()) {
@@ -463,12 +476,26 @@ SharedExchangeThread::SharedExchangeThread(
       }
       listener(*query_size);
     }
+    ready_to_complete_ = true;
   }, &thread_));
 }
 
 SharedExchangeThread::~SharedExchangeThread() {
-  exchange_.SignalStop();
-  thread_->Join();
+  StartShutdown();
+  CompleteShutdown();
+}
+
+void SharedExchangeThread::StartShutdown() {
+  if (thread_) {
+    exchange_.SignalStop();
+  }
+}
+
+void SharedExchangeThread::CompleteShutdown() {
+  if (thread_) {
+    thread_->Join();
+    thread_ = nullptr;
+  }
 }
 
 bool TServerSharedData::IsCronLeader() const {

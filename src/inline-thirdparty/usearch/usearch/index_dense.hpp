@@ -405,15 +405,16 @@ class index_dense_gt {
     using dynamic_allocator_t = aligned_allocator_gt<byte_t, 64>;
     using tape_allocator_t = memory_mapping_allocator_gt<64>;
 
-  private:
     /// @brief Punned index.
     using index_t = index_gt<                        //
         distance_t, vector_key_t, compressed_slot_t, //
         dynamic_allocator_t, tape_allocator_t>;
-    using index_allocator_t = aligned_allocator_gt<index_t, 64>;
 
     using member_iterator_t = typename index_t::member_iterator_t;
     using member_citerator_t = typename index_t::member_citerator_t;
+
+  private:
+    using index_allocator_t = aligned_allocator_gt<index_t, 64>;
 
     /// @brief Punned metric object.
     class metric_proxy_t {
@@ -693,6 +694,9 @@ class index_dense_gt {
     std::size_t max_level() const { return typed_->max_level(); }
     index_dense_config_t const& config() const { return config_; }
     index_limits_t const& limits() const { return typed_->limits(); }
+    double inverse_log_connectivity() const { return typed_->inverse_log_connectivity(); }
+    std::size_t neighbors_base_bytes() const { return typed_->neighbors_base_bytes(); }
+    std::size_t neighbors_bytes() const { return typed_->neighbors_bytes(); }
     bool multi() const { return config_.multi; }
     std::size_t currently_available_threads() const {
         std::unique_lock<std::mutex> available_threads_lock(available_threads_mutex_);
@@ -2252,7 +2256,7 @@ static join_result_t join(                                    //
 } // namespace unum
 
 // This file is part of the usearch inline third-party dependency of YugabyteDB.
-// Git repo: https://github.com/unum-cloud/usearch
-// Git commit: 191d9bb46fe5e2a44d1505ce7563ed51c7e55868
+// Git repo: https://github.com/yugabyte/usearch
+// Git tag: v2.15.3-yb-2
 //
 // See also src/inline-thirdparty/README.md.

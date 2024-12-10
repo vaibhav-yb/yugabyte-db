@@ -20,37 +20,10 @@
 #include "yb/util/tostring.h"
 #include "yb/util/trace.h"
 
-// The reason to include yb_ash_enable_infra in this file and not
-// pg_wrapper.cc:
-//
-// The runtime gFlag yb_enable_ash should only be enabled if the
-// non-runtime gFlag yb_ash_enable_infra is true. Postgres GUC
-// check framework is used to enforce this check. But if both the flags
-// are to be enabled at startup, yb_ash_enable_infra must be registered
-// first, otherwise the check will incorrectly fail.
-//
-// Postmaster processes the list of GUCs twice, once directly from the arrays
-// in guc.c and once from the config file that WriteConfigFile() writes into.
-// AppendPgGFlags() decides the order of Pg gFlags that are going to be written
-// in the same order that GetAllFlags() returns, and GetAllFlags() sorts it
-// internally by the filename (which includes some parts of the filepath as well)
-// and since this is in the folder 'ash', which is lexicographically smaller than
-// the folder 'yql', the flags of this file will be written to the config file
-// before the flags of pg_wrapper.cc and, and hence processed first by postmaster.
-// In the same file, the flags will be sorted lexicographically based on their
-// names, so yb_ash_enable_infra will come before yb_enable_ash.
-//
-// So, to ensure that the GUC check hook doesn't fail, these two flags are
-// defined here. Both the flags are not defined in pg_wrapper.cc since yb_enable_ash
-// is required in other parts of the code as well like cql_server.cc and yb_rpc.cc.
+DEPRECATE_FLAG(bool, ysql_yb_ash_enable_infra, "2024_12");
 
-DEFINE_NON_RUNTIME_PG_PREVIEW_FLAG(bool, yb_ash_enable_infra, false,
-    "Allocate shared memory for ASH, start the background worker, create "
-    "instrumentation hooks and enable querying the yb_active_session_history "
-    "view.");
-
-DEFINE_RUNTIME_PG_PREVIEW_FLAG(bool, yb_enable_ash, false,
-    "Starts sampling and instrumenting YSQL and YCQL queries, "
+DEFINE_NON_RUNTIME_PG_FLAG(bool, yb_enable_ash, true,
+    "Enable Active Session History for sampling and instrumenting YSQL and YCQL queries, "
     "and various background activities. This does nothing if "
     "ysql_yb_enable_ash_infra is disabled.");
 
@@ -79,6 +52,8 @@ DEFINE_test_flag(bool, ash_fetch_wait_states_for_raft_log, true, "Should ASH fet
       "background task states, such as raft log sync/append.");
 DEFINE_test_flag(bool, ash_fetch_wait_states_for_rocksdb_flush_and_compaction, true,
       "Should ASH fetch background task states, such as rocksdb flush and compaction.");
+DEFINE_test_flag(string, yb_test_wait_event_aux_to_sleep_at_csv, "",
+    "If enabled, add a sleep/delay when we enter any one of the specified wait event aux.");
 
 namespace yb::ash {
 
@@ -127,6 +102,8 @@ std::string GetWaitStateDescription(WaitStateCode code) {
       return "A YSQL backend is waiting for a secondary index write from DocDB.";
     case WaitStateCode::kTableWrite:
       return "A YSQL backend is waiting for a table write from DocDB.";
+    case WaitStateCode::kWaitingOnTServer:
+      return "A YSQL backend is waiting on TServer, check wait_event_aux for the RPC.";
     case WaitStateCode::kOnCpu_Active:
       return "A rpc/task is being actively processed on a thread.";
     case WaitStateCode::kOnCpu_Passive:
@@ -505,6 +482,7 @@ WaitStateType GetWaitStateType(WaitStateCode code) {
     case WaitStateCode::kCatalogWrite:
     case WaitStateCode::kIndexWrite:
     case WaitStateCode::kTableWrite:
+    case WaitStateCode::kWaitingOnTServer:
       return WaitStateType::kNetwork;
 
     case WaitStateCode::kOnCpu_Active:

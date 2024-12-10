@@ -10,8 +10,11 @@ import {
 import { PROVIDER_TYPES, BASE_URL } from '../config';
 import { NodeState } from '../redesign/helpers/dtos';
 
-
-export const MULTILINE_GFLAGS_ARRAY = ['ysql_hba_conf_csv', 'ysql_ident_conf_csv'];
+export const MULTILINE_GFLAGS_ARRAY = [
+  'ysql_hba_conf_csv',
+  'ysql_ident_conf_csv',
+  'ysql_pg_conf_csv'
+];
 
 const LDAP_KEYS = [
   'ldapserver',
@@ -65,7 +68,8 @@ export const nodeInClusterStates = [
 
 export const MultilineGFlags = {
   YSQL_HBA_CONF_CSV: 'ysql_hba_conf_csv',
-  YSQL_IDENT_CONF_CSV: 'ysql_ident_conf_csv'
+  YSQL_IDENT_CONF_CSV: 'ysql_ident_conf_csv',
+  YSQL_PG_CONF_CSV: 'ysql_pg_conf_csv'
 };
 
 export function isNodeRemovable(nodeState) {
@@ -266,26 +270,45 @@ export const isOnpremUniverse = (universe) => {
   return isUniverseType(universe, 'onprem');
 };
 
-const INSTANCE_WITH_EPHEMERAL_STORAGE_ONLY = ['g5','g6','g6e',
-  'gr6','i3','i3en','i4g','i4i','im4gn',
-  'is4gen','p5','p5e','trn1','trn1n','x1','x1e'];
+const INSTANCE_WITH_EPHEMERAL_STORAGE_ONLY = [
+  'g5',
+  'g6',
+  'g6e',
+  'gr6',
+  'i3',
+  'i3en',
+  'i4g',
+  'i4i',
+  'im4gn',
+  'is4gen',
+  'p5',
+  'p5e',
+  'trn1',
+  'trn1n',
+  'x1',
+  'x1e'
+];
 
 export const isEphemeralAwsStorageInstance = (instanceType) => {
-  return INSTANCE_WITH_EPHEMERAL_STORAGE_ONLY.includes(instanceType?.split?.('.')[0]) ||
-    instanceType?.split?.('.')[0].includes('d');
+  return (
+    INSTANCE_WITH_EPHEMERAL_STORAGE_ONLY.includes(instanceType?.split?.('.')[0]) ||
+    instanceType?.split?.('.')[0].includes('d')
+  );
 };
 
 export const isPausableUniverse = (universe) => {
-
   if (isUniverseType(universe, 'aws')) {
-    return universe.universeDetails?.nodeDetailsSet?.find(
-      n => n !== null &&
-      !isEphemeralAwsStorageInstance(n.cloudInfo?.instance_type)) !== undefined ?? true;
+    return (
+      universe.universeDetails?.nodeDetailsSet?.find(
+        (n) => n !== null && !isEphemeralAwsStorageInstance(n.cloudInfo?.instance_type)
+      ) !== undefined ?? true
+    );
   }
 
   return (
     isUniverseType(universe, 'gcp') ||
-    isUniverseType(universe, 'azu')
+    isUniverseType(universe, 'azu') ||
+    isUniverseType(universe, 'kubernetes')
   );
 };
 
@@ -315,7 +338,8 @@ export const getProxyNodeAddress = (universeUUID, nodeIp, nodePort) => {
  *
  * @param GFlagInput The entire Gflag configuration enetered that needs to be unformatted
  */
-export const unformatConf = (GFlagInput) => {
+export const unformatConf = (formValues, GFlagInput) => {
+  const flagName = formValues?.flagname;
   // Regex expression to extract non-quoted comma
   const filteredGFlagInput = GFlagInput.split(/,(?=(?:(?:[^"]*"){2})*[^"]*$)/);
   const unformattedConf = filteredGFlagInput?.map((GFlagRowConf, index) => {
@@ -352,17 +376,30 @@ export const unformatConf = (GFlagInput) => {
       JWKSToken = JWKSKey.substring(JWKSKey.indexOf(CONST_VALUES.EQUALS) + 1);
     }
 
+    const content = isNonEmptyString(GFlagRowConfSubset) ? GFlagRowConfSubset : GFlagRowConf;
+    const isDisabled = isRowDisabled(formValues, flagName, GFlagRowConfSubset);
+
     return {
       id: `item-${index}`,
       index: index,
-      content: isNonEmptyString(GFlagRowConfSubset) ? GFlagRowConfSubset : GFlagRowConf,
+      content: content,
       error: false,
       showJWKSButton: isNonEmptyString(JWKSToken),
-      JWKSToken: JWKSToken
+      JWKSToken: JWKSToken,
+      disabled: isDisabled
     };
   });
 
   return unformattedConf;
+};
+
+export const isRowDisabled = (formValues, flagName, rowContent) => {
+  let isDisabled = false;
+  // When PG Parity is enabled, ensure the default values returned for pg_conf_csv by the API is disabled
+  const pgConfCsvPrefilledValue =
+    flagName === MultilineGFlags.YSQL_PG_CONF_CSV ? formValues?.pgGroupFlags?.ysql_pg_conf_csv : '';
+  isDisabled = !!pgConfCsvPrefilledValue?.includes(rowContent);
+  return isDisabled;
 };
 
 /**

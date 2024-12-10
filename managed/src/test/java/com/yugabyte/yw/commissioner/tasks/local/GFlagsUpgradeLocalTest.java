@@ -413,6 +413,7 @@ public class GFlagsUpgradeLocalTest extends LocalProviderUniverseTestBase {
             createTblSpace,
             20,
             userIntent.isYSQLAuthEnabled(),
+            false,
             true);
     assertTrue("Message is " + response.getMessage(), response.isSuccess());
 
@@ -551,7 +552,7 @@ public class GFlagsUpgradeLocalTest extends LocalProviderUniverseTestBase {
     assertNull(universe.getUniverseDetails().placementModificationTaskUuid);
 
     // Revert setting
-    RuntimeConfigEntry.upsertGlobal(UniverseConfKeys.followerLagMaxThreshold.getKey(), "30s");
+    RuntimeConfigEntry.upsertGlobal(UniverseConfKeys.followerLagMaxThreshold.getKey(), "60s");
 
     // Now it should be successful
     doGflagsUpgrade(

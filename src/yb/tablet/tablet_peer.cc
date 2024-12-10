@@ -129,7 +129,7 @@ DECLARE_int32(ysql_transaction_abort_timeout_ms);
 
 DECLARE_bool(cdc_immediate_transaction_cleanup);
 
-DECLARE_int64(cdc_intent_retention_ms);
+DECLARE_uint64(cdc_intent_retention_ms);
 
 DECLARE_bool(enable_flush_retryable_requests);
 
@@ -1248,7 +1248,7 @@ HybridTime TabletPeer::GetMinStartHTRunningTxnsOrLeaderSafeTime() {
         << "Tablet not found, so setting minimum start hybrid time for running txns to kInitial.";
     return HybridTime::kInitial;
   }
-  return (*tablet_result)->GetMinStartHTRunningTxnsOrLeaderSafeTime();
+  return (*tablet_result)->GetMinStartHTRunningTxnsForCDCLogCallback();
 }
 
 Status TabletPeer::SetCDCSDKRetainOpIdAndTime(

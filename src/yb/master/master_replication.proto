@@ -497,6 +497,19 @@ message UpdateConsumerOnProducerMetadataResponsePB {
   optional cdc.SchemaVersionsPB schema_versions = 4;
 }
 
+message InsertPackedSchemaForXClusterTargetRequestPB {
+  // If this is an alter on a colocated table, then this is the colocated parent table id,
+  // and we also need to specify the colocation_id.
+  optional bytes table_id = 1;
+  optional SchemaPB packed_schema = 2;
+  optional uint32 current_schema_version = 3;
+  optional uint32 colocation_id = 4;
+}
+
+message InsertPackedSchemaForXClusterTargetResponsePB {
+  optional MasterErrorPB error = 1;
+}
+
 message GetXClusterSafeTimeRequestPB{}
 
 message GetXClusterSafeTimeResponsePB {
@@ -618,6 +631,15 @@ message IsXClusterBootstrapRequiredResponsePB {
   optional MasterErrorPB error = 1;
   optional bool not_ready = 2;
   optional bool initial_bootstrap_required = 3;
+}
+
+message XClusterEnsureSequenceUpdatesAreInWalRequestPB {
+  required string replication_group_id = 1;
+  repeated string namespace_ids = 2;
+}
+
+message XClusterEnsureSequenceUpdatesAreInWalResponsePB {
+  optional MasterErrorPB error = 1;
 }
 
 message GetXClusterStreamsRequestPB {
@@ -863,6 +885,8 @@ service MasterReplication {
       returns (UpdateConsumerOnProducerSplitResponsePB);
   rpc UpdateConsumerOnProducerMetadata(UpdateConsumerOnProducerMetadataRequestPB)
       returns (UpdateConsumerOnProducerMetadataResponsePB);
+  rpc InsertPackedSchemaForXClusterTarget(InsertPackedSchemaForXClusterTargetRequestPB)
+      returns (InsertPackedSchemaForXClusterTargetResponsePB);
 
   rpc GetUniverseReplications(GetUniverseReplicationsRequestPB)
       returns (GetUniverseReplicationsResponsePB);
@@ -903,6 +927,8 @@ service MasterReplication {
       returns (XClusterDeleteOutboundReplicationGroupResponsePB);
   rpc IsXClusterBootstrapRequired(IsXClusterBootstrapRequiredRequestPB)
       returns (IsXClusterBootstrapRequiredResponsePB);
+  rpc XClusterEnsureSequenceUpdatesAreInWal(XClusterEnsureSequenceUpdatesAreInWalRequestPB)
+      returns (XClusterEnsureSequenceUpdatesAreInWalResponsePB);
   rpc GetXClusterStreams(GetXClusterStreamsRequestPB)
       returns (GetXClusterStreamsResponsePB);
   rpc RepairOutboundXClusterReplicationGroupAddTable(

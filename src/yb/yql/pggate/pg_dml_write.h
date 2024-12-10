@@ -23,9 +23,6 @@ namespace yb::pggate {
 
 class PgDmlWrite : public PgDml {
  public:
-  // Prepare write operations.
-  virtual Status Prepare();
-
   // Setup internal structures for binding values during prepare.
   void PrepareColumns();
 
@@ -51,26 +48,17 @@ class PgDmlWrite : public PgDml {
 
  protected:
   PgDmlWrite(
-      PgSession::ScopedRefPtr pg_session, const PgObjectId& table_id,
-      bool is_region_local, YBCPgTransactionSetting transaction_setting, bool packed = false);
+      const PgSession::ScopedRefPtr& pg_session, YBCPgTransactionSetting transaction_setting,
+      bool packed = false);
 
-  // Allocate write request.
-  void AllocWriteRequest();
+  // Prepare write operations.
+  Status Prepare(const PgObjectId& table_id, bool is_region_local);
 
   // Allocate column expression.
   Result<LWPgsqlExpressionPB*> AllocColumnBindPB(PgColumn* col, PgExpr* expr) override;
 
   // Allocate target for selected or returned expressions.
   LWPgsqlExpressionPB* AllocTargetPB() override;
-
-  // Allocate protobuf for a qual in the write request's where_clauses list.
-  LWPgsqlExpressionPB* AllocQualPB() override;
-
-  // Allocate protobuf for a column reference in the write request's col_refs list.
-  LWPgsqlColRefPB* AllocColRefPB() override;
-
-  // Clear the write request's col_refs list.
-  void ClearColRefPBs() override;
 
   // Allocate column expression.
   LWPgsqlExpressionPB* AllocColumnAssignPB(PgColumn* col) override;
@@ -85,6 +73,8 @@ class PgDmlWrite : public PgDml {
   bool packed_;
 
  private:
+  [[nodiscard]] ArenaList<LWPgsqlColRefPB>& ColRefPBs() override;
+
   Status DeleteEmptyPrimaryBinds();
 
   virtual PgsqlWriteRequestPB::PgsqlStmtType stmt_type() const = 0;

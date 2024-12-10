@@ -22,6 +22,10 @@
 namespace yb::rpc {
 class RpcContext;
 }
+
+namespace yb::tablet {
+class TSLocalLockManager;
+}
 namespace yb::tserver {
 class AcquireObjectLockRequestPB;
 class AcquireObjectLockResponsePB;
@@ -41,16 +45,22 @@ class ObjectLockInfoManager {
   virtual ~ObjectLockInfoManager();
 
   void LockObject(
-      LeaderEpoch epoch, const tserver::AcquireObjectLockRequestPB* req,
-      tserver::AcquireObjectLockResponsePB* resp, rpc::RpcContext rpc);
+      const tserver::AcquireObjectLockRequestPB& req, tserver::AcquireObjectLockResponsePB* resp,
+      rpc::RpcContext rpc);
 
   void UnlockObject(
-      LeaderEpoch epoch, const tserver::ReleaseObjectLockRequestPB* req,
-      tserver::ReleaseObjectLockResponsePB* resp, rpc::RpcContext rpc);
+      const tserver::ReleaseObjectLockRequestPB& req, tserver::ReleaseObjectLockResponsePB* resp,
+      rpc::RpcContext rpc);
 
-  void ExportObjectLockInfo(tserver::DdlLockEntriesPB* resp);
-  bool InsertOrAssign(const std::string& tserver_uuid, std::shared_ptr<ObjectLockInfo> info);
+  void ExportObjectLockInfo(const std::string& tserver_uuid, tserver::DdlLockEntriesPB* resp);
+  void UpdateObjectLocks(const std::string& tserver_uuid, std::shared_ptr<ObjectLockInfo> info);
   void Clear();
+  std::shared_ptr<tablet::TSLocalLockManager> TEST_ts_local_lock_manager();
+
+  // Releases any object locks that may have been taken by the specified tservers's previous
+  // incarnations.
+  void ReleaseOldObjectLocks(
+      const std::string& tserver_uuid, uint64 current_incarnation_num, bool wait = false);
 
  private:
   template <class Req, class Resp>

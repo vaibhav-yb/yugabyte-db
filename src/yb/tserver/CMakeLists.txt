@@ -188,6 +188,24 @@ ADD_YB_LIBRARY(pg_auto_analyze_service_proto
   NONLINK_DEPS ${TSERVER_YRPC_TGTS})
 
 #########################################
+# pg_cron_leader_service_proto
+#########################################
+
+YRPC_GENERATE(
+  TSERVER_YRPC_SRCS TSERVER_YRPC_HDRS TSERVER_YRPC_TGTS
+  SOURCE_ROOT ${CMAKE_CURRENT_SOURCE_DIR}/../..
+  BINARY_ROOT ${CMAKE_CURRENT_BINARY_DIR}/../..
+  PROTO_FILES stateful_services/pg_cron_leader_service.proto)
+set(TSERVER_YRPC_LIBS
+  yrpc
+  yb_common_proto
+  protobuf)
+ADD_YB_LIBRARY(pg_cron_leader_service_proto
+  SRCS ${TSERVER_YRPC_SRCS}
+  DEPS ${TSERVER_YRPC_LIBS}
+  NONLINK_DEPS ${TSERVER_YRPC_TGTS})
+
+#########################################
 # tserver_util
 #########################################
 
@@ -263,7 +281,8 @@ set(TSERVER_SRCS
   xcluster_poller_id.cc
   xcluster_poller_stats.cc
   xcluster_output_client.cc
-  xcluster_write_implementations.cc)
+  xcluster_write_implementations.cc
+  ysql_advisory_lock_table.cc)
 
 set(TSERVER_DEPS
   protobuf

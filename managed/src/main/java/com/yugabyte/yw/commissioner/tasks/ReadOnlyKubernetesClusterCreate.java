@@ -117,7 +117,6 @@ public class ReadOnlyKubernetesClusterCreate extends KubernetesTaskBase {
       // Install YBC on the RR tservers and wait for its completion
       if (universe.isYbcEnabled()) {
         installYbcOnThePods(
-            universe.getName(),
             tserversAdded,
             true,
             ybcManager.getStableYbcVersion(),
@@ -131,6 +130,9 @@ public class ReadOnlyKubernetesClusterCreate extends KubernetesTaskBase {
 
       // Wait for a master leader to hear from all the tservers.
       createWaitForTServerHeartBeatsTask().setSubTaskGroupType(SubTaskGroupType.ConfigureUniverse);
+
+      // Update PDB policy for the universe.
+      createPodDisruptionBudgetPolicyTask(false /* deletePDB */, true /* reCreatePDB */);
 
       createSwamperTargetUpdateTask(false);
 

@@ -13,6 +13,76 @@ type: docs
 
 What follows are the release notes for the YugabyteDB Voyager v1 release series. Content will be added as new notable features and changes are available in the patch releases of the YugabyteDB v1 series.
 
+## v1.8.6 - November 26, 2024
+
+### New Features
+
+- Unsupported PL/pgSQL objects detection. Migration assessment and schema analysis commands can now detect and report SQL features and constructs in PL/pgSQL objects in the source schema that are not supported by YugabyteDB. This includes detecting advisory locks, system columns, and XML functions. Voyager reports individual queries in these objects that contain unsupported constructs, such as queries in PL/pgSQL blocks for functions and procedures, or select statements in views and materialized views.
+
+### Enhancements
+
+- Using the arguments `--table-list` and `--exclude-table-list` in guardrails now checks for PostgreSQL export to determine which tables require permission checks.
+- Added a check for Java as a dependency in guardrails for PostgreSQL export during live migration.
+- Added check to verify if [pg_stat_statements](../../explore/ysql-language-features/pg-extensions/extension-pgstatstatements/) is in a schema not included in the specified `schema_list` and if the migration user has access to queries in the pg_stat_statements view. This is part of the guardrails for assess-migration for PostgreSQL.
+- Introduced the `--version` flag in the voyager installer script, which can be used to specify the version to install.
+- Added argument [--truncate-tables](../reference/data-migration/import-data/#arguments) to import data to target for truncating tables, applicable only when --start-clean is true.
+- Added support in the assess-migration command to detect the `XMLTABLE()` function under unsupported query constructs.
+- Added support for reporting unsupported indexes on some data types, such as daterange, int4range, int8range, tsrange, tstzrange, numrange, and interval, in analyze-schema and assess-migration.
+- Added support for reporting unsupported primary and unique key constraints on various data types in assess-migration and analyze-schema.
+
+### Bug fixes
+
+- Fixed an [issue](https://github.com/yugabyte/yb-voyager/issues/1920) where export-data errors out if background metadata queries (count*) are still running after pg_dump completes.
+- Fixed a bug where the assess-migration command fails when gathering metadata for unsupported query constructs if the pg_stat_statements extension was installed in a non-public schema.
+- Fixed nil pointer exceptions and index-out-of-range issues when running export data status and get data-migration-report commands before export data is properly started.
+- Fixed a bug in export data status command for accurate status reporting of partition tables during PostgreSQL data export.
+
+## v1.8.5 - November 12, 2024
+
+### Enhancements
+
+- The guardrail checks to validate source/target database permissions, verify binary dependencies, and check database version compatibility for PostgreSQL in all voyager commands are now enabled by default.
+- UI/UX improvements in the PostgreSQL permission grant script (`yb-voyager-pg-grant-migration-permissions.sql`) and new checks are added for replication slots, foreign keys, and triggers in PostgreSQL guardrails.
+- Object names are scrollable in the analyze schema HTML report for improved navigation.
+- Added constraint names and their corresponding table names when reporting unsupported features related to deferrable and exclusion constraints.
+- Added reporting for the REFERENCING clause for triggers and BEFORE ROW triggers on partitioned tables in the analyze-schema and assess-migration reports.
+- Added documentation links for unsupported query constructs in the assessment report.
+- Standardized the format of data sent to the yugabyted control plane via the assess-migration command, ensuring consistent presentation across various sections of the report, such as Unsupported Features, Unsupported Datatypes, and Unsupported Query Constructs.
+
+### Bug fixes
+
+- Fixed the import-schema DDL parsing issue for functions and procedures, where extra spaces before the DDL caused it to be treated as normal DDL, preventing the PLPGSQL parsing logic from triggering.
+- Fixed an issue which resulted in "token too long" errors in export-data-from-target when log level was set to DEBUG.
+
+### Known issues
+
+- The [assess-migration](../reference/assess-migration/) command will fail if the [pg_stat_statements](../../explore/ysql-language-features/pg-extensions/extension-pgstatstatements/) extension is created in a non-public schema, due to the "Unsupported Query Constructs" feature.
+To bypass this issue, set the environment variable `REPORT_UNSUPPORTED_QUERY_CONSTRUCTS=false`, which disables the "Unsupported Query Constructs" feature and proceeds with the command execution.
+
+## v1.8.4 - October 29, 2024
+
+### New features
+
+- Adaptive parallelism. Introduced the ability to dynamically adjust the number of parallel jobs in the [import data](../reference/data-migration/import-data/) command based on real-time CPU and memory use of the YugabyteDB cluster. This prevents resource under- and over-utilization, optimizes import speeds, and enhances efficiency. It also ensures stability across both snapshot and live migration phases without the need for manual intervention. Available in YugabyteDB versions {{<release "2.20.8.0">}}, v2024.1.4.0, v2024.2.0.0, or later.
+
+- Detect unsupported query constructs. The [assess-migration](../reference/assess-migration/) command can now detect and report SQL queries containing unsupported features and constructs, such as advisory locks, system columns, and XML functions. This helps identify potential issues early in the migration process.
+
+- Guardrails for YugabyteDB Voyager commands. Added checks to validate source/target database permissions, verify binary dependencies, and check database version compatibility for PostgreSQL in all [yb-voyager](../reference/yb-voyager-cli/) commands. This feature is currently disabled by default; to enable it, use the `--run-guardrails-checks` flag during assess-migration, export data, and import data phases.
+
+### Enhancements
+
+- Added support in [assess-migration](../reference/assess-migration/) and [analyze-schema](../reference/schema-migration/analyze-schema/) commands to report unsupported datatypes for live migration during fall-forward/fall-back, such as user-defined types, array of enums, and so on.
+- Improved coverage of reporting PostGIS datatypes by including BOX2D, BOX3D, and TOPOGEOMETRY in the assess-migration and analyze-schema report.
+- Included Voyager version details in assess-migration and analyze-schema reports.
+- Added a confirmation prompt (yes/no) for start clean during data export, allowing users to confirm before proceeding.
+- Enhanced export and import command output to display exported/imported table list by row count, with the largest tables first.
+
+### Bug fixes
+
+- Fixed [import data](../reference/data-migration/import-data/) and `import data file` commands to ensure batches created from data files don't exceed the default batch size limit (200MB), preventing "RPC message too long" errors with large rows. Also, added an immediate check to error out for single row size over 200MB.
+- Fixed an issue in `analyze-schema` where partitioned tables were incorrectly reported as having insufficient columns in the primary key constraint due to a regex misidentifying the CONSTRAINT clause before primary key definition.
+- Fixed the OPERATOR object names in the schema summary of `assess-migration` and `analyze-schema` reports, and renamed the INDEX, TRIGGER, and POLICY objects by appending the table name to the objects for unique identification (using the format `<object_name> ON <table_name>`).
+
 ## v1.8.3 - October 15, 2024
 
 ### Enhancements

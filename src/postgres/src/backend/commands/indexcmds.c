@@ -73,6 +73,7 @@
 /* YB includes. */
 #include "catalog/binary_upgrade.h"
 #include "catalog/pg_database.h"
+#include "catalog/yb_catalog_version.h"
 #include "commands/progress.h"
 #include "commands/tablegroup.h"
 #include "miscadmin.h"
@@ -1040,10 +1041,10 @@ DefineIndex(Oid relationId,
 				shdepFindImplicitTablegroup(tablespaceId, &tablegroupId);
 
 				/*
-				 * If we do not find a tablegroup corresponding to the given tablespace, we 
+				 * If we do not find a tablegroup corresponding to the given tablespace, we
 				 * would have to create one. We derive the name from tablespace OID.
 				 */
-				tablegroup_name = OidIsValid(tablegroupId) ? get_tablegroup_name(tablegroupId) : 
+				tablegroup_name = OidIsValid(tablegroupId) ? get_tablegroup_name(tablegroupId) :
 					get_implicit_tablegroup_name(tablespaceId);
 
 			}
@@ -1051,8 +1052,9 @@ DefineIndex(Oid relationId,
 			{
 				/*
 				 * In yb_binary_restore if tablespaceId is not valid but
-				 * binary_upgrade_next_tablegroup_oid is valid, that implies we are
-				 * restoring without tablespace information.
+				 * binary_upgrade_next_tablegroup_oid is valid, that implies either:
+				 * 1. it is a default tablespace.
+				 * 2. we are restoring without tablespace information.
 				 * In this case all tables are restored to default tablespace,
 				 * while maintaining the colocation properties, and tablegroup's name
 				 * will be colocation_restore_tablegroupId, while default tablegroup's
@@ -1067,6 +1069,10 @@ DefineIndex(Oid relationId,
 			}
 			else if (yb_binary_restore && OidIsValid(tablegroupId))
 			{
+				/*
+				 * This case handles Primary Key's tablegroup id. The variable
+				 * tablegroupId stores the tablegroupId of the parent table.
+				 */
 				tablegroup_name = get_tablegroup_name(tablegroupId);
 			}
 			else
@@ -1088,7 +1094,7 @@ DefineIndex(Oid relationId,
 				RoleSpec *spec = makeNode(RoleSpec);
 				spec->roletype = ROLESPEC_CSTRING;
 				spec->rolename = pstrdup("postgres");
-				
+
 				CreateTableGroupStmt *tablegroup_stmt = makeNode(CreateTableGroupStmt);
 				tablegroup_stmt->tablegroupname = tablegroup_name;
 				tablegroup_stmt->tablespacename = tablespace_name;
@@ -1097,6 +1103,14 @@ DefineIndex(Oid relationId,
 				tablegroupId = CreateTableGroup(tablegroup_stmt);
 			}
 		}
+		/*
+		 * Reset the binary_upgrade params as these are not needed anymore (only
+		 * required in CreateTableGroup), to ensure these parameter values are
+		 * not reused in subsequent unrelated statements.
+		 */
+		binary_upgrade_next_tablegroup_oid = InvalidOid;
+		binary_upgrade_next_tablegroup_default = false;
+
 
 		if (stmt->split_options)
 		{
@@ -1127,12 +1141,16 @@ DefineIndex(Oid relationId,
 					errmsg("TABLESPACE is not supported for indexes on colocated tables.")));
 
 		/*
-		 * Skip the check in a colocated database because any user can create tables
-		 * in an implicit tablegroup.
-		 * Check permissions for tablegroup. To create an index within a tablegroup, a user must
-		 * either be a superuser, the owner of the tablegroup, or have create perms on it.
+		 * YB: Check permissions for tablegroup. To create an index within a
+		 * tablegroup, a user must either be a superuser, the owner of the
+		 * tablegroup, or have create perms on it. Skip the check in a colocated
+		 * database because any user can create tables in an implicit
+		 * tablegroup. Skip the check during binary upgrade because ACLs have
+		 * not yet been restored, and CREATE INDEX, unlike CREATE TABLE, is
+		 * normally run as the table owner due to CVE-2022-1552. (See upstream
+		 * PG commit a117cebd638dd02e5c2e791c25e43745f233111b for details.)
 		 */
-		if (!MyDatabaseColocated &&
+		if (!MyDatabaseColocated && !IsBinaryUpgrade &&
 			OidIsValid(tablegroupId) && !pg_tablegroup_ownercheck(tablegroupId, GetUserId()))
 		{
 			AclResult  aclresult;
@@ -1270,13 +1288,6 @@ DefineIndex(Oid relationId,
 		ereport(ERROR,
 				(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
 				 errmsg("access method \"%s\" does not support exclusion constraints",
-						accessMethodName)));
-
-	/* YB: Inlined indexes are only supported in colocated mode right now. */
-	if (!MyDatabaseColocated && amRoutine->yb_amiscoveredbymaintable)
-		ereport(ERROR,
-				(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-				 errmsg("access method \"%s\" requires colocation",
 						accessMethodName)));
 
 	amcanorder = amRoutine->amcanorder;
@@ -2109,6 +2120,10 @@ DefineIndex(Oid relationId,
 	else
 	{
 		elog(LOG, "committing pg_index tuple with indislive=true");
+		if (yb_test_block_index_phase[0] != '\0')
+			YbTestGucBlockWhileStrEqual(&yb_test_block_index_phase,
+										"indislive",
+										"index state change indislive=true");
 		/*
 		 * No need to break (abort) ongoing txns since this is an online schema
 		 * change.
@@ -2175,8 +2190,7 @@ DefineIndex(Oid relationId,
 
 		/* Do backfill. */
 		/* YB: Do backfill if this is a separate DocDB table from the main table. */
-		if (!YBIsOidCoveredByMainTable(indexRelationId))
-			HandleYBStatus(YBCPgBackfillIndex(databaseId, indexRelationId));
+		HandleYBStatus(YBCPgBackfillIndex(databaseId, indexRelationId));
 
 		YbTestGucFailIfStrEqual(yb_test_fail_index_state_change, "postbackfill");
 
@@ -2606,8 +2620,8 @@ ComputeIndexAttrs(IndexInfo *indexInfo,
 										 accessMethodId);
 
 		/*
-	 	 * In Yugabyte mode, disallow some built-in operator classes if the column has non-C
-	 	 * collation.
+		 * In Yugabyte mode, disallow some built-in operator classes if the column has non-C
+		 * collation.
 		 */
 		if (IsYugaByteEnabled() &&
 			YBIsCollationValidNonC(attcollation) &&
@@ -2721,9 +2735,9 @@ ComputeIndexAttrs(IndexInfo *indexInfo,
 			}
 			else if (colOptionP[attn] == INDOPTION_HASH)
 				ereport(NOTICE,
-                		(errcode(ERRCODE_WRONG_OBJECT_TYPE),
-                  		 errmsg("nulls sort ordering option is ignored, "
-                        		"NULLS FIRST/NULLS LAST not allowed for a HASH column")));
+						(errcode(ERRCODE_WRONG_OBJECT_TYPE),
+						 errmsg("nulls sort ordering option is ignored, "
+								"NULLS FIRST/NULLS LAST not allowed for a HASH column")));
 			else if (attribute->nulls_ordering == SORTBY_NULLS_FIRST)
 				colOptionP[attn] |= INDOPTION_NULLS_FIRST;
 		}
@@ -5005,6 +5019,17 @@ YbWaitForBackendsCatalogVersion()
 	if (yb_disable_wait_for_backends_catalog_version)
 		return;
 
+	/*
+	 * We don't get the current catalog version after
+	 * YBDecrementDdlNestingLevel(), so we have to send another RPC to fetch
+	 * it.  This is needed because YbGetCatalogCacheVersion() may be behind in
+	 * case other DDLs happened concurrently.  This also means the version we
+	 * are waiting on may be higher than necessary in case other DDLs finished
+	 * before we collect the version.
+	 */
+	uint64_t catalog_version = YbGetMasterCatalogVersion();
+	Assert(catalog_version >= YbGetCatalogCacheVersion());
+
 	int num_lagging_backends = -1;
 	int retries_left = 10;
 	const TimestampTz start = GetCurrentTimestamp();
@@ -5023,12 +5048,12 @@ YbWaitForBackendsCatalogVersion()
 								   " catalog version %" PRIu64 ".",
 								   num_lagging_backends,
 								   MyDatabaseId,
-								   YbGetCatalogCacheVersion()),
+								   catalog_version),
 						 errhint("Run the following query on all tservers to find"
 								 " the lagging backends: SELECT * FROM"
 								 " pg_stat_activity WHERE catalog_version < %"
 								 PRIu64 " AND datid = %u;",
-								 YbGetCatalogCacheVersion(),
+								 catalog_version,
 								 MyDatabaseId)));
 			else
 			{
@@ -5040,12 +5065,13 @@ YbWaitForBackendsCatalogVersion()
 								   " database %u are still behind"
 								   " catalog version %" PRIu64 ".",
 								   MyDatabaseId,
-								   YbGetCatalogCacheVersion())));
+								   catalog_version)));
 			}
 		}
 
 		YBCStatus s = YBCPgWaitForBackendsCatalogVersion(MyDatabaseId,
-														 YbGetCatalogCacheVersion(),
+														 catalog_version,
+														 MyProcPid,
 														 &num_lagging_backends);
 
 		if (!s)		/* ok */

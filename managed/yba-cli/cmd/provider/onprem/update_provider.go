@@ -20,9 +20,12 @@ import (
 
 // updateOnpremProviderCmd represents the provider command
 var updateOnpremProviderCmd = &cobra.Command{
-	Use:   "update",
-	Short: "Update an On-premises YugabyteDB Anywhere provider",
-	Long:  "Update an On-premises provider in YugabyteDB Anywhere",
+	Use:     "update",
+	Aliases: []string{"edit"},
+	Short:   "Update an On-premises YugabyteDB Anywhere provider",
+	Long:    "Update an On-premises provider in YugabyteDB Anywhere",
+	Example: `yba provider onprem update --name <provider-name> \
+	--new-name <new-provider-name>`,
 	PreRun: func(cmd *cobra.Command, args []string) {
 		providerName, err := cmd.Flags().GetString("name")
 		if err != nil {
@@ -255,16 +258,16 @@ func init() {
 
 	updateOnpremProviderCmd.Flags().StringArray("add-region", []string{},
 		"[Optional] Add region associated with the On-premises provider. "+
-			"Provide the following comma separated fields as key-value pairs:"+
-			"\"region-name=<region-name>,latitude=<latitude>,longitude=<longitude>\". "+
+			"Provide the following double colon (::) separated fields as key-value pairs: "+
+			"\"region-name=<region-name>::latitude=<latitude>::longitude=<longitude>\". "+
 			formatter.Colorize("Region name is a required key-value.",
 				formatter.GreenColor)+
 			" Latitude and Longitude are optional. "+
 			"Each region needs to be added using a separate --add-region flag.")
 	updateOnpremProviderCmd.Flags().StringArray("add-zone", []string{},
 		"[Optional] Zone associated to the On-premises Region defined. "+
-			"Provide the following comma separated fields as key-value pairs:"+
-			"\"zone-name=<zone-name>,region-name=<region-name>\". "+
+			"Provide the following double colon (::) separated fields as key-value pairs: "+
+			"\"zone-name=<zone-name>::region-name=<region-name>\". "+
 			formatter.Colorize("Zone name and Region name are required values. ",
 				formatter.GreenColor)+
 			"Each --add-region definition "+
@@ -279,16 +282,16 @@ func init() {
 			"--remove-region definition. Removing a region removes the corresponding zones.")
 	updateOnpremProviderCmd.Flags().StringArray("remove-zone", []string{},
 		"[Optional] Remove zone associated to the On-premises Region defined. "+
-			"Provide the following comma separated fields as key-value pairs:"+
-			"\"zone-name=<zone-name>,region-name=<region-name>\". "+
+			"Provide the following double colon (::) separated fields as key-value pairs: "+
+			"\"zone-name=<zone-name>::region-name=<region-name>\". "+
 			formatter.Colorize("Zone name, Region name are required values. ",
 				formatter.GreenColor)+
 			"Each zone needs to be removed using a separate --remove-zone flag.")
 
 	updateOnpremProviderCmd.Flags().StringArray("edit-region", []string{},
 		"[Optional] Edit region details associated with the On-premises provider. "+
-			"Provide the following comma separated fields as key-value pairs:"+
-			"\"region-name=<region-name>,latitude=<latitude>,longitude=<longitude>\". "+
+			"Provide the following double colon (::) separated fields as key-value pairs: "+
+			"\"region-name=<region-name>::latitude=<latitude>::longitude=<longitude>\". "+
 			formatter.Colorize("Region name is a required key-value.",
 				formatter.GreenColor)+
 			" Latitude and Longitude are optional. "+

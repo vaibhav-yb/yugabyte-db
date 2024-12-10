@@ -9,6 +9,9 @@
 
 #define MAX_STARTUP_ATTEMPTS 7
 
+extern bool version_matching;
+extern bool version_matching_connect_higher_version;
+
 static inline machine_msg_t *od_frontend_error_msg(od_client_t *client,
 						   machine_msg_t *stream,
 						   char *code, char *fmt,
@@ -99,5 +102,6 @@ void od_frontend(void *);
 extern int yb_execute_on_control_connection(od_client_t *,
 					    int (*)(od_client_t *,
 						    od_server_t *));
+extern int yb_auth_via_auth_backend(od_client_t *client);
 
 #endif /* ODYSSEY_FRONTEND_H */

@@ -252,7 +252,7 @@ YBCBuildYBTupleIdDescriptor(const RI_ConstraintInfo *riinfo, TupleTableSlot *slo
 	bool using_index = false;
 	Relation idx_rel = RelationIdGetRelation(riinfo->conindid);
 	Relation source_rel = idx_rel;
-	if (idx_rel->rd_index != NULL && !YBIsCoveredByMainTable(idx_rel))
+	if (idx_rel->rd_index != NULL && !idx_rel->rd_index->indisprimary)
 	{
 		Assert(IndexRelationGetNumberOfKeyAttributes(idx_rel) == riinfo->nkeys);
 		using_index = true;
@@ -276,7 +276,9 @@ YBCBuildYBTupleIdDescriptor(const RI_ConstraintInfo *riinfo, TupleTableSlot *slo
 	TupleDesc source_tupdesc = source_rel->rd_att;
 	for (int i = 0; i < riinfo->nkeys; ++i, ++next_attr)
 	{
-		next_attr->attr_num = using_index ? (i + 1) : riinfo->pk_attnums[i];
+		next_attr->attr_num =
+			using_index ? YbGetIndexAttnum(source_rel, riinfo->pk_attnums[i]) :
+						  riinfo->pk_attnums[i];
 		const int fk_attnum = riinfo->fk_attnums[i];
 		const Oid type_id = TupleDescAttr(slot->tts_tupleDescriptor, fk_attnum - 1)->atttypid;
 		/*

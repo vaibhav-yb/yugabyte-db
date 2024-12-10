@@ -144,11 +144,6 @@ static SimpleStringList table_exclude_patterns = {NULL, NULL};
 static SimpleOidList table_exclude_oids = {NULL, NULL};
 static SimpleStringList tabledata_exclude_patterns = {NULL, NULL};
 static SimpleOidList tabledata_exclude_oids = {NULL, NULL};
-/*
- * The string list records tablespaces used if the dumped database is
- * a colocated database.
- */
-static SimpleStringList colocated_database_tablespaces = {NULL, NULL};
 
 static SimpleStringList foreign_servers_include_patterns = {NULL, NULL};
 static SimpleOidList foreign_servers_include_oids = {NULL, NULL};
@@ -730,8 +725,11 @@ main(int argc, char **argv)
 	 * Binary upgrade mode implies dumping sequence data even in schema-only
 	 * mode.  This is not exposed as a separate option, but kept separate
 	 * internally for clarity.
+	 * YB: Before, during, and after online upgrade, we use the same sequence
+	 * data table, so we don't want to write anything to sequence data during
+	 * the restore.
 	 */
-	if (dopt.binary_upgrade || dopt.include_yb_metadata)
+	if ((!IsYugabyteEnabled && dopt.binary_upgrade) || dopt.include_yb_metadata)
 		dopt.sequence_data = 1;
 
 	if (dopt.dataOnly && dopt.schemaOnly)
@@ -3258,8 +3256,11 @@ dumpDatabase(Archive *fout)
 	/*
 	 * pg_largeobject comes from the old system intact, so set its
 	 * relfrozenxids, relminmxids and relfilenode.
+	 *
+	 * YB: We don't support pg_largeobject and thus don't need to upgrade this
+	 * table.
 	 */
-	if (dopt->binary_upgrade)
+	if (dopt->binary_upgrade && !IsYugabyteEnabled)
 	{
 		PGresult   *lo_res;
 		PQExpBuffer loFrozenQry = createPQExpBuffer();
@@ -5042,8 +5043,6 @@ binary_upgrade_set_pg_class_oids(Archive *fout,
 							  "SELECT pg_catalog.binary_upgrade_set_next_index_relfilenode('%u'::pg_catalog.oid);\n",
 							  toast_index_relfilenode);
 		}
-
-		PQclear(upgrade_res);
 	}
 	else
 	{
@@ -5055,6 +5054,8 @@ binary_upgrade_set_pg_class_oids(Archive *fout,
 						  "SELECT pg_catalog.binary_upgrade_set_next_index_relfilenode('%u'::pg_catalog.oid);\n",
 						  relfilenode);
 	}
+
+	PQclear(upgrade_res);
 
 	appendPQExpBufferChar(upgrade_buffer, '\n');
 
@@ -6789,12 +6790,18 @@ getTablegroups(Archive *fout, int *numTablegroups)
 		tbinfo[i].dobj.name = pg_strdup(PQgetvalue(res, i, i_grpname));
 		tbinfo[i].dacl.acl = pg_strdup(PQgetvalue(res, i, i_grpacl));
 		tbinfo[i].dacl.acldefault = pg_strdup(PQgetvalue(res, i, i_grpacldefault));
+		tbinfo[i].dacl.privtype = 0;
+		tbinfo[i].dacl.initprivs = NULL;
 		tbinfo[i].rolname = getRoleName(PQgetvalue(res, i, i_grpowner));
 		tbinfo[i].grptablespace = pg_strdup(PQgetvalue(res, i, i_grptablespace));
 		tbinfo[i].grpoptions = pg_strdup(PQgetvalue(res, i, i_grpoptions));
 
 		/* Decide whether we want to dump it */
 		selectDumpableObject(&(tbinfo[i].dobj), fout);
+
+		/* Mark whether tablegroup has an ACL */
+		if (!PQgetisnull(res, i, i_grpacl))
+			tbinfo[i].dobj.components |= DUMP_COMPONENT_ACL;
 	}
 
 	PQclear(res);
@@ -13437,6 +13444,18 @@ dumpCollation(Archive *fout, const CollInfo *collinfo)
 	else
 		collctype = NULL;
 
+	/*
+	 * Before version 15, collcollate and collctype were of type NAME and
+	 * non-nullable. Treat empty strings as NULL for consistency.
+	 */
+	if (fout->remoteVersion < 150000)
+	{
+		if (collcollate[0] == '\0')
+			collcollate = NULL;
+		if (collctype[0] == '\0')
+			collctype = NULL;
+	}
+
 	if (!PQgetisnull(res, 0, i_colliculocale))
 		colliculocale = PQgetvalue(res, 0, i_colliculocale);
 	else
@@ -13463,29 +13482,54 @@ dumpCollation(Archive *fout, const CollInfo *collinfo)
 	if (strcmp(PQgetvalue(res, 0, i_collisdeterministic), "f") == 0)
 		appendPQExpBufferStr(q, ", deterministic = false");
 
-	if (colliculocale != NULL)
+	if (collprovider[0] == 'd')
 	{
-		appendPQExpBufferStr(q, ", locale = ");
-		appendStringLiteralAH(q, colliculocale, fout);
-	}
-	else
-	{
-		Assert(collcollate != NULL);
-		Assert(collctype != NULL);
+		if (collcollate || collctype || colliculocale)
+			pg_log_warning("invalid collation \"%s\"", qcollname);
 
-		if (strcmp(collcollate, collctype) == 0)
+		/* no locale -- the default collation cannot be reloaded anyway */
+	}
+	else if (collprovider[0] == 'i')
+	{
+		if (fout->remoteVersion >= 150000)
+		{
+			if (collcollate || collctype || !colliculocale)
+				pg_log_warning("invalid collation \"%s\"", qcollname);
+
+			appendPQExpBufferStr(q, ", locale = ");
+			appendStringLiteralAH(q, colliculocale ? colliculocale : "",
+								  fout);
+		}
+		else
+		{
+			if (!collcollate || !collctype || colliculocale ||
+				strcmp(collcollate, collctype) != 0)
+				pg_log_warning("invalid collation \"%s\"", qcollname);
+
+			appendPQExpBufferStr(q, ", locale = ");
+			appendStringLiteralAH(q, collcollate ? collcollate : "", fout);
+		}
+	}
+	else if (collprovider[0] == 'c')
+	{
+		if (colliculocale || !collcollate || !collctype)
+			pg_log_warning("invalid collation \"%s\"", qcollname);
+
+		if (collcollate && collctype && strcmp(collcollate, collctype) == 0)
 		{
 			appendPQExpBufferStr(q, ", locale = ");
-			appendStringLiteralAH(q, collcollate, fout);
+			appendStringLiteralAH(q, collcollate ? collcollate : "", fout);
 		}
 		else
 		{
 			appendPQExpBufferStr(q, ", lc_collate = ");
-			appendStringLiteralAH(q, collcollate, fout);
+			appendStringLiteralAH(q, collcollate ? collcollate : "", fout);
 			appendPQExpBufferStr(q, ", lc_ctype = ");
-			appendStringLiteralAH(q, collctype, fout);
+			appendStringLiteralAH(q, collctype ? collctype : "", fout);
 		}
 	}
+	else
+		pg_fatal("unrecognized collation provider '%c'", collprovider[0]);
 
 	/*
 	 * For binary upgrade, carry over the collation version.  For normal
@@ -14691,6 +14735,7 @@ dumpDefaultACL(Archive *fout, const DefaultACLInfo *daclinfo)
  * 'type' must be one of
  *		TABLE, SEQUENCE, FUNCTION, LANGUAGE, SCHEMA, DATABASE, TABLESPACE,
  *		FOREIGN DATA WRAPPER, SERVER, or LARGE OBJECT.
+ *      Or for Yugabyte, TABLEGROUP.
  * 'name' is the formatted name of the object.  Must be quoted etc. already.
  * 'subname' is the formatted name of the sub-object, if any.  Must be quoted.
  *		(Currently we assume that subname is only provided for table columns.)
@@ -14719,6 +14764,16 @@ dumpACL(Archive *fout, DumpId objDumpId, DumpId altDumpId,
 
 	/* Do nothing if ACL dump is not enabled */
 	if (dopt->aclsSkip)
+		return InvalidDumpId;
+
+	/*
+	 * YB_TODO: Fix with extension upgrade. pg_stat_statements_reset() gained
+	 * parameters between PG11 and PG15, so without this, the restore fails
+	 * with:
+	 * ERROR:  function pg_catalog.pg_stat_statements_reset() does not exist
+	 */
+	if (IsYugabyteEnabled && dopt->binary_upgrade &&
+		strcmp(name, "\"pg_stat_statements_reset\"()") == 0)
 		return InvalidDumpId;
 
 	/* --data-only skips ACLs *except* BLOB ACLs */
@@ -14787,17 +14842,11 @@ dumpACL(Archive *fout, DumpId objDumpId, DumpId altDumpId,
 		else
 			appendPQExpBuffer(tag, "%s %s", type, name);
 
-		if (dopt->include_yb_metadata || dopt->binary_upgrade)
-			yb_use_roles_sql = createPQExpBuffer();
-		/*
-		 * YB_TODO: \if is a psql meta-command and doesn't work with pg_restore,
-		 * for the dopt->binary_upgrade == true case. For now in the
-		 * dopt->binary_upgrade == true case, emit an empty statement. When we
-		 * implement restoration of global objects including roles, we will
-		 * probably want to set an ACL correctly.
-		 */
 		if (dopt->include_yb_metadata)
+		{
+			yb_use_roles_sql = createPQExpBuffer();
 			appendPQExpBuffer(yb_use_roles_sql, "\\if :use_roles\n%s\\endif\n", sql->data);
+		}
 
 		aclDeps[nDeps++] = objDumpId;
 		if (altDumpId != InvalidDumpId)
@@ -14811,12 +14860,12 @@ dumpACL(Archive *fout, DumpId objDumpId, DumpId altDumpId,
 								  .owner = owner,
 								  .description = "ACL",
 								  .section = SECTION_NONE,
-								  .createStmt = ((dopt->include_yb_metadata || dopt->binary_upgrade) ?
+								  .createStmt = (dopt->include_yb_metadata ?
 												 yb_use_roles_sql->data :
 												 sql->data),
 								  .deps = aclDeps,
 								  .nDeps = nDeps));
-		if (dopt->include_yb_metadata || dopt->binary_upgrade)
+		if (dopt->include_yb_metadata)
 			destroyPQExpBuffer(yb_use_roles_sql);
 
 		destroyPQExpBuffer(tag);
@@ -15408,10 +15457,10 @@ dumpTablegroup(Archive *fout, const TablegroupInfo *tginfo)
 
 	/*
 	 * Do nothing, if the dumped database is a colocated database
-	 * or if include_yb_metadata is not supplied
+	 * or if include_yb_metadata/binary_upgrade is not supplied
 	 * or if --no-tablegroups or --no-tablegroup-creation is supplied.
 	 */
-	if (is_colocated_database || !dopt->include_yb_metadata
+	if (is_colocated_database || !(dopt->include_yb_metadata || dopt->binary_upgrade)
 		|| dopt->no_tablegroups || dopt->no_tablegroup_creations)
 		return;
 
@@ -15465,7 +15514,7 @@ dumpTablegroup(Archive *fout, const TablegroupInfo *tginfo)
 								  .dumpArg = NULL));				/* Dumper Arg */
 
 	if (tginfo->dobj.dump & DUMP_COMPONENT_ACL)
-		dumpACL(fout, tginfo->dobj.dumpId, InvalidDumpId, "LARGE OBJECT",
+		dumpACL(fout, tginfo->dobj.dumpId, InvalidDumpId, "TABLEGROUP",
 				tginfo->dobj.name, NULL, NULL, tginfo->rolname, &tginfo->dacl);
 
 	destroyPQExpBuffer(q);
@@ -15645,7 +15694,7 @@ dumpTableSchema(Archive *fout, const TableInfo *tbinfo)
 
 		/* Get the table properties from YB, if relevant. */
 		YbTableProperties yb_properties = NULL;
-		if (dopt->include_yb_metadata &&
+		if ((dopt->include_yb_metadata || dopt->binary_upgrade) &&
 			(tbinfo->relkind == RELKIND_RELATION || tbinfo->relkind == RELKIND_INDEX
 			 || tbinfo->relkind == RELKIND_MATVIEW || tbinfo->relkind == RELKIND_PARTITIONED_TABLE))
 		{
@@ -15661,12 +15710,9 @@ dumpTableSchema(Archive *fout, const TableInfo *tbinfo)
 		 */
 		if (is_colocated_database && !is_legacy_colocated_database
 			&& (tbinfo->relkind == RELKIND_RELATION || tbinfo->relkind == RELKIND_MATVIEW
-				|| tbinfo->relkind == RELKIND_PARTITIONED_TABLE)
-			&& yb_properties && yb_properties->is_colocated
-			&& (!simple_string_list_member(&colocated_database_tablespaces, tbinfo->reltablespace)
-			|| dopt->outputNoTablespaces))
+				|| tbinfo->relkind == RELKIND_PARTITIONED_TABLE) && yb_properties
+			&& yb_properties->is_colocated)
 		{
-			simple_string_list_append(&colocated_database_tablespaces, tbinfo->reltablespace);
 			/*
 			 * Set the next implicit tablegroup oid in a colocated database.
 			 * It's mandatory to reuse the old tablegroup oid to match tablegroup parent table
@@ -15677,15 +15723,13 @@ dumpTableSchema(Archive *fout, const TableInfo *tbinfo)
 			appendPQExpBuffer(q,
 							  "SELECT pg_catalog.binary_upgrade_set_next_tablegroup_oid('%u'::pg_catalog.oid);\n",
 							  yb_properties->tablegroup_oid);
-			if (dopt->outputNoTablespaces)
+
+			if(strcmp(yb_properties->tablegroup_name, "default") == 0)
 			{
-				if(strcmp(yb_properties->tablegroup_name, "default") == 0)
-				{
-					appendPQExpBufferStr(q,
-									"\n-- For YB colocation backup without tablespace information, must preserve default tablegroup tables\n");
-					appendPQExpBuffer(q,
-						"SELECT pg_catalog.binary_upgrade_set_next_tablegroup_default(true);\n");
-				}
+				appendPQExpBufferStr(q,
+									 "\n-- For YB colocation backup without tablespace information, must preserve default tablegroup tables\n");
+				appendPQExpBuffer(q,
+								  "SELECT pg_catalog.binary_upgrade_set_next_tablegroup_default(true);\n");
 			}
 		}
 
@@ -15956,7 +16000,8 @@ dumpTableSchema(Archive *fout, const TableInfo *tbinfo)
 			}
 			/* else - single shard table - supported, no need to add anything */
 
-			if (!is_colocated_database && !dopt->no_tablegroups && dopt->include_yb_metadata &&
+			if (!is_colocated_database && !dopt->no_tablegroups &&
+				(dopt->include_yb_metadata || dopt->binary_upgrade) &&
 				OidIsValid(yb_properties->tablegroup_oid))
 			{
 				TablegroupInfo *tablegroup = findTablegroupByOid(yb_properties->tablegroup_oid);
@@ -16641,7 +16686,7 @@ dumpIndex(Archive *fout, const IndxInfo *indxinfo)
 			binary_upgrade_set_pg_class_oids(fout, q,
 											 indxinfo->dobj.catId.oid, true);
 
-		if (dopt->outputNoTablespaces && is_colocated_database && !is_legacy_colocated_database)
+		if (is_colocated_database && !is_legacy_colocated_database)
 		{
 			YbTableProperties yb_properties;
 			yb_properties = (YbTableProperties) pg_malloc(sizeof(YbTablePropertiesData));

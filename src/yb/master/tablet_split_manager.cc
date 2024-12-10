@@ -21,6 +21,7 @@
 
 #include "yb/gutil/casts.h"
 #include "yb/gutil/map-util.h"
+#include "yb/gutil/strings/human_readable.h"
 
 #include "yb/dockv/partition.h"
 #include "yb/common/schema.h"
@@ -235,11 +236,10 @@ Status TabletSplitManager::ValidateSplitCandidateTable(
           NotSupported, "Table is deleted; ignoring for splitting. table_id: $0", table->id());
     }
 
-    if (l->is_index() && l->pb.index_info().has_vector_idx_options() &&
-        l->pb.index_info().vector_idx_options().idx_type() == PgVectorIndexType::DUMMY) {
+    if (l->is_index() && l->pb.index_info().has_vector_idx_options()) {
       return STATUS_FORMAT(
           NotSupported,
-          "Tablet splitting is not supported for dummy vector index tables, table_id: $0",
+          "Tablet splitting is not supported for vector index tables, table_id: $0",
           table->id());
     }
   }
@@ -510,14 +510,13 @@ Status AllReplicasHaveFinishedCompaction(const TabletReplicaMap& replicas) {
 Status CheckLiveReplicasForSplit(
     const TabletId& tablet_id, const TabletReplicaMap& replicas, size_t rf) {
   size_t live_replicas = 0;
-  for (const auto& pair : replicas) {
-    const auto& replica = pair.second;
+  for (const auto& [ts_uuid, replica] : replicas) {
     if (replica.member_type == consensus::PRE_VOTER) {
       return STATUS_FORMAT(NotSupported,
                            "One tablet peer is doing RBS as PRE_VOTER, "
                            "tablet_id: $1, peer_uuid: $2, current RAFT state: $3",
-                            tablet_id, pair.second.ts_desc->permanent_uuid(),
-                            RaftGroupStatePB_Name(pair.second.state));
+                            tablet_id, ts_uuid,
+                            RaftGroupStatePB_Name(replica.state));
     }
     if (replica.member_type == consensus::VOTER) {
       live_replicas++;
@@ -525,8 +524,8 @@ Status CheckLiveReplicasForSplit(
         return STATUS_FORMAT(NotSupported,
                              "At least one tablet peer not running, "
                              "tablet_id: $0, peer_uuid: $1, current RAFT state: $2",
-                             tablet_id, pair.second.ts_desc->permanent_uuid(),
-                             RaftGroupStatePB_Name(pair.second.state));
+                             tablet_id, ts_uuid,
+                             RaftGroupStatePB_Name(replica.state));
       }
     }
   }
@@ -679,7 +678,12 @@ class OutstandingSplitState {
   }
 
   void ProcessCandidates() {
-    VLOG(2) << Format("Processing $0 split candidates.", new_split_candidates_.size());
+    if (VLOG_IS_ON(4)) {
+      VLOG(4) << Format("Processing split candidates: $0", new_split_candidates_);
+    } else {
+      VLOG(2) << Format("Processing $0 split candidates", new_split_candidates_.size());
+    }
+
     // Add any new splits to the set of splits to schedule (while respecting the max number of
     // outstanding splits).
     if (!CanSplitMoreGlobal()) {
@@ -687,11 +691,19 @@ class OutstandingSplitState {
     }
 
     if (FLAGS_sort_automatic_tablet_splitting_candidates) {
-      auto threshold = FLAGS_tablet_split_min_size_ratio * largest_candidate_size_;
-      VLOG(3) << "Filtering out candidates smaller than " << threshold;
+      auto threshold = static_cast<uint64_t>(
+          FLAGS_tablet_split_min_size_ratio * largest_candidate_size_);
+      VLOG(3) << "Filtering out candidates smaller than "
+              << HumanReadableNumBytes::ToString(threshold);
       std::erase_if(
           new_split_candidates_,
-          [threshold](const auto& candidate) { return candidate.leader_sst_size < threshold; });
+          [threshold](const auto& candidate) {
+        if (candidate.leader_sst_size < threshold) {
+          VLOG(4) << "Rejected: " << candidate.ToString();
+          return true;
+        }
+        return false;
+      });
       sort(new_split_candidates_.begin(), new_split_candidates_.end(), LargestTabletFirst);
     }
     for (const auto& candidate : new_split_candidates_) {
@@ -725,6 +737,10 @@ class OutstandingSplitState {
   struct SplitCandidate {
     TabletInfoPtr tablet;
     uint64_t leader_sst_size;
+
+    std::string ToString() const {
+      return YB_STRUCT_TO_STRING(tablet, leader_sst_size);
+    }
   };
   // New split candidates. The chosen candidates are eventually added to splits_to_schedule.
   std::vector<SplitCandidate> new_split_candidates_;
@@ -744,7 +760,7 @@ class OutstandingSplitState {
 
   void TrackTserverSplits(const TabletId& tablet_id, const TabletReplicaMap& split_replicas) {
     for (const auto& location : split_replicas) {
-      VLOG(4) << Format("Tracking location $0 for split of tablet $1", location.first, tablet_id);
+      VLOG(4) << Format("Tracking location T $1 P $0", location.first, tablet_id);
       ts_to_ongoing_splits_[location.first].insert(tablet_id);
     }
   }

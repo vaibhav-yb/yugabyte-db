@@ -78,14 +78,13 @@ def main() -> None:
             metadata_items=metadata_items,
             os_type=args.os_type,
             architecture=args.architecture,
-            is_linuxbrew=args.is_linuxbrew,
             lto=args.lto,
             allow_older_os=args.allow_older_os)
         for compiler in compiler_list:
             print(compiler)
         return
 
-    if args.save_thirdparty_url_to_file:
+    if args.save_thirdparty_url_to_file or args.save_thirdparty_checksum_url_to_file:
         if not args.compiler_type:
             raise ValueError("Compiler type not specified")
 
@@ -94,7 +93,6 @@ def main() -> None:
             compiler_type=args.compiler_type,
             os_type=args.os_type,
             architecture=args.architecture,
-            is_linuxbrew=args.is_linuxbrew,
             lto=args.lto,
             allow_older_os=args.allow_older_os)
 
@@ -104,6 +102,13 @@ def main() -> None:
             make_parent_dir(args.save_thirdparty_url_to_file)
             write_file(content=thirdparty_url,
                        output_file_path=args.save_thirdparty_url_to_file)
+
+        thirdparty_checksum_url = thirdparty_release.checksum_url()
+        logging.info(f"Checksum URL for the third-party dependencies: {thirdparty_checksum_url}")
+        if args.save_thirdparty_checksum_url_to_file:
+            make_parent_dir(args.save_thirdparty_checksum_url_to_file)
+            write_file(content=thirdparty_checksum_url,
+                       output_file_path=args.save_thirdparty_checksum_url_to_file)
 
 
 if __name__ == '__main__':

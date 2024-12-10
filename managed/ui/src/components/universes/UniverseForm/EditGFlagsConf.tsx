@@ -133,7 +133,7 @@ export const EditGFlagsConf: FC<EditGFlagConfProps> = ({
   const isOIDCSupported = versionDifference >= 0;
 
   if (isNonEmptyString(flagValue) && !GFlagValueConfObject) {
-    unformattedLDAPConf = unformatConf(flagValue);
+    unformattedLDAPConf = unformatConf(formProps?.values, flagValue);
   }
 
   const [flagName, setFlagName] = useState<string>(formProps?.values?.flagname);
@@ -164,11 +164,13 @@ export const EditGFlagsConf: FC<EditGFlagConfProps> = ({
   }, [formProps?.values?.flagname]);
 
   const getPlaceholder = (index: number, flagName: string) => {
+    let message = CONST_VALUES.EMPTY_STRING;
     if (flagName === MultilineGFlags.YSQL_IDENT_CONF_CSV) {
       return 'universeForm.gFlags.identConfLocal';
+    } else if (flagName === MultilineGFlags.YSQL_PG_CONF_CSV) {
+      return message;
     }
 
-    let message = CONST_VALUES.EMPTY_STRING;
     switch (index) {
       case 0:
         message = 'universeForm.gFlags.hbaLDAPConfLocal';
@@ -391,6 +393,7 @@ export const EditGFlagsConf: FC<EditGFlagConfProps> = ({
                                       ? GFlagRows[index].content
                                       : CONST_VALUES.EMPTY_STRING
                                   }
+                                  disabled={item?.disabled}
                                   onChange={(e: any) => handleChange(e.target.value, index)}
                                   error={GFlagRows[index]?.error}
                                   helperText={t(GFlagRows[index].errorMessageKey!)}

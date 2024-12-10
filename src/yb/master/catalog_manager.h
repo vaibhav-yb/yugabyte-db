@@ -2098,7 +2098,7 @@ class CatalogManager : public CatalogManagerIf, public SnapshotCoordinatorContex
   void ResetTasksTrackers();
   // Aborts all tasks belonging to 'tables' and waits for them to finish.
   void AbortAndWaitForAllTasks() EXCLUDES(mutex_);
-  void AbortAndWaitForAllTasksUnlocked() REQUIRES_SHARED(mutex_);
+  void AbortAndWaitForAllTasksUnlocked(bool call_task_finisher) REQUIRES_SHARED(mutex_);
 
   // Can be used to create background_tasks_ field for this master.
   // Used on normal master startup or when master comes out of the shell mode.
@@ -2162,7 +2162,8 @@ class CatalogManager : public CatalogManagerIf, public SnapshotCoordinatorContex
   // Is this table part of xCluster or CDCSDK?
   bool IsTablePartOfXRepl(const TableId& table_id) const REQUIRES_SHARED(mutex_);
 
-  bool IsTablePartOfCDCSDK(const TableId& table_id) const REQUIRES_SHARED(mutex_);
+  bool IsTablePartOfCDCSDK(const TableId& table_id, bool require_replication_slot = false) const
+      REQUIRES_SHARED(mutex_);
 
   bool IsPitrActive();
 

@@ -501,6 +501,10 @@ DEFINE_RUNTIME_bool(enable_tablet_split_of_cdcsdk_streamed_tables, true,
     "When set, it enables automatic tablet splitting for tables that are part of a "
     "CDCSDK stream");
 
+DEFINE_RUNTIME_bool(enable_tablet_split_of_replication_slot_streamed_tables, false,
+    "When set, it enables automatic tablet splitting for tables that are part of replication "
+    "slot's stream metadata");
+
 METRIC_DEFINE_gauge_uint32(cluster, num_tablet_servers_live,
                            "Number of live tservers in the cluster", yb::MetricUnit::kUnits,
                            "The number of tablet servers that have responded or done a heartbeat "
@@ -1301,7 +1305,17 @@ Status CatalogManager::VisitSysCatalog(SysCatalogLoadingState* state) {
 
     // Abort any outstanding tasks. All CatalogEntities are orphaned below, so
     // it's important to end their tasks now.
-    AbortAndWaitForAllTasksUnlocked();
+    //
+    // N.B. This doesn't actually wait for anything at all.
+    // See https://github.com/yugabyte/yugabyte-db/issues/18634
+    //
+    // The async task framework provides a hook, the Finished method, for subclasses to perform
+    // additional actions when the task has finished its main work. This method is also called when
+    // a task is aborted. Some tasks ie. tablet snapshot tasks call catalog manager methods that
+    // acquire the mutex_. Because we don't use reentrant mutexes this deadlocks the server. So we
+    // pass a boolean parameter here to the async task framework to skip calling the Finished
+    // method.
+    AbortAndWaitForAllTasksUnlocked(/* call_task_finisher */ false);
 
     if (FLAGS_enable_ysql) {
       // Number of TS to wait for before creating the txn table.
@@ -3104,6 +3118,15 @@ Status CatalogManager::XReplValidateSplitCandidateTableUnlocked(const TableId& t
         " a CDCSDK stream, table_id: $0",
         table_id);
   }
+
+  if (!FLAGS_enable_tablet_split_of_replication_slot_streamed_tables &&
+      IsTablePartOfCDCSDK(table_id, true /* require_replication_slot */)) {
+    return STATUS_FORMAT(
+        NotSupported,
+        "Tablet splitting is not supported for tables that are a part of a replication slot, "
+        "table_id: $0",
+        table_id);
+  }
   return Status::OK();
 }
 
@@ -4148,6 +4171,12 @@ Status CatalogManager::CreateTable(const CreateTableRequestPB* orig_req,
         // Adding a table to an existing colocation tablet.
         if (is_vector_index) {
           tablets = VERIFY_RESULT(indexed_table->GetTablets());
+          auto options = req.index_info().vector_idx_options();
+          if (options.idx_type() != PgVectorIndexType::DUMMY &&
+              tablets.size() != 1) {
+            return STATUS(InvalidArgument,
+              "Copartitioned vector index must have only one tablet for now.");
+          }
         } else {
           auto tablet = tablegroup ?
               tablegroup->tablet() :
@@ -12237,13 +12266,14 @@ void CatalogManager::AbortAndWaitForAllTasks() {
     tables = std::vector(std::begin(tables_it), std::end(tables_it));
     namespaces = namespace_names_mapper_.GetAll();
   }
-  CatalogEntityWithTasks::CloseAbortAndWaitForAllTasks(tables);
-  CatalogEntityWithTasks::CloseAbortAndWaitForAllTasks(namespaces);
+  CatalogEntityWithTasks::CloseAbortAndWaitForAllTasks(tables, /* call_task_finisher */ true);
+  CatalogEntityWithTasks::CloseAbortAndWaitForAllTasks(namespaces, /* call_task_finisher*/ true);
 }
 
-void CatalogManager::AbortAndWaitForAllTasksUnlocked() {
-  CatalogEntityWithTasks::CloseAbortAndWaitForAllTasks(tables_->GetAllTables());
-  CatalogEntityWithTasks::CloseAbortAndWaitForAllTasks(namespace_names_mapper_.GetAll());
+void CatalogManager::AbortAndWaitForAllTasksUnlocked(bool call_task_finisher) {
+  CatalogEntityWithTasks::CloseAbortAndWaitForAllTasks(tables_->GetAllTables(), call_task_finisher);
+  CatalogEntityWithTasks::CloseAbortAndWaitForAllTasks(
+      namespace_names_mapper_.GetAll(), call_task_finisher);
 }
 
 void CatalogManager::HandleNewTableId(const TableId& table_id) {
@@ -12262,7 +12292,7 @@ Status CatalogManager::ScheduleTask(std::shared_ptr<server::RunnableMonitoredTas
   // If we are not able to enqueue, abort the task.
   if (!s.ok()) {
     RETURN_NOT_OK(task->OnSubmitFailure());
-    task->AbortAndReturnPrevState(s);
+    task->AbortAndReturnPrevState(s, /* call_task_finisher */ true);
   }
   return s;
 }

@@ -976,7 +976,7 @@ CreateReplicationSlot(CreateReplicationSlotCmd *cmd)
 			 */
 			ReplicationSlotCreate(cmd->slotname, true,
 								  cmd->temporary ? RS_TEMPORARY : RS_EPHEMERAL,
-								  cmd->plugin, snapshot_action, NULL);
+								  cmd->plugin, snapshot_action, NULL, lsn_type);
 		}
 	}
 

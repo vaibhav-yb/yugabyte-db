@@ -74,7 +74,7 @@ pg_create_physical_replication_slot(PG_FUNCTION_ARGS)
 	ReplicationSlotCreate(NameStr(*name), false,
 						  temporary ? RS_TEMPORARY : RS_PERSISTENT,
 						  NULL /* yb_plugin_name */, CRS_NOEXPORT_SNAPSHOT,
-						  NULL);
+						  NULL, CRS_SEQUENCE);
 
 	values[0] = NameGetDatum(&MyReplicationSlot->data.name);
 	nulls[0] = false;
@@ -181,7 +181,8 @@ pg_create_logical_replication_slot(PG_FUNCTION_ARGS)
 	 */
 	ReplicationSlotCreate(NameStr(*name), true,
 						  temporary ? RS_TEMPORARY : RS_EPHEMERAL,
-						  NameStr(*plugin), CRS_NOEXPORT_SNAPSHOT, NULL, yb_lsn_type);
+						  NameStr(*plugin), CRS_NOEXPORT_SNAPSHOT, NULL,
+						  YBParseLsnType(yb_lsn_type));
 
 	memset(nulls, 0, sizeof(nulls));
 

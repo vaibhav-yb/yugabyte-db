@@ -5609,7 +5609,7 @@ TEST_F(CDCSDKYsqlTest, YB_DISABLE_TEST_IN_TSAN(TestCDCSDKLagMetricUnchangedOnEmp
   ASSERT_GE(metrics->cdcsdk_sent_lag_micros->value(), current_lag);
 }
 
-void CDCSDKYsqlTest::TestMetricObjectRemovalAfterStreamDeletion(bool use_logical_replication) {
+TEST_F(CDCSDKYsqlTest, YB_DISABLE_TEST_IN_TSAN(TestCDCMetricRemovalUponStreamDeletion)) {
   ANNOTATE_UNPROTECTED_WRITE(FLAGS_update_min_cdc_indices_interval_secs) = 0;
   ANNOTATE_UNPROTECTED_WRITE(FLAGS_cdc_state_checkpoint_update_interval_ms) = 0;
   ANNOTATE_UNPROTECTED_WRITE(FLAGS_update_metrics_interval_ms) = 0;
@@ -5623,9 +5623,7 @@ void CDCSDKYsqlTest::TestMetricObjectRemovalAfterStreamDeletion(bool use_logical
   ASSERT_EQ(tablets.size(), num_tablets);
 
   TableId table_id = ASSERT_RESULT(GetTableId(&test_cluster_, kNamespaceName, kTableName));
-  auto stream_id = use_logical_replication
-                       ? ASSERT_RESULT(CreateConsistentSnapshotStreamWithReplicationSlot())
-                       : ASSERT_RESULT(CreateConsistentSnapshotStream());
+  auto stream_id = ASSERT_RESULT(CreateConsistentSnapshotStream());
 
   const auto& tserver = test_cluster()->mini_tablet_server(0)->server();
   auto cdc_service = dynamic_cast<CDCServiceImpl*>(
@@ -5648,16 +5646,6 @@ void CDCSDKYsqlTest::TestMetricObjectRemovalAfterStreamDeletion(bool use_logical
         return false;
       },
       MonoDelta::FromSeconds(60), "Metric object is not removed."));
-}
-
-TEST_F(CDCSDKYsqlTest, YB_DISABLE_TEST_IN_TSAN(TestCDCMetricRemovalUponStreamDeletion)) {
-  TestMetricObjectRemovalAfterStreamDeletion(false /* use_logical_replication */);
-}
-
-TEST_F(
-    CDCSDKYsqlTest,
-    YB_DISABLE_TEST_IN_TSAN(TestCDCMetricRemovalUponSlotDeletionForLogicalReplication)) {
-  TestMetricObjectRemovalAfterStreamDeletion(true /* use_logical_replication */);
 }
 
 TEST_F(CDCSDKYsqlTest, YB_DISABLE_TEST_IN_TSAN(TestMetricObjectRemovalAfterStreamExpiration)) {

@@ -5630,16 +5630,20 @@ TEST_F(CDCSDKYsqlTest, YB_DISABLE_TEST_IN_TSAN(TestCDCMetricRemovalUponStreamDel
       tserver->rpc_server()->TEST_service_pool("yb.cdc.CDCService")->TEST_get_service().get());
 
   // Retrieve the metrics object, a successful retrieval will proceed without any errors here.
-  auto metrics = ASSERT_RESULT(GetCDCSDKTabletMetrics(
-      *cdc_service, tablets[0].tablet_id(), stream_id, CreateCDCMetricsEntity::kFalse));
+  auto metrics =
+      std::static_pointer_cast<cdc::CDCSDKTabletMetrics>(cdc_service->GetCDCTabletMetrics(
+          {{}, stream_id, tablets[0].tablet_id()},
+          /* tablet_peer */ nullptr, CDCSDK, CreateCDCMetricsEntity::kFalse));
 
   // Delete the stream now.
   ASSERT_EQ(DeleteCDCStream(stream_id), true);
 
   ASSERT_OK(WaitFor(
       [&]() {
-        auto result = GetCDCSDKTabletMetrics(
-            *cdc_service, tablets[0].tablet_id(), stream_id, CreateCDCMetricsEntity::kFalse);
+        auto result =
+            std::static_pointer_cast<cdc::CDCSDKTabletMetrics>(cdc_service->GetCDCTabletMetrics(
+                {{}, stream_id, tablets[0].tablet_id()},
+                /* tablet_peer */ nullptr, CDCSDK, CreateCDCMetricsEntity::kFalse));
         if (!result.ok()) {
           return true;
         }
@@ -5687,8 +5691,10 @@ TEST_F(CDCSDKYsqlTest, YB_DISABLE_TEST_IN_TSAN(TestMetricObjectRemovalAfterStrea
   // Wait for entry deletion.
   ASSERT_OK(WaitFor(
       [&]() {
-        auto result = GetCDCSDKTabletMetrics(
-            *cdc_service, tablets[0].tablet_id(), stream_id, CreateCDCMetricsEntity::kFalse);
+        auto result =
+            std::static_pointer_cast<cdc::CDCSDKTabletMetrics>(cdc_service->GetCDCTabletMetrics(
+                {{}, stream_id, tablets[0].tablet_id()},
+                /* tablet_peer */ nullptr, CDCSDK, CreateCDCMetricsEntity::kFalse));
         if (!result.ok()) {
           return true;
         }

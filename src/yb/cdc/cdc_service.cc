@@ -2954,7 +2954,7 @@ Status CDCServiceImpl::DeleteCDCStateTableMetadata(
       LOG(INFO) << "CDC state table entry for tablet " << tablet_id << " and streamid " << stream_id
                 << " is deleted";
 
-      RemoveXReplTabletMetrics(stream_id, *tablet_peer_result);
+      RemoveCDCTabletMetrics({{}, stream_id, tablet_id}, *tablet_peer_result);
       LOG(INFO) << "Metric object for CDC state table entry for tablet " << tablet_id
                 << " and streamid " << stream_id << " is deleted";
     }

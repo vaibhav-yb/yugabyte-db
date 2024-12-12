@@ -5628,11 +5628,12 @@ void CDCSDKYsqlTest::TestMetricObjectRemovalAfterStreamDeletion(bool use_logical
                        : ASSERT_RESULT(CreateConsistentSnapshotStream());
 
   const auto& tserver = test_cluster()->mini_tablet_server(0)->server();
-  auto cdc_service = CDCService(tserver);
+  auto cdc_service = dynamic_cast<CDCServiceImpl*>(
+      tserver->rpc_server()->TEST_service_pool("yb.cdc.CDCService")->TEST_get_service().get());
 
   // Retrieve the metrics object, a successful retrieval will proceed without any errors here.
   auto metrics = ASSERT_RESULT(GetCDCSDKTabletMetrics(
-      *cdc_service, tablets[0].tablet_id(), stream_id, CreateMetricsEntityIfNotFound::kFalse));
+      *cdc_service, tablets[0].tablet_id(), stream_id, CreateCDCMetricsEntity::kFalse));
 
   // Delete the stream now.
   ASSERT_EQ(DeleteCDCStream(stream_id), true);
@@ -5640,7 +5641,7 @@ void CDCSDKYsqlTest::TestMetricObjectRemovalAfterStreamDeletion(bool use_logical
   ASSERT_OK(WaitFor(
       [&]() {
         auto result = GetCDCSDKTabletMetrics(
-            *cdc_service, tablets[0].tablet_id(), stream_id, CreateMetricsEntityIfNotFound::kFalse);
+            *cdc_service, tablets[0].tablet_id(), stream_id, CreateCDCMetricsEntity::kFalse);
         if (!result.ok()) {
           return true;
         }
@@ -5680,7 +5681,8 @@ TEST_F(CDCSDKYsqlTest, YB_DISABLE_TEST_IN_TSAN(TestMetricObjectRemovalAfterStrea
   ASSERT_EQ(ASSERT_RESULT(GetStateTableRowCount()), 1);
 
   const auto& tserver = test_cluster()->mini_tablet_server(0)->server();
-  auto cdc_service = CDCService(tserver);
+  auto cdc_service = dynamic_cast<CDCServiceImpl*>(
+      tserver->rpc_server()->TEST_service_pool("yb.cdc.CDCService")->TEST_get_service().get());
 
   auto get_changes_result = GetChangesFromCDC(stream_id, tablets);
 
@@ -5698,7 +5700,7 @@ TEST_F(CDCSDKYsqlTest, YB_DISABLE_TEST_IN_TSAN(TestMetricObjectRemovalAfterStrea
   ASSERT_OK(WaitFor(
       [&]() {
         auto result = GetCDCSDKTabletMetrics(
-            *cdc_service, tablets[0].tablet_id(), stream_id, CreateMetricsEntityIfNotFound::kFalse);
+            *cdc_service, tablets[0].tablet_id(), stream_id, CreateCDCMetricsEntity::kFalse);
         if (!result.ok()) {
           return true;
         }

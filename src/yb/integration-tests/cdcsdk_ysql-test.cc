@@ -5644,10 +5644,7 @@ TEST_F(CDCSDKYsqlTest, YB_DISABLE_TEST_IN_TSAN(TestCDCMetricRemovalUponStreamDel
             std::static_pointer_cast<cdc::CDCSDKTabletMetrics>(cdc_service->GetCDCTabletMetrics(
                 {{}, stream_id, tablets[0].tablet_id()},
                 /* tablet_peer */ nullptr, CDCSDK, CreateCDCMetricsEntity::kFalse));
-        if (!result.ok()) {
-          return true;
-        }
-        return false;
+        return result == nullptr;
       },
       MonoDelta::FromSeconds(60), "Metric object is not removed."));
 }
@@ -5695,10 +5692,7 @@ TEST_F(CDCSDKYsqlTest, YB_DISABLE_TEST_IN_TSAN(TestMetricObjectRemovalAfterStrea
             std::static_pointer_cast<cdc::CDCSDKTabletMetrics>(cdc_service->GetCDCTabletMetrics(
                 {{}, stream_id, tablets[0].tablet_id()},
                 /* tablet_peer */ nullptr, CDCSDK, CreateCDCMetricsEntity::kFalse));
-        if (!result.ok()) {
-          return true;
-        }
-        return false;
+        return result == nullptr;
       },
       MonoDelta::FromSeconds(60), "Metric object is not removed."));
 }

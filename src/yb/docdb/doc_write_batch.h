@@ -68,10 +68,18 @@ class ValueRef {
         value_type_(dockv::ValueEntryType::kInvalid) {
   }
 
+  // TODO(AR) the following members are not initialized: value_type_, sorting_type_,
+  //          write_instruction_, list_extend_order_.
   explicit ValueRef(dockv::ValueEntryType key_entry_type);
 
+  // TODO(AR) the following members are not initialized: value_pb_, value_type_, sorting_type_,
+  //          write_instruction_, list_extend_order_.
   explicit ValueRef(std::reference_wrapper<const Slice> encoded_value)
       : encoded_value_(&encoded_value.get()) {}
+
+  // TODO(AR) the following members are not initialized: write_instruction_, list_extend_order_.
+  explicit ValueRef(std::reference_wrapper<const dockv::DocVectorValue> vector_value,
+                    SortingType sorting_type = SortingType::kNotSpecified);
 
   const QLValuePB& value_pb() const {
     return *value_pb_;
@@ -113,6 +121,10 @@ class ValueRef {
     return encoded_value_;
   }
 
+  const dockv::DocVectorValue* vector_value() const {
+    return vector_value_;
+  }
+
   bool is_array() const;
 
   bool is_set() const;
@@ -132,6 +144,7 @@ class ValueRef {
   dockv::ListExtendOrder list_extend_order_;
   dockv::ValueEntryType value_type_;
   const Slice* encoded_value_ = nullptr;
+  const dockv::DocVectorValue* vector_value_ = nullptr;
 };
 
 // This controls whether "init markers" are required at all intermediate levels.
@@ -262,6 +275,7 @@ class DocWriteBatch {
     return put_batch_;
   }
 
+  void MoveLocksToWriteBatchPB(LWKeyValueWriteBatchPB *kv_pb, bool is_lock) const;
   void MoveToWriteBatchPB(LWKeyValueWriteBatchPB *kv_pb) const;
 
   // This is used in tests when measuring the number of seeks that a given update to this batch

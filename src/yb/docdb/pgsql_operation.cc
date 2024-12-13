@@ -30,11 +30,13 @@
 #include "yb/common/ql_value.h"
 #include "yb/common/row_mark.h"
 
+#include "yb/common/transaction_error.h"
 #include "yb/docdb/doc_pg_expr.h"
 #include "yb/docdb/doc_pgsql_scanspec.h"
 #include "yb/docdb/doc_read_context.h"
 #include "yb/docdb/doc_rowwise_iterator.h"
 #include "yb/docdb/doc_write_batch.h"
+#include "yb/docdb/docdb.h"
 #include "yb/docdb/docdb.messages.h"
 #include "yb/docdb/docdb_debug.h"
 #include "yb/docdb/docdb_pgapi.h"
@@ -50,6 +52,7 @@
 #include "yb/dockv/pg_row.h"
 #include "yb/dockv/primitive_value_util.h"
 #include "yb/dockv/reader_projection.h"
+#include "yb/dockv/vector_id.h"
 
 #include "yb/gutil/macros.h"
 
@@ -855,10 +858,11 @@ class VectorIndexKeyProvider {
       auto vector_value = table_row.GetValueByIndex(indexed_column_index);
       RSTATUS_DCHECK(vector_value, Corruption, "Vector column ($0) missing in row: $1",
                      vector_index_.column_id(), table_row.ToString());
+      auto encoded_value = dockv::EncodedDocVectorValue::FromSlice(vector_value->binary_value());
       search_result_.push_back(VectorIndexSearchResultEntry {
         // TODO(vector_index) Avoid decoding vector_slice for each vector
         .encoded_distance = VERIFY_RESULT(vector_index_.Distance(
-            vector_slice_, vector_value->binary_value())),
+            vector_slice_, encoded_value.data)),
         .key = KeyBuffer(iterator.impl().GetTupleId()),
       });
     }
@@ -1155,19 +1159,32 @@ Status PgsqlWriteOperation::InsertColumn(
                     InvalidArgument, "Only values support during insert");
   const auto& value = column_value.expr().value();
 
-  if (!pack_context || !VERIFY_RESULT(pack_context->Add(column_id, value))) {
-    // Inserting into specified column.
-    DocPath sub_path(encoded_doc_key_.as_slice(), KeyEntryValue::MakeColumnId(column_id));
-    // If the column has a missing value, we don't want any null values that are inserted to be
-    // compacted away. So we store kNullLow instead of kTombstone.
-    RETURN_NOT_OK(data.doc_write_batch->InsertSubDocument(
-        sub_path,
-        IsNull(value) && !IsNull(column.missing_value()) ?
-            ValueRef(dockv::ValueEntryType::kNullLow) : ValueRef(value, column.sorting_type()),
-        data.read_operation_data, request_.stmt_id()));
+  if (!column.is_vector()) {
+    return DoInsertColumn(data, column_id, column, value, pack_context);
   }
 
-  return Status::OK();
+  dockv::DocVectorValue vector_value(value, vector_index::VectorId::GenerateRandom());
+  return DoInsertColumn(data, column_id, column, vector_value, pack_context);
+}
+
+template <class Value>
+Status PgsqlWriteOperation::DoInsertColumn(
+    const DocOperationApplyData& data, ColumnId column_id, const ColumnSchema& column,
+    Value&& value, RowPackContext* pack_context) {
+  if (pack_context && VERIFY_RESULT(pack_context->Add(column_id, value))) {
+    return Status::OK();
+  }
+
+  // Inserting into specified column.
+  DocPath sub_path(encoded_doc_key_.as_slice(), KeyEntryValue::MakeColumnId(column_id));
+
+  // If the column has a missing value, we don't want any null values that are inserted to be
+  // compacted away. So we store kNullLow instead of kTombstone.
+  return data.doc_write_batch->InsertSubDocument(
+      sub_path,
+      IsNull(value) && !IsNull(column.missing_value()) ?
+          ValueRef(dockv::ValueEntryType::kNullLow) : ValueRef(value, column.sorting_type()),
+      data.read_operation_data, request_.stmt_id());
 }
 
 Status PgsqlWriteOperation::ApplyInsert(const DocOperationApplyData& data, IsUpsert is_upsert) {
@@ -2060,8 +2077,6 @@ Result<std::tuple<size_t, bool>> PgsqlReadOperation::ExecuteVectorSearch(
   DummyANNFactory<FloatVector> ann_factory;
   auto ann_store = ann_factory.Create(ysql_query_vec->dim);
 
-  auto index_extraction_schema = Schema();
-  std::vector<ColumnSchema> indexed_column_ids;
   dockv::ReaderProjection index_doc_projection;
 
   auto key_col_id = doc_read_context.schema().column_id(0);
@@ -2088,14 +2103,15 @@ Result<std::tuple<size_t, bool>> PgsqlReadOperation::ExecuteVectorSearch(
     ++scanned_table_rows_;
     if (fetch_result == FetchResult::Found) {
       auto vec_value = row.GetValueByColumnId(vector_col_id);
-      if (!vec_value.has_value()) continue;
+      if (!vec_value.has_value()) {
+        continue;
+      }
+
       // Add the vector to the ANN store
-      auto vec = VERIFY_RESULT(VectorANN<FloatVector>::GetVectorFromYSQLWire(
-          *pointer_cast<const vector_index::YSQLVector*>(vec_value->binary_value().data()),
-          vec_value->binary_value().size()));
+      auto encoded = dockv::EncodedDocVectorValue::FromSlice(vec_value->binary_value());
+      auto vec = VERIFY_RESULT(VectorANN<FloatVector>::GetVectorFromYSQLWire(encoded.data));
       auto doc_iter = down_cast<DocRowwiseIterator*>(table_iter_.get());
-      ann_store->Add(vector_index::VectorId::GenerateRandom(),
-                     std::move(vec), doc_iter->GetTupleId());
+      ann_store->Add(VERIFY_RESULT(encoded.DecodeId()), std::move(vec), doc_iter->GetTupleId());
     }
   }
 
@@ -2575,6 +2591,8 @@ Status PgsqlLockOperation::Init(
 
 Status PgsqlLockOperation::GetDocPaths(GetDocPathsMode mode,
     DocPathsToLock *paths, IsolationLevel *level) const {
+  // Behaviour of advisory lock is regardless of isolation level.
+  *level = IsolationLevel::NON_TRANSACTIONAL;
   // kStrongReadIntents is used for acquring locks on the entire row.
   // It's duplicate with the primary intent for the advisory lock.
   if (mode != GetDocPathsMode::kStrongReadIntents) {
@@ -2596,7 +2614,42 @@ void PgsqlLockOperation::ClearResponse() {
   }
 }
 
+Result<bool> PgsqlLockOperation::LockExists(const DocOperationApplyData& data) {
+  dockv::KeyBytes advisory_lock_key(encoded_doc_key_.as_slice());
+  advisory_lock_key.AppendKeyEntryType(dockv::KeyEntryType::kIntentTypeSet);
+  advisory_lock_key.AppendIntentTypeSet(GetIntentTypes(IsolationLevel::NON_TRANSACTIONAL));
+  dockv::KeyBytes txn_reverse_index_prefix;
+  AppendTransactionKeyPrefix(txn_op_context_.transaction_id, &txn_reverse_index_prefix);
+  txn_reverse_index_prefix.AppendKeyEntryType(dockv::KeyEntryType::kMaxByte);
+  auto reverse_index_upperbound = txn_reverse_index_prefix.AsSlice();
+  auto iter = CreateRocksDBIterator(
+      data.doc_write_batch->doc_db().intents, &KeyBounds::kNoBounds,
+      BloomFilterMode::DONT_USE_BLOOM_FILTER, boost::none,
+      rocksdb::kDefaultQueryId, nullptr, &reverse_index_upperbound,
+      rocksdb::CacheRestartBlockKeys::kFalse);
+  Slice key_prefix = txn_reverse_index_prefix.AsSlice();
+  key_prefix.remove_suffix(1);
+  iter.Seek(key_prefix);
+  bool found = false;
+  while (iter.Valid()) {
+    if (!iter.key().starts_with(key_prefix)) {
+      break;
+    }
+    if (iter.value().starts_with(advisory_lock_key.AsSlice())) {
+      found = true;
+      break;
+    }
+    iter.Next();
+  }
+  RETURN_NOT_OK(iter.status());
+  return found;
+}
+
 Status PgsqlLockOperation::Apply(const DocOperationApplyData& data) {
+  if (!request_.is_lock() && !VERIFY_RESULT(LockExists(data))) {
+    return STATUS_EC_FORMAT(InternalError, TransactionError(TransactionErrorCode::kSkipLocking),
+                            "Try to release non-existing lock $0", doc_key_.ToString());
+  }
   Slice value(&(dockv::ValueEntryTypeAsChar::kRowLock), 1);
   auto& entry = data.doc_write_batch->AddLock();
   entry.lock.key = encoded_doc_key_.as_slice();

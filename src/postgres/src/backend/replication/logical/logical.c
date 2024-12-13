@@ -651,6 +651,7 @@ YBValidateLsnType(char *lsn_type)
 		|| strcmp(lsn_type, LSN_TYPE_HYBRID_TIME) == 0))
 		elog(ERROR, "lsn type can only be SEQUENCE or HYBRID_TIME");
 }
+
 CRSLsnType
 YBParseLsnType(char *lsn_type)
 {

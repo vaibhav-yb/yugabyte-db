@@ -279,7 +279,8 @@ void TableInfo::CompleteInit() {
     if (!index_info->vector_idx_options().has_column_id()) {
       LOG_WITH_PREFIX(DFATAL) << "It is expected to have column id specified for vector index";
     } else {
-      ColumnId id { make_signed(index_info->vector_idx_options().column_id()) };
+      // NB! Index schema must have the last column be a vector for which vector index created.
+      ColumnId id = doc_read_context->schema().column_ids().back();
       doc_read_context->mutable_schema()->SetVectorColumns({ id });
     }
   }
@@ -471,6 +472,11 @@ bool TableInfo::TEST_Equals(const TableInfo& lhs, const TableInfo& rhs) {
                            rhs.index_info,
                            IndexInfo::TEST_Equals) &&
          lhs.partition_schema.Equals(rhs.partition_schema);
+}
+
+bool TableInfo::NeedVectorIndex() const {
+  return index_info && index_info->is_vector_idx() &&
+         index_info->vector_idx_options().idx_type() != PgVectorIndexType::DUMMY;
 }
 
 Status KvStoreInfo::LoadTablesFromPB(
@@ -1421,7 +1427,7 @@ void RaftGroupMetadata::SetSchemaAndTableName(
   SetTableNameUnlocked(namespace_name, table_name, op_id, table_id);
 }
 
-Status RaftGroupMetadata::AddTable(
+Result<TableInfoPtr> RaftGroupMetadata::AddTable(
     const std::string& table_id, const std::string& namespace_name, const std::string& table_name,
     const TableType table_type, const Schema& schema, const IndexMap& index_map,
     const dockv::PartitionSchema& partition_schema, const std::optional<IndexInfo>& index_info,
@@ -1457,7 +1463,7 @@ Status RaftGroupMetadata::AddTable(
     VLOG_WITH_PREFIX(1) << "Added table with schema version " << schema_version << "\n"
                         << AsString(new_table_info);
     kv_store_.UpdateColocationMap(new_table_info);
-    return Status::OK();
+    return new_table_info;
   }
 
   const auto& existing_table = *iter->second;
@@ -1469,7 +1475,7 @@ Status RaftGroupMetadata::AddTable(
       schema.table_properties().is_ysql_catalog_table()) {
     // This must be the one-time migration with transactional DDL being turned on for the first
     // time on this cluster.
-    return Status::OK();
+    return iter->second;
   }
 
   // We never expect colocation IDs to mismatch.
@@ -1488,7 +1494,7 @@ Status RaftGroupMetadata::AddTable(
         schema.colocation_id(), kv_store_.colocation_to_table);
   }
 
-  return Status::OK();
+  return iter->second;
 }
 
 void RaftGroupMetadata::RemoveTable(const TableId& table_id, const OpId& op_id) {
@@ -2266,6 +2272,16 @@ RaftGroupMetadata::GetAllColocatedTablesWithColocationId() const {
     table_colocation_id_map[info->table_id] = id;
   }
   return table_colocation_id_map;
+}
+
+std::vector<TableInfoPtr> RaftGroupMetadata::GetAllColocatedTableInfos() const {
+  std::lock_guard lock(data_mutex_);
+  std::vector<TableInfoPtr> result;
+  result.reserve(kv_store_.tables.size());
+  for (const auto& [id, info] : kv_store_.tables) {
+    result.push_back(info);
+  }
+  return result;
 }
 
 Status CheckCanServeTabletData(const RaftGroupMetadata& metadata) {

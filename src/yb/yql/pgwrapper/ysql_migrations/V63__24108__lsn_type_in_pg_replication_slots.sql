@@ -57,3 +57,31 @@ BEGIN
             LEFT JOIN pg_database D ON (L.datoid = D.oid);
   END IF;
 END $$;
+
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT TRUE FROM pg_attribute
+    WHERE attrelid = 'pg_catalog.pg_stat_replication_slots'::regclass
+          AND attname = 'yb_lsn_type'
+          AND NOT attisdropped
+  ) THEN
+    CREATE OR REPLACE VIEW pg_catalog.pg_stat_replication_slots
+    WITH (use_initdb_acl = true)
+    AS
+        SELECT
+            s.slot_name,
+            s.spill_txns,
+            s.spill_count,
+            s.spill_bytes,
+            s.stream_txns,
+            s.stream_count,
+            s.stream_bytes,
+            s.total_txns,
+            s.total_bytes,
+            s.stats_reset
+        FROM pg_replication_slots as r,
+            LATERAL pg_stat_get_replication_slot(slot_name) as s
+        WHERE r.datoid IS NOT NULL; -- excluding physical slots
+  END IF;
+END $$;

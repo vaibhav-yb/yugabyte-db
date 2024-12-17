@@ -25,7 +25,7 @@ SELECT * FROM pg_create_logical_replication_slot('testslot_test_decoding', 'test
 
 SELECT * FROM pg_create_logical_replication_slot('testslot_hybrid_time', 'yboutput', false, false, 'HYBRID_TIME');
       slot_name       | lsn
-------------------------+-----
+----------------------+-----
  testslot_hybrid_time | 0/2
 (1 row)
 
@@ -38,8 +38,8 @@ ORDER BY slot_name;
 ------------------------+---------------+-----------+----------+-----------+--------+------------+------+--------------+-------------+---------------------+-------------
  testslot1              | pgoutput      | logical   | yugabyte | f         | f      |            |    1 |            1 | 0/1         | 0/2                 | SEQUENCE
  testslot2              | pgoutput      | logical   | yugabyte | f         | f      |            |    1 |            1 | 0/1         | 0/2                 | SEQUENCE
- testslot_test_decoding | test_decoding | logical   | yugabyte | f         | f      |            |    1 |            1 | 0/1         | 0/2                 | SEQUENCE
  testslot_hybrid_time   | yboutput      | logical   | yugabyte | f         | f      |            |    1 |            1 | 0/1         | 0/2                 | HYBRID_TIME
+ testslot_test_decoding | test_decoding | logical   | yugabyte | f         | f      |            |    1 |            1 | 0/1         | 0/2                 | SEQUENCE
 (4 rows)
 
 -- drop the replication slot and create with same name again.
@@ -101,6 +101,12 @@ SELECT * FROM pg_drop_replication_slot('testslot3');
 (1 row)
 
 SELECT * FROM pg_drop_replication_slot('testslot_test_decoding');
+ pg_drop_replication_slot
+--------------------------
+
+(1 row)
+
+SELECT * FROM pg_drop_replication_slot('testslot_hybrid_time');
  pg_drop_replication_slot
 --------------------------
 

@@ -2350,6 +2350,21 @@ static struct config_bool ConfigureNamesBool[] =
 	},
 
 	{
+		{"yb_force_catalog_update_on_next_ddl", PGC_USERSET,
+			DEVELOPER_OPTIONS,
+			gettext_noop("Make the next DDL update the catalog in force mode "
+			"which allows it to operate even during ysql major catalog "
+			"upgrades. WARNING: This is a dangerous option and should be used "
+			"only for DDLs on temp tables, and other transient objects."),
+			NULL,
+			GUC_NOT_IN_SAMPLE
+		},
+		&yb_force_catalog_update_on_next_ddl,
+		false,
+		NULL, NULL, NULL
+	},
+
+	{
 		{"force_global_transaction", PGC_USERSET, UNGROUPED,
 			gettext_noop("Forces use of global transaction table."),
 			NULL
@@ -2635,30 +2650,15 @@ static struct config_bool ConfigureNamesBool[] =
 	},
 
 	{
-		{"yb_ash_enable_infra", PGC_POSTMASTER, RESOURCES,
-			gettext_noop("Allocate shared memory for ASH, start the "
-							"background worker, create instrumentation hooks "
-							"and enable querying the yb_active_session_history "
-							"view."),
-			NULL,
-			GUC_NOT_IN_SAMPLE
-		},
-		&yb_ash_enable_infra,
-		false,
-		NULL, NULL, NULL
-	},
-
-	{
-		{"yb_enable_ash", PGC_SIGHUP, STATS_COLLECTOR,
-			gettext_noop("Starts sampling and instrumenting YSQL and YCQL queries, "
-						 "and various background activities. This does nothing if "
-						 "ysql_yb_ash_enable_infra is disabled."),
+		{"yb_enable_ash", PGC_POSTMASTER, STATS_MONITORING,
+			gettext_noop("Enable Active Session History for sampling and instrumenting YSQL "
+						 "and YCQL queries, and various background activities."),
 			NULL,
 			GUC_NOT_IN_SAMPLE
 		},
 		&yb_enable_ash,
 		false,
-		yb_enable_ash_check_hook, NULL, NULL
+		NULL, NULL, NULL
 	},
 
 	{

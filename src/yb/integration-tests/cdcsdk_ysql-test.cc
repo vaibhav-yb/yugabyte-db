@@ -8069,7 +8069,7 @@ void CDCSDKYsqlTest::TestCreateReplicationSlotWithLsnTypeParam(const std::string
       "create table test_table (id int primary key, name text, l_name varchar, hours float);"));
 
   auto result = ASSERT_RESULT(conn.Fetch(
-      "select * from pg_create_logical_replication_slot('rs', 'yboutput', false, false, '" +
+      "select * from pg_create_logical_replication_slot('rs', 'yboutput', false, '" +
       lsn_type + "');"));
 
   auto list_cdc_streams_resp = ASSERT_RESULT(ListDBStreams());

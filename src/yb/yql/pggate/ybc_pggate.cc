@@ -46,6 +46,7 @@
 
 #include "yb/gutil/casts.h"
 
+#include "yb/gutil/walltime.h"
 #include "yb/server/clockbound_clock.h"
 #include "yb/server/skewed_clock.h"
 
@@ -2835,6 +2836,18 @@ YBCStatus YBCRestoreReadTimePoint(uint64_t read_time_point_handle) {
 
 void YBCForceAllowCatalogModifications(bool allowed) {
   pgapi->ForceAllowCatalogModifications(allowed);
+}
+
+YBCStatus YBCGetCurrentHybridTimeLsn(uint64_t* current_hybrid_time) {
+  const auto current_time_micros = GetCurrentTimeMicros();
+
+  const auto result = Result<uint64_t>(HybridTime::FromMicros(current_time_micros).ToUint64());
+  if (!result.ok()) {
+    return ToYBCStatus(result.status());
+  }
+  *current_hybrid_time = result.get();
+
+  return YBCStatusOK();
 }
 
 YBCStatus YBCAcquireAdvisoryLock(

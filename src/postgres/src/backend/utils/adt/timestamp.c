@@ -31,6 +31,7 @@
 #include "nodes/nodeFuncs.h"
 #include "nodes/supportnodes.h"
 #include "parser/scansup.h"
+#include "pg_yb_utils.h"
 #include "utils/array.h"
 #include "utils/builtins.h"
 #include "utils/date.h"
@@ -38,6 +39,7 @@
 #include "utils/float.h"
 #include "utils/numeric.h"
 #include "utils/sortsupport.h"
+#include "yb/yql/pggate/ybc_pggate.h"
 
 /*
  * gcc's -ffast-math switch breaks routines that expect exact results from
@@ -1570,6 +1572,25 @@ Datum
 pg_conf_load_time(PG_FUNCTION_ARGS)
 {
 	PG_RETURN_TIMESTAMPTZ(PgReloadTime);
+}
+
+/*
+ * Get the current operating system time value as hybrid time.
+ */
+Datum
+yb_get_current_hybrid_time_lsn(PG_FUNCTION_ARGS)
+{
+	Datum result = Int64GetDatum(0);
+
+	if (IsYugaByteEnabled())
+	{
+		uint64_t hybrid_time;
+		YBCGetCurrentHybridTimeLsn(&hybrid_time);
+
+		result = Int64GetDatum(hybrid_time);
+	}
+
+	return result;
 }
 
 /*

@@ -22,8 +22,10 @@
 
 #include "yb/client/table_info.h"
 
+#include "yb/common/hybrid_time.h"
 #include "yb/common/pg_types.h"
 #include "yb/common/placement_info.h"
+#include "yb/gutil/walltime.h"
 #include "yb/qlexpr/ql_expr.h"
 #include "yb/common/ql_value.h"
 #include "yb/common/read_hybrid_time.h"

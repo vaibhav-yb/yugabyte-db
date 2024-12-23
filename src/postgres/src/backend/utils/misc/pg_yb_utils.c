@@ -1591,6 +1591,7 @@ bool yb_enable_fkey_catcache = true;
 bool yb_enable_nop_alter_role_optimization = true;
 bool yb_enable_inplace_index_update = true;
 bool yb_enable_advisory_locks = false;
+bool yb_ignore_freeze_with_copy = true;
 
 YBUpdateOptimizationOptions yb_update_optimization_options = {
 	.has_infra = true,
@@ -5493,8 +5494,11 @@ void
 YbGetRedactedQueryString(const char* query, int query_len,
 						 const char** redacted_query, int* redacted_query_len)
 {
+	CommandTag command_tag;
+
 	*redacted_query = pnstrdup(query, query_len);
-	*redacted_query = RedactPasswordIfExists(*redacted_query);
+	command_tag = YbParseCommandTag(*redacted_query);
+	*redacted_query = YbRedactPasswordIfExists(*redacted_query, command_tag);
 	*redacted_query_len = strlen(*redacted_query);
 }
 

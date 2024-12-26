@@ -106,6 +106,7 @@
 #include "catalog/pg_operator.h"
 #include "catalog/pg_partitioned_table.h"
 #include "catalog/pg_policy.h"
+#include "catalog/pg_statistic_ext_data.h"
 #include "catalog/pg_yb_profile.h"
 #include "catalog/pg_yb_role_profile.h"
 #include "catalog/yb_catalog_version.h"
@@ -2179,6 +2180,8 @@ typedef enum YbPFetchTable
 	YB_PFETCH_TABLE_PG_RANGE,
 	YB_PFETCH_TABLE_PG_REWRITE,
 	YB_PFETCH_TABLE_PG_STATISTIC,
+	YB_PFETCH_TABLE_PG_STATISTIC_EXT,
+	YB_PFETCH_TABLE_PG_STATISTIC_EXT_DATA,
 	YB_PFETCH_TABLE_PG_TABLESPACE,
 	YB_PFETCH_TABLE_PG_TRIGGER,
 	YB_PFETCH_TABLE_PG_TYPE,
@@ -2241,6 +2244,8 @@ static const YbCatNamePfId YbCatalogNamesPfIds[] = {
 	{"pg_range", YB_PFETCH_TABLE_PG_RANGE},
 	{"pg_rewrite", YB_PFETCH_TABLE_PG_REWRITE},
 	{"pg_statistic", YB_PFETCH_TABLE_PG_STATISTIC},
+	{"pg_statistic_ext", YB_PFETCH_TABLE_PG_STATISTIC_EXT},
+	{"pg_statistic_ext_data", YB_PFETCH_TABLE_PG_STATISTIC_EXT_DATA},
 	{"pg_tablespace", YB_PFETCH_TABLE_PG_TABLESPACE},
 	{"pg_trigger", YB_PFETCH_TABLE_PG_TRIGGER},
 	{"pg_type", YB_PFETCH_TABLE_PG_TYPE},
@@ -2346,6 +2351,10 @@ YbGetPrefetchableTableInfo(YbPFetchTable table)
 			(YbPFetchTableInfo){ RewriteRelationId, {YB_TABLE_CACHE_TYPE_CAT_CACHE_NO_INDEX, .cat_cache = {RULERELNAME}}},
 		[YB_PFETCH_TABLE_PG_STATISTIC] =
 			(YbPFetchTableInfo){ StatisticRelationId, {YB_TABLE_CACHE_TYPE_CAT_CACHE_NO_INDEX, .cat_cache = {STATRELATTINH}}},
+		[YB_PFETCH_TABLE_PG_STATISTIC_EXT] =
+			(YbPFetchTableInfo){ StatisticExtRelationId, {YB_TABLE_CACHE_TYPE_CAT_CACHE_WITH_INDEX, .cat_cache = {STATEXTOID, STATEXTNAMENSP}}},
+		[YB_PFETCH_TABLE_PG_STATISTIC_EXT_DATA] =
+			(YbPFetchTableInfo){ StatisticExtDataRelationId, {YB_TABLE_CACHE_TYPE_CAT_CACHE_NO_INDEX, .cat_cache = {STATEXTDATASTXOID}}},
 		[YB_PFETCH_TABLE_PG_TABLESPACE] =
 			(YbPFetchTableInfo){ TableSpaceRelationId, {YB_TABLE_CACHE_TYPE_CAT_CACHE_NO_INDEX, .cat_cache = {TABLESPACEOID}}},
 		[YB_PFETCH_TABLE_PG_TRIGGER] =
@@ -5779,11 +5788,26 @@ RelationSetNewRelfilenode(Relation relation, char persistence,
 	TransactionId freezeXid = InvalidTransactionId;
 	RelFileNode newrnode;
 
+	/*
+	 * YB Note: this code that opens pg_class table was moved here from below.
+	 * Get a writable copy of the pg_class tuple for the given relation.
+	 */
+	pg_class = table_open(RelationRelationId, RowExclusiveLock);
+
 	if (!IsBinaryUpgrade || yb_binary_restore)
 	{
-		/* Allocate a new relfilenode */
-		newrelfilenode = GetNewRelFileNode(relation->rd_rel->reltablespace,
-										   NULL, persistence);
+		if (IsYugaByteEnabled())
+			/*
+			 * In YB, always use pg_class to check for OID collision. During
+			 * table rewrite a relfilenode is used by DocDB to construct a
+			 * table id in the same way as a regular table OID.
+			 */
+			newrelfilenode = GetNewRelFileNode(relation->rd_rel->reltablespace,
+											   pg_class, persistence);
+		else
+			/* Allocate a new relfilenode */
+			newrelfilenode = GetNewRelFileNode(relation->rd_rel->reltablespace,
+											   NULL, persistence);
 	}
 	else if (relation->rd_rel->relkind == RELKIND_INDEX)
 	{
@@ -5811,9 +5835,8 @@ RelationSetNewRelfilenode(Relation relation, char persistence,
 				 errmsg("unexpected request for new relfilenode in binary upgrade mode")));
 
 	/*
-	 * Get a writable copy of the pg_class tuple for the given relation.
+	 * YB Note: native PG code setup pg_class here, YB has moved that code up above.
 	 */
-	pg_class = table_open(RelationRelationId, RowExclusiveLock);
 
 	tuple = SearchSysCacheCopy1(RELOID,
 								ObjectIdGetDatum(RelationGetRelid(relation)));

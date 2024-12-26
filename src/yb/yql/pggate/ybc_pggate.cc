@@ -523,8 +523,8 @@ void YBCInitPgGate(const YBCPgTypeEntity *data_type_table, int count, PgCallback
 }
 
 void YBCDestroyPgGate() {
-  LOG_IF(DFATAL, !is_main_thread())
-    << __PRETTY_FUNCTION__ << " should only be invoked from the main thread";
+  LOG_IF(FATAL, !is_main_thread())
+      << __PRETTY_FUNCTION__ << " should only be invoked from the main thread";
 
   if (pgapi_shutdown_done.exchange(true)) {
     LOG(DFATAL) << __PRETTY_FUNCTION__ << " should only be called once";
@@ -538,8 +538,8 @@ void YBCDestroyPgGate() {
 }
 
 void YBCInterruptPgGate() {
-  LOG_IF(DFATAL, !is_main_thread())
-    << __PRETTY_FUNCTION__ << " should only be invoked from the main thread";
+  LOG_IF(FATAL, !is_main_thread())
+      << __PRETTY_FUNCTION__ << " should only be invoked from the main thread";
 
   pgapi->Interrupt();
 }

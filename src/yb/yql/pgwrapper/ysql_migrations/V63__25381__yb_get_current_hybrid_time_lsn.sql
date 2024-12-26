@@ -12,7 +12,7 @@ BEGIN;
     proargnames, proargdefaults, protrftypes, prosrc, probin, proconfig, proacl
   ) VALUES (
     8078, 'yb_get_current_hybrid_time_lsn', 11, 10, 12, 1, 0, 0, '-', 'f', false, false, true,
-    false, 'v', 'u', 0, 0, 2249, '', '{20}', '{o}', '{current_hybrid_time_lsn}',
+    true, 'v', 's', 0, 0, 20, '', '{20}', '{o}', '{current_hybrid_time_lsn}',
     NULL, NULL, 'yb_get_current_hybrid_time_lsn', NULL, NULL, NULL)
   ON CONFLICT DO NOTHING;
 

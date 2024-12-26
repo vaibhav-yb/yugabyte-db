@@ -2842,18 +2842,6 @@ uint64_t YBCGetCurrentHybridTimeLsn() {
   return (HybridTime::FromMicros(GetCurrentTimeMicros()).ToUint64());
 }
 
-YBCStatus YBCGetCurrentHybridTimeLsn(uint64_t* current_hybrid_time) {
-  const auto current_time_micros = GetCurrentTimeMicros();
-
-  const auto result = Result<uint64_t>(HybridTime::FromMicros(current_time_micros).ToUint64());
-  if (!result.ok()) {
-    return ToYBCStatus(result.status());
-  }
-  *current_hybrid_time = result.get();
-
-  return YBCStatusOK();
-}
-
 YBCStatus YBCAcquireAdvisoryLock(
     YBAdvisoryLockId lock_id, YBAdvisoryLockMode mode, bool wait, bool session) {
   return ToYBCStatus(pgapi->AcquireAdvisoryLock(lock_id, mode, wait, session));

@@ -421,11 +421,11 @@ class CatalogManager : public CatalogManagerIf, public SnapshotCoordinatorContex
                                      rpc::RpcContext* rpc,
                                      const LeaderEpoch& epoch);
 
-  void AcquireObjectLocks(
-      const tserver::AcquireObjectLockRequestPB* req, tserver::AcquireObjectLockResponsePB* resp,
+  void AcquireObjectLocksGlobal(
+      const AcquireObjectLocksGlobalRequestPB* req, AcquireObjectLocksGlobalResponsePB* resp,
       rpc::RpcContext rpc);
-  void ReleaseObjectLocks(
-      const tserver::ReleaseObjectLockRequestPB* req, tserver::ReleaseObjectLockResponsePB* resp,
+  void ReleaseObjectLocksGlobal(
+      const ReleaseObjectLocksGlobalRequestPB* req, ReleaseObjectLocksGlobalResponsePB* resp,
       rpc::RpcContext rpc);
   void ExportObjectLockInfo(const std::string& tserver_uuid, tserver::DdlLockEntriesPB* resp);
   ObjectLockInfoManager* object_lock_info_manager() { return object_lock_info_manager_.get(); }
@@ -2931,12 +2931,6 @@ class CatalogManager : public CatalogManagerIf, public SnapshotCoordinatorContex
       const NamespaceName& namespace_name, const TableInfoPtr& indexed_table) REQUIRES(mutex_);
 
   bool IsYsqlMajorCatalogUpgradeInProgress() const;
-
-  // In the case of an online ysql major catalog upgrade, returns the current version only if the
-  // current version's catalog is valid, meaning in the MONITORING stage, or post-upgrade. If we are
-  // before the MONITORING stage, returns the prior version's table. In the case of a clean install,
-  // returns the current version.
-  Result<TableId> GetVersionSpecificCatalogTableId(const TableId& table_id) const override;
 
   bool SkipCatalogVersionChecks() override;
 

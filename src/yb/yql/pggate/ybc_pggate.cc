@@ -2838,6 +2838,10 @@ void YBCForceAllowCatalogModifications(bool allowed) {
   pgapi->ForceAllowCatalogModifications(allowed);
 }
 
+uint64_t YBCGetCurrentHybridTimeLsn() {
+  return (HybridTime::FromMicros(GetCurrentTimeMicros()).ToUint64());
+}
+
 YBCStatus YBCGetCurrentHybridTimeLsn(uint64_t* current_hybrid_time) {
   const auto current_time_micros = GetCurrentTimeMicros();
 

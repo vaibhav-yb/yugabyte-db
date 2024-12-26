@@ -31,7 +31,6 @@
 #include "nodes/nodeFuncs.h"
 #include "nodes/supportnodes.h"
 #include "parser/scansup.h"
-#include "pg_yb_utils.h"
 #include "utils/array.h"
 #include "utils/builtins.h"
 #include "utils/date.h"
@@ -39,6 +38,9 @@
 #include "utils/float.h"
 #include "utils/numeric.h"
 #include "utils/sortsupport.h"
+
+/* YB includes */
+#include "pg_yb_utils.h"
 #include "yb/yql/pggate/ybc_pggate.h"
 
 /*
@@ -1580,17 +1582,7 @@ pg_conf_load_time(PG_FUNCTION_ARGS)
 Datum
 yb_get_current_hybrid_time_lsn(PG_FUNCTION_ARGS)
 {
-	Datum result = Int64GetDatum(0);
-
-	if (IsYugaByteEnabled())
-	{
-		uint64_t hybrid_time;
-		YBCGetCurrentHybridTimeLsn(&hybrid_time);
-
-		result = Int64GetDatum(hybrid_time);
-	}
-
-	return result;
+	return Int64GetDatum(YBCGetCurrentHybridTimeLsn());
 }
 
 /*

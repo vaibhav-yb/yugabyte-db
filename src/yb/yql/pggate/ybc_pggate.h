@@ -940,7 +940,7 @@ YBCStatus YBCRestoreReadTimePoint(uint64_t read_time_point_handle);
 
 void YBCForceAllowCatalogModifications(bool allowed);
 
-YBCStatus YBCGetCurrentHybridTimeLsn(uint64_t* current_hybrid_time);
+uint64_t YBCGetCurrentHybridTimeLsn();
 
 YBCStatus YBCAcquireAdvisoryLock(
     YBAdvisoryLockId lock_id, YBAdvisoryLockMode mode, bool wait, bool session);

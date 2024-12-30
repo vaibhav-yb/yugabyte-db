@@ -1,7 +1,7 @@
 BEGIN;
   SET LOCAL yb_non_ddl_txn_for_sys_tables_allowed TO true;
 
-  -- Add a column for lsn_type in pg_get_replication_slots
+  -- Add a column for yb_lsn_type in pg_get_replication_slots
   -- TODO: As a workaround for GHI #13500, we perform a delete + insert instead
   -- of an update into pg_proc. Restore to UPDATE once fixed.
   DELETE FROM pg_catalog.pg_proc WHERE proname = 'pg_get_replication_slots' AND
@@ -60,13 +60,7 @@ END $$;
 
 DO $$
 BEGIN
-  IF NOT EXISTS (
-    SELECT TRUE FROM pg_attribute
-    WHERE attrelid = 'pg_catalog.pg_stat_replication_slots'::regclass
-          AND attname = 'yb_lsn_type'
-          AND NOT attisdropped
-  ) THEN
-    CREATE OR REPLACE VIEW pg_catalog.pg_stat_replication_slots
+  CREATE OR REPLACE VIEW pg_catalog.pg_stat_replication_slots
     WITH (use_initdb_acl = true)
     AS
         SELECT

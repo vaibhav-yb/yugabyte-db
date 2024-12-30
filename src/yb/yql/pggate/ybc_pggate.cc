@@ -2350,7 +2350,7 @@ YBCStatus YBCPgListReplicationSlots(
           slot_lsn_type = YBCPAllocStdString("HYBRID_TIME");
           break;
         default:
-          LOG(FATAL) << "Received unexpected LSN type " << info.lsn_type();
+          LOG(DFATAL) << "Received unexpected LSN type " << info.lsn_type();
       }
 
       new (dest) YBCReplicationSlotDescriptor{
@@ -2411,7 +2411,7 @@ YBCStatus YBCPgGetReplicationSlot(
       slot_lsn_type = YBCPAllocStdString("HYBRID_TIME");
       break;
     default:
-      LOG(FATAL) << "Received unexpected LSN type " << slot_info.lsn_type();
+      LOG(DFATAL) << "Received unexpected LSN type " << slot_info.lsn_type();
   }
 
   new (*replication_slot) YBCReplicationSlotDescriptor{

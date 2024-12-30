@@ -17,8 +17,11 @@
 # Simple linter for postgres code.
 
 # Whitespace
-grep -nE '\s+$' "$1" \
-  | sed 's/^/error:trailing_whitespace:/'
+if ! [[ "$1" == src/postgres/src/backend/snowball/libstemmer/* ||
+        "$1" == src/postgres/src/interfaces/ecpg/test/expected/* ]]; then
+  grep -nE '\s+$' "$1" \
+    | sed 's/^/error:trailing_whitespace:/'
+fi
 if ! [[ "$1" == src/postgres/src/backend/snowball/libstemmer/* ||
         "$1" == src/postgres/src/interfaces/ecpg/test/expected/* ||
         "$1" == src/postgres/src/include/snowball/libstemmer/* ||
@@ -28,9 +31,16 @@ if ! [[ "$1" == src/postgres/src/backend/snowball/libstemmer/* ||
 fi
 grep -nE '/\*(\w+|\s\w+|\w+\s)\*/' "$1" \
   | sed 's/^/error:bad_parameter_comment_spacing:/'
-grep -nE '\s(if|else if|for|while)\(' "$1" \
-  | grep -vE 'while\((0|1)\)' \
-  | sed 's/^/error:bad_spacing_after_if_else_for_while:/'
+if ! [[ "$1" == src/postgres/contrib/ltree/* ||
+        "$1" == src/postgres/src/backend/snowball/libstemmer/* ||
+        "$1" == src/postgres/src/backend/utils/adt/tsquery.c ||
+        "$1" == src/postgres/src/interfaces/ecpg/test/expected/* ||
+        "$1" == src/postgres/src/interfaces/ecpg/test/thread/* ||
+        "$1" == src/postgres/src/pl/plperl/ppport.h ]]; then
+  grep -nE '^\s*(if|else if|for|while)\(' "$1" \
+    | grep -vE 'while\((0|1)\)' \
+    | sed 's/^/error:bad_spacing_after_if_else_for_while:/'
+fi
 
 # Comments
 grep -nE '//\s' "$1" \

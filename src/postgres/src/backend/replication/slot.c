@@ -54,6 +54,7 @@
 /* YB includes. */
 #include "commands/ybccmds.h"
 #include "pg_yb_utils.h"
+#include "utils/elog.h"
 
 /*
  * Replication slot on-disk data structure.
@@ -321,6 +322,48 @@ ReplicationSlotCreate(const char *name, bool db_specific,
 			 "Sleeping for %d us after the slot creation to handle clock skew.",
 			 max_clock_skew);
 		pg_usleep(max_clock_skew);
+
+		/*
+		 * YB Note: This section has been copied for POC purposes for now.
+		 *
+		 * Check for name collision, and identify an allocatable slot.  We need to
+		 * hold ReplicationSlotControlLock in shared mode for this, so that nobody
+		 * else can change the in_use flags while we're looking at them.
+		 */
+		LWLockAcquire(ReplicationSlotControlLock, LW_SHARED);
+		for (i = 0; i < max_replication_slots; i++)
+		{
+			ReplicationSlot *s = &ReplicationSlotCtl->replication_slots[i];
+
+			if (s->in_use && strcmp(name, NameStr(s->data.name)) == 0)
+				ereport(ERROR,
+						(errcode(ERRCODE_DUPLICATE_OBJECT),
+						errmsg("replication slot \"%s\" already exists", name)));
+			if (!s->in_use && slot == NULL)
+				slot = s;
+		}
+		LWLockRelease(ReplicationSlotControlLock);
+
+		/*
+		 * We need to briefly prevent any other backend from iterating over the
+		 * slots while we flip the in_use flag. We also need to set the active
+		 * flag while holding the ControlLock as otherwise a concurrent
+		 * ReplicationSlotAcquire() could acquire the slot as well.
+		 */
+		LWLockAcquire(ReplicationSlotControlLock, LW_EXCLUSIVE);
+
+		slot->in_use = true;
+
+		/* We can now mark the slot active, and that makes it our slot. */
+		SpinLockAcquire(&slot->mutex);
+		Assert(slot->active_pid == 0);
+		elog(INFO, "VKVK Assigning pid %d to slot %s", MyProcPid, name);
+		slot->active_pid = MyProcPid;
+		SpinLockRelease(&slot->mutex);
+		// MyReplicationSlot = slot;
+
+		LWLockRelease(ReplicationSlotControlLock);
+
 		return;
 	}
 
@@ -570,6 +613,7 @@ retry:
 			yb_replication_slot->record_id_commit_time_ht;
 
 		MyReplicationSlot = s;
+		elog(INFO, "VKVK PID at slot.c level is %d", s->active_pid);
 
 		/* Setup the per-table replica identity table. */
 		memset(&ctl, 0, sizeof(ctl));
@@ -638,6 +682,7 @@ retry:
 	 * This is the slot we want; check if it's active under some other
 	 * process.  In single user mode, we don't need this check.
 	 */
+	elog(INFO, "VKVK IsUnderPostmaster %d with myprocid %d", IsUnderPostmaster, MyProcPid);
 	if (IsUnderPostmaster)
 	{
 		/*
@@ -649,9 +694,11 @@ retry:
 			ConditionVariablePrepareToSleep(&s->active_cv);
 
 		SpinLockAcquire(&s->mutex);
+		elog(INFO, "VKVK before checking for active_pid %d", s->active_pid);
 		if (s->active_pid == 0)
 			s->active_pid = MyProcPid;
 		active_pid = s->active_pid;
+		elog(INFO, "VKVK after assigning s->active_pid %d", active_pid);
 		SpinLockRelease(&s->mutex);
 	}
 	else
@@ -687,6 +734,7 @@ retry:
 
 	/* We made this slot active, so it's ours now. */
 	MyReplicationSlot = s;
+	elog(INFO, "VKVK slot PID after making it active %d", MyReplicationSlot->active_pid);
 
 	/*
 	 * The call to pgstat_acquire_replslot() protects against stats for a

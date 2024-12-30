@@ -368,7 +368,7 @@ pg_get_replication_slots(PG_FUNCTION_ARGS)
 	LWLockAcquire(ReplicationSlotControlLock, LW_SHARED);
 	for (slotno = 0; slotno < yb_totalslots; slotno++)
 	{
-		ReplicationSlot *slot = &ReplicationSlotCtl->replication_slots[slotno];
+		ReplicationSlot *pg_slot = &ReplicationSlotCtl->replication_slots[slotno];
 		ReplicationSlot slot_contents;
 		Datum		values[PG_GET_REPLICATION_SLOTS_COLS +
 						   YB_PG_GET_REPLICATION_SLOTS_COLS];
@@ -411,9 +411,9 @@ pg_get_replication_slots(PG_FUNCTION_ARGS)
 		else
 		{
 			/* Copy slot contents while holding spinlock, then examine at leisure */
-			SpinLockAcquire(&slot->mutex);
-			slot_contents = *slot;
-			SpinLockRelease(&slot->mutex);
+			SpinLockAcquire(&pg_slot->mutex);
+			slot_contents = *pg_slot;
+			SpinLockRelease(&pg_slot->mutex);
 		}
 
 		memset(values, 0, sizeof(values));
@@ -444,8 +444,14 @@ pg_get_replication_slots(PG_FUNCTION_ARGS)
 		else
 			values[i++] = BoolGetDatum(slot_contents.active_pid != 0);
 
-		if (slot_contents.active_pid != 0)
-			values[i++] = Int32GetDatum(slot_contents.active_pid);
+		// if (slot_contents.active_pid != 0)
+		// 	values[i++] = Int32GetDatum(slot_contents.active_pid);
+		// else
+		// 	nulls[i++] = true;
+
+		elog(INFO, "VKVK active PID is %d", pg_slot->active_pid);
+		if (pg_slot->active_pid != 0)
+			values[i++] = Int32GetDatum(pg_slot->active_pid);
 		else
 			nulls[i++] = true;
 
@@ -514,10 +520,10 @@ pg_get_replication_slots(PG_FUNCTION_ARGS)
 				{
 					int			pid;
 
-					SpinLockAcquire(&slot->mutex);
-					pid = slot->active_pid;
-					slot_contents.data.restart_lsn = slot->data.restart_lsn;
-					SpinLockRelease(&slot->mutex);
+					SpinLockAcquire(&pg_slot->mutex);
+					pid = pg_slot->active_pid;
+					slot_contents.data.restart_lsn = pg_slot->data.restart_lsn;
+					SpinLockRelease(&pg_slot->mutex);
 					if (pid != 0)
 					{
 						values[i++] = CStringGetTextDatum("unreserved");

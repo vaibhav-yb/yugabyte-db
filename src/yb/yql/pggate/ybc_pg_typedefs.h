@@ -17,6 +17,7 @@
 
 #include <stddef.h>
 #include <stdint.h>
+#include <sys/types.h>
 
 #include "yb/yql/pggate/pg_metrics_list.h"
 
@@ -622,6 +623,7 @@ typedef struct PgReplicationSlotDescriptor {
   YBCPgReplicaIdentityDescriptor *replica_identities;
   int replica_identities_count;
   uint64_t last_pub_refresh_time;
+  pid_t active_pid;
 } YBCReplicationSlotDescriptor;
 
 // Upon adding any more palloc'd members in the below struct, add logic to free it in

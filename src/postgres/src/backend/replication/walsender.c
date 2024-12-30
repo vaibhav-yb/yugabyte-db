@@ -1542,7 +1542,8 @@ StartLogicalReplication(StartReplicationCmd *cmd)
 	replication_active = true;
 
 	SyncRepInitConfig();
-
+	elog(INFO, "VKVK MyWalSnd pid is %d", MyWalSnd->pid);
+	MyReplicationSlot->active_pid = MyWalSnd->pid;
 	if (IsYugaByteEnabled())
 		YBCInitVirtualWal(logical_decoding_ctx->options.yb_publication_names);
 
@@ -1556,6 +1557,7 @@ StartLogicalReplication(StartReplicationCmd *cmd)
 		YBCDestroyVirtualWal();
 
 	replication_active = false;
+	MyReplicationSlot->active_pid = 0;
 	if (got_STOPPING)
 		proc_exit(0);
 	WalSndSetState(WALSNDSTATE_STARTUP);

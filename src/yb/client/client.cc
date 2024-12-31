@@ -123,6 +123,7 @@
 #include "yb/util/tsan_util.h"
 
 #include "yb/yql/cql/ql/ptree/pt_option.h"
+#include "yb/yql/pggate/ybc_pg_typedefs.h"
 
 using namespace std::literals;
 
@@ -1590,6 +1591,7 @@ Status YBClient::GetCDCStream(
     *replication_slot_name = resp.stream().cdcsdk_ysql_replication_slot_name();
   }
 
+  *lsn_type = ReplicationSlotLsnType::ReplicationSlotLsnType_SEQUENCE;
   if (lsn_type && resp.stream().has_cdc_stream_info_options() &&
       resp.stream().cdc_stream_info_options().has_cdcsdk_ysql_replication_slot_lsn_type()) {
     *lsn_type = resp.stream().cdc_stream_info_options().cdcsdk_ysql_replication_slot_lsn_type();

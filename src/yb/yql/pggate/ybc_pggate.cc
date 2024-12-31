@@ -2353,7 +2353,7 @@ YBCStatus YBCPgListReplicationSlots(
       }
 
       const char* slot_lsn_type;
-      switch (info.lsn_type()) {
+      switch (info.yb_lsn_type()) {
         case tserver::PGReplicationSlotLsnType::ReplicationSlotLsnTypePg_SEQUENCE:
           slot_lsn_type = YBCPAllocStdString("SEQUENCE");
           break;
@@ -2361,7 +2361,7 @@ YBCStatus YBCPgListReplicationSlots(
           slot_lsn_type = YBCPAllocStdString("HYBRID_TIME");
           break;
         default:
-          LOG(DFATAL) << "Received unexpected LSN type " << info.lsn_type();
+          LOG(FATAL) << "Received unexpected LSN type " << info.yb_lsn_type();
       }
 
       new (dest) YBCReplicationSlotDescriptor{
@@ -2414,7 +2414,7 @@ YBCStatus YBCPgGetReplicationSlot(
   }
 
   const char* slot_lsn_type;
-  switch (slot_info.lsn_type()) {
+  switch (slot_info.yb_lsn_type()) {
     case tserver::PGReplicationSlotLsnType::ReplicationSlotLsnTypePg_SEQUENCE:
       slot_lsn_type = YBCPAllocStdString("SEQUENCE");
       break;
@@ -2422,7 +2422,7 @@ YBCStatus YBCPgGetReplicationSlot(
       slot_lsn_type = YBCPAllocStdString("HYBRID_TIME");
       break;
     default:
-      LOG(DFATAL) << "Received unexpected LSN type " << slot_info.lsn_type();
+      LOG(FATAL) << "Received unexpected LSN type " << slot_info.yb_lsn_type();
   }
 
   new (*replication_slot) YBCReplicationSlotDescriptor{

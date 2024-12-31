@@ -142,7 +142,7 @@ struct CDCSDKStreamInfo {
         pb->set_output_plugin_name(cdcsdk_ysql_replication_slot_plugin_name);
       }
       if (replication_slot_lsn_type) {
-        pb->set_lsn_type(replication_slot_lsn_type);
+        pb->set_yb_lsn_type(replication_slot_lsn_type);
       }
     }
 
@@ -176,7 +176,7 @@ struct CDCSDKStreamInfo {
         case ReplicationSlotLsnType_HYBRID_TIME:
           return tserver::PGReplicationSlotLsnType::ReplicationSlotLsnTypePg_HYBRID_TIME;
         default:
-          LOG(DFATAL) << "Invalid LSN type specified " << lsn_type;
+          LOG(FATAL) << "Invalid LSN type specified " << lsn_type;
       }
     }
 };

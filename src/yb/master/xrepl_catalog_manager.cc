@@ -2929,10 +2929,19 @@ Status CatalogManager::GetCDCStream(
   }
 
   if (FLAGS_ysql_yb_allow_replication_slot_lsn_types &&
-      stream_lock->pb.has_cdcsdk_ysql_replication_slot_lsn_type()) {
+      stream_lock->pb.has_cdcsdk_ysql_replication_slot_name()) {
     auto cdc_stream_info_options = stream_info->mutable_cdc_stream_info_options();
-    cdc_stream_info_options->set_cdcsdk_ysql_replication_slot_lsn_type(
-        stream_lock->pb.cdcsdk_ysql_replication_slot_lsn_type());
+
+    if (stream_lock->pb.has_cdcsdk_ysql_replication_slot_lsn_type()) {
+      cdc_stream_info_options->set_cdcsdk_ysql_replication_slot_lsn_type(
+          stream_lock->pb.cdcsdk_ysql_replication_slot_lsn_type());
+    } else {
+      VLOG(2) << "No cdcsdk_ysql_replication_slot_lsn_type found for stream: " << stream->id()
+              << " and slot " << stream_lock->pb.cdcsdk_ysql_replication_slot_name()
+              << ". Setting default value to 'SEQUENCE'.";
+      cdc_stream_info_options->set_cdcsdk_ysql_replication_slot_lsn_type(
+          ReplicationSlotLsnType::ReplicationSlotLsnType_SEQUENCE);
+    }
   }
 
   auto replica_identity_map = stream_lock->pb.replica_identity_map();

@@ -103,6 +103,7 @@ typedef enum PgDataType {
   YB_YQL_DATA_TYPE_UINT32 = 102,
   YB_YQL_DATA_TYPE_UINT64 = 103,
   YB_YQL_DATA_TYPE_GIN_NULL = 104,
+  YB_YQL_DATA_TYPE_VECTOR = 105,
 } YBCPgDataType;
 
 // Datatypes that are internally designated to be unsupported.
@@ -409,6 +410,10 @@ typedef struct PgGFlagsAccessor {
   const bool*     ysql_conn_mgr_version_matching;
   const bool*     ysql_conn_mgr_version_matching_connect_higher_version;
   const bool*     ysql_block_dangerous_roles;
+  const char*     ysql_sequence_cache_method;
+  const char*     ysql_conn_mgr_sequence_support_mode;
+  const int32_t*  ysql_conn_mgr_max_query_size;
+  const int32_t*  ysql_conn_mgr_wait_timeout_ms;
 } YBCPgGFlagsAccessor;
 
 typedef struct YbTablePropertiesData {

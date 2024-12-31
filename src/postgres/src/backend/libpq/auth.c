@@ -3594,11 +3594,13 @@ ybGetJwtAuthOptionsFromPortAndJwks(Port *port, char *jwks,
 	/* Use "sub" as the default matching claim key */
 	opt->matching_claim_key = hba_line->yb_jwt_matching_claim_key ?: "sub";
 
-	opt->allowed_issuers = (char **) YbPtrListToArray(
-		hba_line->yb_jwt_issuers, &opt->allowed_issuers_length);
+	opt->allowed_issuers = (char **)
+		YbPtrListToArray(hba_line->yb_jwt_issuers,
+						 &opt->allowed_issuers_length);
 
-	opt->allowed_audiences = (char **) YbPtrListToArray(
-		hba_line->yb_jwt_audiences, &opt->allowed_audiences_length);
+	opt->allowed_audiences = (char **)
+		YbPtrListToArray(hba_line->yb_jwt_audiences,
+						 &opt->allowed_audiences_length);
 }
 
 static int
@@ -3613,7 +3615,7 @@ YbCheckJwtAuth(Port *port)
 	 * fail to read the jwks file or the content is invalid.
 	 * Check if jwt_jwks_url is provided then use that otherwise use jwt_jwks_path
 	 */
-	if(port->hba->yb_jwt_jwks_url)
+	if (port->hba->yb_jwt_jwks_url)
 		jwks = ybReadFromUrl(port->hba->yb_jwt_jwks_url);
 	else
 		jwks = ybReadFile(HbaFileName, port->hba->yb_jwt_jwks_path, LOG);
@@ -3732,12 +3734,12 @@ ybReadFromUrl(const char *url)
 						YBCStatusMessageBegin(status))));
 		YBCFreeStatus(status);
 		return NULL;
-	} 
-	if(!url_contents)
+	}
+	if (!url_contents)
 		return NULL;
 
 	len = strlen(url_contents);
-	if(!pg_verifymbstr(url_contents, len, true))
+	if (!pg_verifymbstr(url_contents, len, true))
 	{
 		ereport(LOG,
 				(errcode(ERRCODE_CHARACTER_NOT_IN_REPERTOIRE),

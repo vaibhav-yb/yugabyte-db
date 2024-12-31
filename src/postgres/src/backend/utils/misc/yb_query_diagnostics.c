@@ -1031,8 +1031,11 @@ FlushAndCleanBundles()
 	YbQueryDiagnosticsEntry *entry;
 	MemoryContext curr_context = GetCurrentMemoryContext();
 	int			expired_entries_index = 0;
-	YbQueryDiagnosticsEntry *expired_entries = palloc0(
-		sizeof(YbQueryDiagnosticsEntry) * QUERY_DIAGNOSTICS_HASH_MAX_SIZE);
+	YbQueryDiagnosticsEntry *expired_entries;
+
+	expired_entries = (YbQueryDiagnosticsEntry *)
+		palloc0(sizeof(YbQueryDiagnosticsEntry) *
+				QUERY_DIAGNOSTICS_HASH_MAX_SIZE);
 
 	LWLockAcquire(bundles_in_progress_lock, LW_SHARED);
 
@@ -1881,9 +1884,8 @@ DumpToFile(const char *folder_path, const char *file_name, const char *data,
 									 O_RDWR | O_CREAT | O_APPEND)) < 0)
 			snprintf(description, YB_QD_DESCRIPTION_LEN,
 					 "out of file descriptors: %s; release and retry", strerror(errno));
-
-		else if(FileWrite(file, (char *)data, strlen(data), FileSize(file),
-						  WAIT_EVENT_DATA_FILE_WRITE) < 0)
+		else if (FileWrite(file, (char *)data, strlen(data), FileSize(file),
+						   WAIT_EVENT_DATA_FILE_WRITE) < 0)
 			snprintf(description, YB_QD_DESCRIPTION_LEN, "Error writing to file; %s",
 					 strerror(errno));
 

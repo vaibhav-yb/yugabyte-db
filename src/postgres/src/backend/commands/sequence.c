@@ -948,9 +948,8 @@ nextval_internal(Oid relid, bool check_permissions)
 							(maxv < 0 && last + incby > maxv)) {
 							if (!cycle)
 							{
-								yb_sequence_limit_reached(
-									RelationGetRelationName(seqrel),
-									true, maxv);
+								yb_sequence_limit_reached(RelationGetRelationName(seqrel),
+														  true, maxv);
 								pg_unreachable();
 							}
 							first_val = minv;
@@ -976,9 +975,8 @@ nextval_internal(Oid relid, bool check_permissions)
 							(minv > 0 && last + incby < minv)) {
 							if (!cycle)
 							{
-								yb_sequence_limit_reached(
-									RelationGetRelationName(seqrel),
-									false, minv);
+								yb_sequence_limit_reached(RelationGetRelationName(seqrel),
+														  false, minv);
 								pg_unreachable();
 							}
 							first_val = maxv;
@@ -999,16 +997,15 @@ nextval_internal(Oid relid, bool check_permissions)
 				 * Try to update the sequence. If the sequence has been
 				 * modified concurrently we would have to try again.
 				 */
-				HandleYBStatus(YBCUpdateSequenceTupleConditionally(
-					MyDatabaseId,
-					relid,
-					YbGetCatalogCacheVersion(),
-					YBIsDBCatalogVersionMode(),
-					last_val,
-					true /* is_called */,
-					last,
-					is_called,
-					&skipped));
+				HandleYBStatus(YBCUpdateSequenceTupleConditionally(MyDatabaseId,
+																   relid,
+																   YbGetCatalogCacheVersion(),
+																   YBIsDBCatalogVersionMode(),
+																   last_val,
+																   true /* is_called */,
+																   last,
+																   is_called,
+																   &skipped));
 			}
 		}
 		/* save info in local cache */
@@ -1018,10 +1015,11 @@ nextval_internal(Oid relid, bool check_permissions)
 		elm->last_valid = true;
 		last_used_seq = elm;
 		relation_close(seqrel, NoLock);
-		if(YbIsClientYsqlConnMgr())
+		if (YbIsClientYsqlConnMgr() &&
+			(strcmp((YBCGetGFlags()->ysql_conn_mgr_sequence_support_mode), "session") == 0))
 		{
 			increment_sticky_object_count();
-			elog(LOG, "Incremented sticky object count for sequence %s",
+			elog(LOG_SERVER_ONLY, "Incremented sticky object count for sequence %s",
 				 RelationGetRelationName(seqrel));
 		}
 		return first_val;
@@ -1207,6 +1205,13 @@ nextval_internal(Oid relid, bool check_permissions)
 Datum
 currval_oid(PG_FUNCTION_ARGS)
 {
+	if (YbIsClientYsqlConnMgr() && (strcmp((YBCGetGFlags()->ysql_conn_mgr_sequence_support_mode),
+		"pooled_without_curval_lastval") == 0))
+	{
+		ereport(ERROR, (errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
+						errmsg("currval not supported for session created "
+								"by connection manager")));
+	}
 	Oid			relid = PG_GETARG_OID(0);
 	int64		result;
 	SeqTable	elm;
@@ -1238,6 +1243,13 @@ currval_oid(PG_FUNCTION_ARGS)
 Datum
 lastval(PG_FUNCTION_ARGS)
 {
+	if (YbIsClientYsqlConnMgr() && (strcmp((YBCGetGFlags()->ysql_conn_mgr_sequence_support_mode),
+		"pooled_without_curval_lastval") == 0))
+	{
+		ereport(ERROR, (errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
+						errmsg("lastval not supported for session created "
+								"by connection manager")));
+	}
 	Relation	seqrel;
 	int64		result;
 

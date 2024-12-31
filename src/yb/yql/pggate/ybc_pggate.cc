@@ -2377,7 +2377,7 @@ YBCStatus YBCPgListReplicationSlots(
           .replica_identities = replica_identities,
           .replica_identities_count = replica_identities_count,
           .last_pub_refresh_time = info.last_pub_refresh_time(),
-          .lsn_type = slot_lsn_type
+          .yb_lsn_type = slot_lsn_type
       };
       ++dest;
     }
@@ -2438,7 +2438,7 @@ YBCStatus YBCPgGetReplicationSlot(
       .replica_identities = replica_identities,
       .replica_identities_count = replica_identities_count,
       .last_pub_refresh_time = slot_info.last_pub_refresh_time(),
-      .lsn_type = slot_lsn_type
+      .yb_lsn_type = slot_lsn_type
   };
 
   return YBCStatusOK();

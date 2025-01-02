@@ -73,6 +73,7 @@
 #include "yb/yql/pggate/pggate_thread_local_vars.h"
 #include "yb/yql/pggate/util/pg_wire.h"
 #include "yb/yql/pggate/util/ybc-internal.h"
+#include "yb/yql/pggate/util/ybc_util.h"
 #include "yb/yql/pggate/ybc_pg_typedefs.h"
 
 DEFINE_UNKNOWN_int32(pggate_num_connections_to_server, 1,
@@ -2361,7 +2362,11 @@ YBCStatus YBCPgListReplicationSlots(
           slot_lsn_type = YBCPAllocStdString("HYBRID_TIME");
           break;
         default:
-          LOG(FATAL) << "Received unexpected LSN type " << info.yb_lsn_type();
+          LOG(ERROR) << "Received unexpected LSN type " << info.yb_lsn_type() << " for stream "
+                     << info.stream_id();
+          return ToYBCStatus(STATUS_FORMAT(
+              InternalError, "Received unexpected LSN type $0 for stream $1", info.yb_lsn_type(),
+              info.stream_id()));
       }
 
       new (dest) YBCReplicationSlotDescriptor{
@@ -2422,7 +2427,11 @@ YBCStatus YBCPgGetReplicationSlot(
       slot_lsn_type = YBCPAllocStdString("HYBRID_TIME");
       break;
     default:
-      LOG(FATAL) << "Received unexpected LSN type " << slot_info.yb_lsn_type();
+      LOG(ERROR) << "Received unexpected LSN type " << slot_info.yb_lsn_type() << " for stream "
+                 << slot_info.stream_id();
+      return ToYBCStatus(STATUS_FORMAT(
+          InternalError, "Received unexpected LSN type $0 for stream $1", slot_info.yb_lsn_type(),
+          slot_info.stream_id()));
   }
 
   new (*replication_slot) YBCReplicationSlotDescriptor{

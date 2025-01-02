@@ -53,7 +53,7 @@ DELETE FROM test WHERE id = 1;
 
 **Transformer class:** 
 
-### PGCompatible
+## PGCompatible
 
 **Transformer class:** `io.debezium.connector.postgresql.transforms.PGCompatible`
 

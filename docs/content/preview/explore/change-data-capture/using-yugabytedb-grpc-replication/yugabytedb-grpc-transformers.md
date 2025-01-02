@@ -53,7 +53,7 @@ DELETE FROM test WHERE id = 1;
 
 **Transformer class:** `io.debezium.connector.yugabytedb.transforms.YBExtractNewRecordState`
 
-### PGCompatible
+## PGCompatible
 
 **Transformer class:** `io.debezium.connector.yugabytedb.transforms.PGCompatible`
 
@@ -103,6 +103,25 @@ Do note that for statement 2 and 4, the columns which were not updated as a part
 
 -- statement 5
 "before":{"id":1,"name":"Vaibhav Kushwaha","aura":null},"after":null
+```
+
+### MODIFIED_COLUMNS_OLD_AND_NEW_IMAGES
+
+```
+-- statement 1
+"before":null,"after":{"id":1,"name":"Vaibhav","aura":9876}
+
+-- statement 2
+"before":{"id":1,"name":null,"aura":9876},"after":{"id":1,"name":null,"aura":9999}
+
+-- statement 3
+"before":{"id":1,"name":"Vaibhav","aura":9999},"after":{"id":1,"name":"Vaibhav Kushwaha","aura":10}
+
+-- statement 4
+"before":{"id":1,"name":null,"aura":10},"after":{"id":1,"name":null,"aura":null}
+
+-- statement 5
+"before":{"id":1,"name":null,"aura":null},"after":null
 ```
 
 ### ALL

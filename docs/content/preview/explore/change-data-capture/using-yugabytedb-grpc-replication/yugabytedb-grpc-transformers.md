@@ -20,7 +20,7 @@ The connector comes bundled with some SMTs which can ease in the data flow and h
 
 The above mentioned transformers are only expected to be used with gRPC replication.
 
-{{ < /note >}}
+{{< /note >}}
 
 Note that for maintaining simplicity, only the `before` and `after` fields of the `payload` of the message published by the connector will be mentioned in the following examples. Any information pertaining to the record schema, if same as the standard Debezium connector for Postgres, will be skipped.
 

@@ -18,7 +18,7 @@ The connector comes bundled with some SMTs which can ease in the data flow and h
 
 {{< note title="Important" >}}
 
-The above mentioned transformers are only expected to be used with logical replication when the [plugin](../using-logical-replication/key-concepts#output-plugin) being used is `yboutput`.
+The above mentioned transformers are only expected to be used with gRPC replication.
 
 {{ < /note >}}
 

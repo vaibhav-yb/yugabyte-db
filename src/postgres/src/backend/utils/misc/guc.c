@@ -4728,11 +4728,11 @@ static struct config_int ConfigureNamesInt[] =
 		/* TODO(jason): once it becomes stable, this can be PGC_USERSET. */
 		{"yb_insert_on_conflict_read_batch_size", PGC_SUSET, CLIENT_CONN_STATEMENT,
 			gettext_noop("Maximum batch size for arbiter index reads during INSERT ON CONFLICT."),
-			gettext_noop("A value of 1 disables this feature."),
+			gettext_noop("A value of 0 disables this feature."),
 			0
 		},
 		&yb_insert_on_conflict_read_batch_size,
-		1, 1, INT_MAX,
+		0, 0, INT_MAX,
 		NULL, NULL, NULL
 	},
 
@@ -15162,8 +15162,8 @@ check_transaction_priority_lower_bound(double *newval, void **extra, GucSource s
 						(errmsg("priorities don't exist for read committed isolation transations, the "
 										"transaction will wait for conflicting transactions to commit before "
 										"proceeding"),
-						 errdetail("this also applies to other isolation levels if using Wait-on-Conflict "
-											"concurrency control")));
+						 errdetail("This also applies to other isolation levels if using Wait-on-Conflict "
+											"concurrency control.")));
 	}
 	return true;
 }
@@ -15183,8 +15183,8 @@ check_transaction_priority_upper_bound(double *newval, void **extra, GucSource s
 						(errmsg("priorities don't exist for read committed isolation transations, the "
 										"transaction will wait for conflicting transactions to commit before "
 										"proceeding"),
-						 errdetail("this also applies to other isolation levels if using Wait-on-Conflict "
-											"concurrency control")));
+						 errdetail("This also applies to other isolation levels if using Wait-on-Conflict "
+											"concurrency control.")));
 	}
 	return true;
 }

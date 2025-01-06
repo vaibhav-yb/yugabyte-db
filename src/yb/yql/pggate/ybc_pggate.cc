@@ -111,6 +111,15 @@ DEFINE_test_flag(string, ysql_conn_mgr_dowarmup_all_pools_mode, "none",
 DEFINE_NON_RUNTIME_bool(ysql_conn_mgr_superuser_sticky, true,
   "If enabled, make superuser connections sticky in Ysql Connection Manager.");
 
+DEFINE_NON_RUNTIME_int32(ysql_conn_mgr_max_query_size, 4096,
+  "Maximum size of the query which connection manager can process in the deploy phase or while"
+  "forwarding the client query");
+
+DEFINE_NON_RUNTIME_int32(ysql_conn_mgr_wait_timeout_ms, 10000,
+  "ysql_conn_mgr_wait_timeout_ms denotes the waiting time in ms, before getting timeout while "
+  "sending/receiving the packets at the socket in ysql connection manager. It is seen"
+  " asan builds requires large wait timeout than other builds");
+
 // This gflag should be deprecated but kept to avoid breaking some customer
 // clusters using it. Use ysql_catalog_preload_additional_table_list if possible.
 DEFINE_NON_RUNTIME_bool(ysql_catalog_preload_additional_tables, false,
@@ -240,8 +249,8 @@ Status InitPgGateImpl(const YBCPgTypeEntity* data_type_table,
   auto opt_session_id = session_id ? std::optional(*session_id) : std::nullopt;
   return WithMaskedYsqlSignals(
     [data_type_table, count, &pg_callbacks, opt_session_id, &ash_config] {
-    YBCInitPgGateEx(data_type_table, count, pg_callbacks, nullptr /* context */, opt_session_id,
-                    ash_config);
+    YBCInitPgGateEx(
+        data_type_table, count, pg_callbacks, nullptr /* context */, opt_session_id, ash_config);
     return static_cast<Status>(Status::OK());
   });
 }
@@ -497,10 +506,10 @@ void YBCInitPgGateEx(const YBCPgTypeEntity *data_type_table, int count, PgCallba
   pgapi_shutdown_done.exchange(false);
   if (context) {
     pgapi = new pggate::PgApiImpl(
-      std::move(*context), data_type_table, count, pg_callbacks, session_id, ash_config);
+        std::move(*context), data_type_table, count, pg_callbacks, session_id, *ash_config);
   } else {
-    pgapi = new pggate::PgApiImpl(PgApiContext(), data_type_table, count, pg_callbacks, session_id,
-                                  ash_config);
+    pgapi = new pggate::PgApiImpl(
+        PgApiContext(), data_type_table, count, pg_callbacks, session_id, *ash_config);
   }
 
   VLOG(1) << "PgGate open";
@@ -2065,6 +2074,10 @@ const YBCPgGFlagsAccessor* YBCGetGFlags() {
       .ysql_conn_mgr_version_matching = &FLAGS_ysql_conn_mgr_version_matching,
       .ysql_conn_mgr_version_matching_connect_higher_version =
           &FLAGS_ysql_conn_mgr_version_matching_connect_higher_version,
+      .ysql_sequence_cache_method = FLAGS_ysql_sequence_cache_method.c_str(),
+      .ysql_conn_mgr_sequence_support_mode = FLAGS_ysql_conn_mgr_sequence_support_mode.c_str(),
+      .ysql_conn_mgr_max_query_size = &FLAGS_ysql_conn_mgr_max_query_size,
+      .ysql_conn_mgr_wait_timeout_ms = &FLAGS_ysql_conn_mgr_wait_timeout_ms,
   };
   // clang-format on
   return &accessor;

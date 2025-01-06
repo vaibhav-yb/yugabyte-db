@@ -525,6 +525,14 @@ def find_binary_location(binary_name):
         os.path.join(YUGABYTE_DIR, "build", "latest", "gobin"),
     ]
 
+    # Paths for pg_isready
+    dir_candidates.extend([
+        # If tar is downloaded
+        os.path.join(YUGABYTE_DIR, "postgres", "bin"),
+        # Development environment
+        os.path.join(YUGABYTE_DIR, "build", "debug-clang17-dynamic-ninja", "postgres", "bin")
+    ])
+
     # Jenkins Test Environment
     dir_candidates += [
         os.path.join(YUGABYTE_JENKINS_BUILD_DIR, "bin")
@@ -1109,9 +1117,11 @@ class ControlScript(object):
     def status(self):
         if len(os.listdir(self.configs.saved_data.get("data_dir"))) != 0:
             Output.init_animation("Fetching status...")
-            status_output = self.get_status_string().strip()
+            status_output, ret_code = self.get_status_string()
             Output.update_animation("", Output.ANIMATION_STOP)
-            Output.print_out("\n" + status_output)
+            Output.print_out("\n" + status_output.strip())
+            if ret_code:
+                sys.exit(ret_code)
         else:
             Output.print_out("{} is not running.".format(SCRIPT_NAME))
 
@@ -3270,8 +3280,8 @@ class ControlScript(object):
                     warning_msg += "\n" + warning_help_msg
 
             if is_first_run:
-                status = self.get_status_string() + \
-                    "{} YugabyteDB started successfully! To load a sample dataset, " \
+                status, _ = self.get_status_string()
+                status += "{} YugabyteDB started successfully! To load a sample dataset, " \
                     "try '{} demo'.\n" \
                     "{} Join us on Slack at {}\n" \
                     "{} Claim your free t-shirt at {}\n".format(
@@ -3497,8 +3507,8 @@ class ControlScript(object):
                     warning_msg += "\n" + warning_help_msg
 
             if is_first_run:
-                status = self.get_status_string() + \
-                    "{} YugabyteDB started successfully! To load a sample dataset, " \
+                status, _ = self.get_status_string()
+                status += "{} YugabyteDB started successfully! To load a sample dataset, " \
                     "try '{} demo'.\n" \
                     "{} Join us on Slack at {}\n" \
                     "{} Claim your free t-shirt at {}\n".format(
@@ -5823,6 +5833,18 @@ class ControlScript(object):
         Output.log("Failed to login: {}".format(err))
         return "Timeout: " + err
 
+    def check_pg_isready(self, timeout = 5, retries = 10):
+        advertise_ip = self.advertise_ip()
+        path = find_binary_location("pg_isready")
+        cmd = [path, "-h", str(advertise_ip)]
+
+        (out, err, retcode) = run_process_with_retries(cmd=cmd, log_cmd=True, retries=retries,
+                                                       timeout=timeout)
+        if retcode:
+            return False
+        else:
+            return True
+
     # Returns pretty output table.
     def get_status_string(self):
 
@@ -5858,14 +5880,18 @@ class ControlScript(object):
 
         status_info = []
         status_display_info = dict()
+        ret_code = 0
         # Make sure ascii escape characters for color encoding do not count towards char limit.
         if self.get_failed_node_processes():
             title = Output.make_bold(Output.make_red(SCRIPT_NAME))
             extra_len = len(Output.make_bold(Output.make_red("")))
             status = "Stopped"
+            ysql_status = "Not Ready"
             status_info = [
                 (Output.make_yellow("Status"), status),
+                (Output.make_yellow("YSQL Status"), ysql_status),
             ]
+            ret_code = 1
         else:
             title = Output.make_bold(Output.make_green(SCRIPT_NAME))
             extra_len = len(Output.make_bold(Output.make_green("")))
@@ -5875,17 +5901,39 @@ class ControlScript(object):
             # the leader election
             # In case of manual start or some other route, we can have a smaller timeout
             status = ""
+            if self.configs.temp_data.get("yugabyted_cmd") == "start":
+                Output.init_animation("Checking YSQL Status...")
+            pg_isready = self.check_pg_isready()
+            if self.configs.temp_data.get("yugabyted_cmd") == "start":
+                Output.update_animation("", Output.ANIMATION_STOP)
             if was_already_setup:
                 if master_addrs:
                     status = "Running."
+                    if pg_isready:
+                        ysql_status = "Ready"
+                        ret_code = 0
+                    else:
+                        ysql_status = "Not Ready"
+                        ret_code = 1
+
                 else:
                     status = "Bootstrapping."
+                    ysql_status = "Not Ready"
+                    ret_code = 0
             else:
                 if self.wait_get_all_masters(timeout=10):
                     status = "Running."
+                    if pg_isready:
+                        ysql_status = "Ready"
+                        ret_code = 0
+                    else:
+                        ysql_status = "Not Ready"
+                        ret_code = 1
                 else:
                     status = "Status command timed out as YugabyteDB \"yb-master\" " + \
                                 "process is not responding."
+                    ysql_status = "Not Ready"
+                    ret_code = 1
 
             enabled_security_features = []
             if self.configs.temp_data.get("yugabyted_cmd") == "status":
@@ -5913,7 +5961,10 @@ class ControlScript(object):
             else:
                 rf = YBAdminProxy.get_cluster_rf(master_addrs)
 
-            status_info = [(Output.make_yellow("Status"), status)]
+            status_info = [
+                (Output.make_yellow("Status"), status),
+                (Output.make_yellow("YSQL Status"), ysql_status),
+            ]
             if rf:
                 status_info.append((Output.make_yellow("Replication Factor"), rf))
 
@@ -6011,7 +6062,7 @@ class ControlScript(object):
                     format(v if v is not None else "None")
 
         status += div_line
-        return status
+        return status, ret_code
 
     # Returns pretty output table
     def get_status_string_common(self, status_info, status_display_info = None):
@@ -6109,6 +6160,13 @@ class ControlScript(object):
             self.configs.saved_data["current_masters"] = masters_csv
             Output.log("thread-uml: master list updated, old list: {} ".format(
                 current_master_list) + "new list: {}".format(full_master_list))
+
+            tserver_ip_addr = self.advertise_ip()
+            tserver_ip_port = self.configs.saved_data.get("tserver_rpc_port")
+            if not YBTableServerCLIProxy.update_gflag_in_tserver(tserver_ip_addr,
+                tserver_ip_port, "tserver_master_addrs", masters_csv, True):
+                Output.log("Failed to update the master list {} " +
+                            "on the tserver node.".format(masters_csv))
 
             # Persist the config if masters have changed
             self.configs.save_configs()
@@ -6539,7 +6597,7 @@ class ControlScript(object):
                         ": The directory mentioned in the --cert_dir value of the configs file " +
                         "doen't exist. Please create the directory and copy the certs into that " +
                         "directory.")
-                elif args.join:
+                elif (args.join or self.configs.saved_data.get("join")):
                     # Case Scenario: When the user is trying to start and join a node
                     # to a secure cluster but the generated certs are neither present
                     # in the default directory nor given through --certs_dir flag.
@@ -7548,15 +7606,19 @@ class ControlScript(object):
 
             if args.advertise_address is None:
                 if not self.configs.saved_data.get("advertise_address"):
-                    if OS_NAME == "Linux":
-                        # Case Scenario: When advertise_address has no value in conf file
-                        # and the OS is Linux, set the advertise address to the private IP
-                        # of the machine.
-                        args.advertise_address = self.find_ip_address_of_node()
+                    if os.path.exists("/.dockerenv"):
+                            args.advertise_address = self.find_hostname_of_node()
                     else:
-                        # Case Scenario: When advertise_address has no value in conf file
-                        # and the OS is Mac, set the advertise address to 127.0.0.1.
-                        args.advertise_address = IP_LOCALHOST
+                        if OS_NAME == "Linux":
+                            # Case Scenario: When advertise_address has no value in conf file
+                            # and the OS is Linux, set the advertise address to the private IP
+                            # of the machine.
+                            args.advertise_address = self.find_ip_address_of_node()
+
+                        else:
+                            # Case Scenario: When advertise_address has no value in conf file
+                            # and the OS is Mac, set the advertise address to 127.0.0.1.
+                            args.advertise_address = IP_LOCALHOST
                 else:
                     # Case Scenario: When advertise_address has a value in conf file and then
                     # use that regardless of the OS.
@@ -7584,19 +7646,22 @@ class ControlScript(object):
                 args.background = "True"
 
             cluster_member = self.configs.saved_data.get("cluster_member")
-            if args.join is not None:
-                if not self.validate_hostname_ip(args.join):
+            join_ip = args.join if args.join else self.configs.saved_data.get("join")
+            if join_ip:
+                if not self.validate_hostname_ip(join_ip):
                     Output.log_error_and_exit(Output.make_red("ERROR") + ": --join" +
-                        " provided is not a valid address. Please try again with a valid IPV4, " +
-                        "IPV6 or DNS.")
+                        " provided is not a valid address. Please try again with a " +
+                        "valid IPV4, IPV6 or DNS.")
 
-                Output.print_and_log("Fetching configs from join IP...")
                 if not cluster_member:
+                    # Node is starting for the first time.
+                    Output.print_and_log("Fetching configs from join IP...")
+
                     # Check if tserver webserver at join_IP is reachable or not
                     # Also get the leader master(used to get the info of all tservers)
-                    master_leader = self.get_current_master_leader_from_api(args.join,
+                    master_leader = self.get_current_master_leader_from_api(join_ip,
                                                                 tserver_webserver_port)
-                    args.join = master_leader
+                    join_ip = master_leader
 
                     # Get info on all tservers
                     master_leader_hostport = "{}:{}".format(master_leader, master_webserver_port)
@@ -7607,7 +7672,7 @@ class ControlScript(object):
                         for node in [node.split(":")[0] for node in list(nodes.keys())]:
                             if args.advertise_address == node:
                                 Output.log_error_and_exit(Output.make_red("ERROR:") + " A node" +
-                                    " is already running on {}, please ".format(args.join) +
+                                    " is already running on {}, please ".format(join_ip) +
                                     "specify a valid address.")
 
                     is_placement_uuid_set = False
@@ -7674,8 +7739,8 @@ class ControlScript(object):
                     ": --certs_dir flag needs to be accompanied with the --secure flag.")
 
             if args.insecure:
-                if args.join and not cluster_member:
-                    master_hostport = "{}:{}".format(args.join, master_webserver_port)
+                if join_ip and not cluster_member:
+                    master_hostport = "{}:{}".format(join_ip, master_webserver_port)
                     if self.is_leader_master_secure(master_hostport):
                         # Case Scenario: When a User starts the 1st node in secure mode and tries
                         # to start the second node in insecure mode
@@ -7684,8 +7749,8 @@ class ControlScript(object):
                             "IP was provided in --join flag has SSL/TLS enabled. Cannot join a " +
                             "secure and an insecure node.")
             elif args.secure:
-                if args.join and not cluster_member:
-                    master_hostport = "{}:{}".format(args.join, master_webserver_port)
+                if join_ip and not cluster_member:
+                    master_hostport = "{}:{}".format(join_ip, master_webserver_port)
                     if not self.is_leader_master_secure(master_hostport):
                         # Case Scenario: When the user starts the 1st node in insecure mode and
                         # tries to start the second node in secure mode.
@@ -8354,11 +8419,17 @@ class ControlScript(object):
         # Initialize the binary path of ybadmin
         YBAdminProxy.init()
 
+        # Initialize the binary path of yb-ts-cli
+        YBTableServerCLIProxy.init()
+
         self.validate_and_set_configs(args)
 
         # Initialize the binary path of ybadmin
         # TODO(Sanket): Clean up and refactor this file
         YBAdminProxy.set_certs_dir(self.configs.saved_data.get("master_flags"), \
+            self.configs.saved_data.get("secure"), self.configs.saved_data.get("certs_dir"))
+
+        YBTableServerCLIProxy.set_certs_dir(self.configs.saved_data.get("master_flags"), \
             self.configs.saved_data.get("secure"), self.configs.saved_data.get("certs_dir"))
 
         try:
@@ -8926,6 +8997,51 @@ class Diagnostics(object):
                 if os.path.isfile(filepath):
                     size += os.path.getsize(filepath)
         return size
+
+class YBTableServerCLIProxy(object):
+    cmd_args = []
+
+    @staticmethod
+    def init():
+        YBTableServerCLIProxy.cmd_args.append(find_binary_location("yb-ts-cli"))
+
+    @staticmethod
+    def set_certs_dir(master_flags, secure, certs_dir):
+        # If the user is attempting to use TLS, let's point yb-admin to
+        # the same certs dir as the master
+        if secure:
+            YBTableServerCLIProxy.cmd_args.append("--certs_dir_name={}".format(certs_dir))
+        elif master_flags:
+            flags_list = master_flags.split(",")
+            if 'use_node_to_node_encryption=true' not in flags_list:
+                return
+            certs_dir_name = [y for y in
+                [re.match('certs_dir=(.*)', x) for x in flags_list]
+                if y is not None]
+            if not certs_dir_name[0]:
+                raise RuntimeError("use_node_to_node_encryption=true must "
+                                "be accompanied by a certs_dir setting")
+            YBTableServerCLIProxy.cmd_args.append('--certs_dir_name={}'.
+                                                 format(certs_dir_name[0].group(1)))
+
+    @staticmethod
+    def update_gflag_in_tserver(tserver_ip, tserver_port, gflag, gflag_value, byForce=False):
+        cmd = YBTableServerCLIProxy.cmd_args + \
+            [
+                "--server_address={}:{}".format(tserver_ip, tserver_port),
+                "set_flag",
+                gflag,
+                gflag_value
+            ]
+
+        if byForce:
+            cmd = cmd + \
+                [
+                    "--force"
+                ]
+
+        out, err, ret_code = run_process(cmd, timeout=10, log_cmd=True)
+        return (0 == ret_code)
 
 class YBControllerCLIProxy(object):
     cmd_args = []

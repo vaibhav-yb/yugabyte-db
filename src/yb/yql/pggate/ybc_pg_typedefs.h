@@ -356,6 +356,16 @@ typedef struct PgAttrValueDescriptor {
   int collation_id;
 } YBCPgAttrValueDescriptor;
 
+typedef struct WaitEventInfo {
+  uint32_t wait_event;
+  uint16_t rpc_code;
+} YBCWaitEventInfo;
+
+typedef struct WaitEventInfoPtr {
+  uint32_t* wait_event;
+  uint16_t* rpc_code;
+} YBCWaitEventInfoPtr;
+
 typedef struct PgCallbacks {
   YBCPgMemctx (*GetCurrentYbMemctx)();
   const char* (*GetDebugQueryString)();
@@ -366,7 +376,7 @@ typedef struct PgCallbacks {
   /* hba.c */
   int (*CheckUserMap)(const char *, const char *, const char *, bool case_insensitive);
   /* pgstat.h */
-  uint32_t (*PgstatReportWaitStart)(uint32_t);
+  YBCWaitEventInfo (*PgstatReportWaitStart)(YBCWaitEventInfo);
 } YBCPgCallbacks;
 
 typedef struct PgGFlagsAccessor {
@@ -399,6 +409,10 @@ typedef struct PgGFlagsAccessor {
   const bool*     ysql_conn_mgr_superuser_sticky;
   const bool*     ysql_conn_mgr_version_matching;
   const bool*     ysql_conn_mgr_version_matching_connect_higher_version;
+  const char*     ysql_sequence_cache_method;
+  const char*     ysql_conn_mgr_sequence_support_mode;
+  const int32_t*  ysql_conn_mgr_max_query_size;
+  const int32_t*  ysql_conn_mgr_wait_timeout_ms;
 } YBCPgGFlagsAccessor;
 
 typedef struct YbTablePropertiesData {

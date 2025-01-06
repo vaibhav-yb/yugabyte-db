@@ -17,3 +17,4 @@ BEGIN;
     NULL, 'pg_create_logical_replication_slot', NULL, NULL, NULL)
   ON CONFLICT DO NOTHING;
 COMMIT;
+

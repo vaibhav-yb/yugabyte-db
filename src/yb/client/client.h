@@ -175,7 +175,7 @@ struct CDCSDKStreamInfo {
         case ReplicationSlotLsnType_HYBRID_TIME:
           return tserver::PGReplicationSlotLsnType::ReplicationSlotLsnTypePg_HYBRID_TIME;
         default:
-          LOG(WARN) << "Invalid LSN type specified: " << lsn_type << ", defaulting to SEQUENCE";
+          LOG(WARNING) << "Invalid LSN type specified: " << lsn_type << ", defaulting to SEQUENCE";
           return tserver::PGReplicationSlotLsnType::ReplicationSlotLsnTypePg_SEQUENCE;
       }
     }

@@ -485,7 +485,8 @@ Status YBCGetTableKeyRangesImpl(
   return Status::OK();
 }
 
-YBCStatus GetYbLsnTypeString(tserver::PgReplicationSlotInfoPB slot_info, std::string slot_lsn_type) {
+YBCStatus GetYbLsnTypeString(
+    tserver::PgReplicationSlotInfoPB slot_info, std::string slot_lsn_type) {
   switch (slot_info.yb_lsn_type()) {
     case tserver::PGReplicationSlotLsnType::ReplicationSlotLsnTypePg_SEQUENCE:
       slot_lsn_type = YBC_LSN_TYPE_SEQUENCE;

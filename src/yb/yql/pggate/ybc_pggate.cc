@@ -50,6 +50,7 @@
 #include "yb/server/clockbound_clock.h"
 #include "yb/server/skewed_clock.h"
 
+#include "yb/tserver/pg_client.pb.h"
 #include "yb/util/atomic.h"
 #include "yb/util/curl_util.h"
 #include "yb/util/flags.h"
@@ -73,6 +74,7 @@
 #include "yb/yql/pggate/pggate_thread_local_vars.h"
 #include "yb/yql/pggate/util/pg_wire.h"
 #include "yb/yql/pggate/util/ybc-internal.h"
+#include "yb/yql/pggate/util/ybc_util.h"
 #include "yb/yql/pggate/ybc_pg_typedefs.h"
 
 DEFINE_UNKNOWN_int32(pggate_num_connections_to_server, 1,
@@ -2353,20 +2355,7 @@ YBCStatus YBCPgListReplicationSlots(
       }
 
       const char* slot_lsn_type;
-      switch (info.yb_lsn_type()) {
-        case tserver::PGReplicationSlotLsnType::ReplicationSlotLsnTypePg_SEQUENCE:
-          slot_lsn_type = YBCPAllocStdString("SEQUENCE");
-          break;
-        case tserver::PGReplicationSlotLsnType::ReplicationSlotLsnTypePg_HYBRID_TIME:
-          slot_lsn_type = YBCPAllocStdString("HYBRID_TIME");
-          break;
-        default:
-          LOG(ERROR) << "Received unexpected LSN type " << info.yb_lsn_type() << " for stream "
-                     << info.stream_id();
-          return ToYBCStatus(STATUS_FORMAT(
-              InternalError, "Received unexpected LSN type $0 for stream $1", info.yb_lsn_type(),
-              info.stream_id()));
-      }
+      RETURN_NOT_OK(GetYbLsnTypeString(info.yb_lsn_type(), slot_lsn_type));
 
       new (dest) YBCReplicationSlotDescriptor{
           .slot_name = YBCPAllocStdString(info.slot_name()),
@@ -2417,21 +2406,8 @@ YBCStatus YBCPgGetReplicationSlot(
     replica_identity_idx++;
   }
 
-  const char* slot_lsn_type;
-  switch (slot_info.yb_lsn_type()) {
-    case tserver::PGReplicationSlotLsnType::ReplicationSlotLsnTypePg_SEQUENCE:
-      slot_lsn_type = YBCPAllocStdString("SEQUENCE");
-      break;
-    case tserver::PGReplicationSlotLsnType::ReplicationSlotLsnTypePg_HYBRID_TIME:
-      slot_lsn_type = YBCPAllocStdString("HYBRID_TIME");
-      break;
-    default:
-      LOG(ERROR) << "Received unexpected LSN type " << slot_info.yb_lsn_type() << " for stream "
-                 << slot_info.stream_id();
-      return ToYBCStatus(STATUS_FORMAT(
-          InternalError, "Received unexpected LSN type $0 for stream $1", slot_info.yb_lsn_type(),
-          slot_info.stream_id()));
-  }
+  char* slot_lsn_type;
+  RETURN_NOT_OK(GetYbLsnTypeString(slot_info.yb_lsn_type(), slot_lsn_type));
 
   new (*replication_slot) YBCReplicationSlotDescriptor{
       .slot_name = YBCPAllocStdString(slot_info.slot_name()),
@@ -2450,6 +2426,23 @@ YBCStatus YBCPgGetReplicationSlot(
   };
 
   return YBCStatusOK();
+}
+
+YBCStatus GetYbLsnTypeString(tserver::PGReplicationSlotLsnType lsn_type, char* slot_lsn_type) {
+  switch (slot_info.yb_lsn_type()) {
+    case tserver::PGReplicationSlotLsnType::ReplicationSlotLsnTypePg_SEQUENCE:
+      slot_lsn_type = YBCPAllocStdString("SEQUENCE");
+      return YBCStatusOK();
+    case tserver::PGReplicationSlotLsnType::ReplicationSlotLsnTypePg_HYBRID_TIME:
+      slot_lsn_type = YBCPAllocStdString("HYBRID_TIME");
+      return YBCStatusOK();
+    default:
+      LOG(ERROR) << "Received unexpected LSN type " << slot_info.yb_lsn_type() << " for stream "
+                 << slot_info.stream_id();
+      return ToYBCStatus(STATUS_FORMAT(
+          InternalError, "Received unexpected LSN type $0 for stream $1", slot_info.yb_lsn_type(),
+          slot_info.stream_id()));
+  }
 }
 
 YBCStatus YBCPgNewDropReplicationSlot(const char *slot_name,

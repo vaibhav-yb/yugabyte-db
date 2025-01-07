@@ -168,6 +168,10 @@ DECLARE_bool(TEST_ysql_log_perdb_allocated_new_objectid);
 
 DECLARE_bool(use_fast_backward_scan);
 
+/* Constants for replication slot LSN types */
+const std::string YBC_LSN_TYPE_SEQUENCE = "SEQUENCE";
+const std::string YBC_LSN_TYPE_HYBRID_TIME = "HYBRID_TIME";
+
 namespace {
 
 bool PreloadAdditionalCatalogListValidator(const char* flag_name, const std::string& flag_val) {
@@ -479,6 +483,23 @@ Status YBCGetTableKeyRangesImpl(
   }
 
   return Status::OK();
+}
+
+YBCStatus GetYbLsnTypeString(tserver::PgReplicationSlotInfoPB slot_info, std::string slot_lsn_type) {
+  switch (slot_info.yb_lsn_type()) {
+    case tserver::PGReplicationSlotLsnType::ReplicationSlotLsnTypePg_SEQUENCE:
+      slot_lsn_type = YBC_LSN_TYPE_SEQUENCE;
+      return YBCStatusOK();
+    case tserver::PGReplicationSlotLsnType::ReplicationSlotLsnTypePg_HYBRID_TIME:
+      slot_lsn_type = YBC_LSN_TYPE_HYBRID_TIME;
+      return YBCStatusOK();
+    default:
+      LOG(ERROR) << "Received unexpected LSN type " << slot_info.yb_lsn_type() << " for stream "
+                 << slot_info.stream_id();
+      return ToYBCStatus(STATUS_FORMAT(
+          InternalError, "Received unexpected LSN type $0 for stream $1", slot_info.yb_lsn_type(),
+          slot_info.stream_id()));
+  }
 }
 
 inline YBCPgExplicitRowLockStatus MakePgExplicitRowLockStatus() {
@@ -2354,8 +2375,11 @@ YBCStatus YBCPgListReplicationSlots(
         replica_identity_idx++;
       }
 
-      const char* slot_lsn_type;
-      RETURN_NOT_OK(GetYbLsnTypeString(info.yb_lsn_type(), slot_lsn_type));
+      std::string slot_lsn_type;
+      auto status = GetYbLsnTypeString(info, slot_lsn_type);
+      if (!status) {
+        return status;
+      }
 
       new (dest) YBCReplicationSlotDescriptor{
           .slot_name = YBCPAllocStdString(info.slot_name()),
@@ -2370,7 +2394,7 @@ YBCStatus YBCPgListReplicationSlots(
           .replica_identities = replica_identities,
           .replica_identities_count = replica_identities_count,
           .last_pub_refresh_time = info.last_pub_refresh_time(),
-          .yb_lsn_type = slot_lsn_type
+          .yb_lsn_type = YBCPAllocStdString(slot_lsn_type)
       };
       ++dest;
     }
@@ -2406,8 +2430,11 @@ YBCStatus YBCPgGetReplicationSlot(
     replica_identity_idx++;
   }
 
-  char* slot_lsn_type;
-  RETURN_NOT_OK(GetYbLsnTypeString(slot_info.yb_lsn_type(), slot_lsn_type));
+  std::string slot_lsn_type = nullptr;
+  auto status = GetYbLsnTypeString(slot_info, slot_lsn_type);
+  if (!status) {
+    return status;
+  }
 
   new (*replication_slot) YBCReplicationSlotDescriptor{
       .slot_name = YBCPAllocStdString(slot_info.slot_name()),
@@ -2422,27 +2449,10 @@ YBCStatus YBCPgGetReplicationSlot(
       .replica_identities = replica_identities,
       .replica_identities_count = replica_identities_count,
       .last_pub_refresh_time = slot_info.last_pub_refresh_time(),
-      .yb_lsn_type = slot_lsn_type
+      .yb_lsn_type = YBCPAllocStdString(slot_lsn_type)
   };
 
   return YBCStatusOK();
-}
-
-YBCStatus GetYbLsnTypeString(tserver::PGReplicationSlotLsnType lsn_type, char* slot_lsn_type) {
-  switch (slot_info.yb_lsn_type()) {
-    case tserver::PGReplicationSlotLsnType::ReplicationSlotLsnTypePg_SEQUENCE:
-      slot_lsn_type = YBCPAllocStdString("SEQUENCE");
-      return YBCStatusOK();
-    case tserver::PGReplicationSlotLsnType::ReplicationSlotLsnTypePg_HYBRID_TIME:
-      slot_lsn_type = YBCPAllocStdString("HYBRID_TIME");
-      return YBCStatusOK();
-    default:
-      LOG(ERROR) << "Received unexpected LSN type " << slot_info.yb_lsn_type() << " for stream "
-                 << slot_info.stream_id();
-      return ToYBCStatus(STATUS_FORMAT(
-          InternalError, "Received unexpected LSN type $0 for stream $1", slot_info.yb_lsn_type(),
-          slot_info.stream_id()));
-  }
 }
 
 YBCStatus YBCPgNewDropReplicationSlot(const char *slot_name,

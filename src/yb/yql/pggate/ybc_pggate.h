@@ -897,7 +897,8 @@ YBCStatus YBCPgListReplicationSlots(
 YBCStatus YBCPgGetReplicationSlot(
     const char *slot_name, YBCReplicationSlotDescriptor **replication_slot);
 
-YBCStatus GetYbLsnTypeString(tserver::PGReplicationSlotLsnType lsn_type, char* slot_lsn_type);
+// YBCStatus GetYbLsnTypeString(
+//     yb::tserver::PgReplicationSlotInfoPB slot_info, std::string& slot_lsn_type);
 
 YBCStatus YBCPgNewDropReplicationSlot(const char *slot_name,
                                       YBCPgStatement *handle);

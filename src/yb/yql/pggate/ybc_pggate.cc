@@ -2430,7 +2430,7 @@ YBCStatus YBCPgGetReplicationSlot(
     replica_identity_idx++;
   }
 
-  std::string slot_lsn_type = nullptr;
+  std::string slot_lsn_type;
   auto status = GetYbLsnTypeString(slot_info, slot_lsn_type);
   if (!status) {
     return status;

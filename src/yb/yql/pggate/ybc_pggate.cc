@@ -485,15 +485,13 @@ Status YBCGetTableKeyRangesImpl(
   return Status::OK();
 }
 
-static Status GetYbLsnTypeString(
-    tserver::PgReplicationSlotInfoPB slot_info, std::string slot_lsn_type) {
+static Result<std::string> GetYbLsnTypeString(
+    tserver::PgReplicationSlotInfoPB slot_info) {
   switch (slot_info.yb_lsn_type()) {
     case tserver::PGReplicationSlotLsnType::ReplicationSlotLsnTypePg_SEQUENCE:
-      slot_lsn_type = YBC_LSN_TYPE_SEQUENCE;
-      return Status::OK();
+      return YBC_LSN_TYPE_SEQUENCE;
     case tserver::PGReplicationSlotLsnType::ReplicationSlotLsnTypePg_HYBRID_TIME:
-      slot_lsn_type = YBC_LSN_TYPE_HYBRID_TIME;
-      return Status::OK();
+      return YBC_LSN_TYPE_HYBRID_TIME;
     default:
       LOG(ERROR) << "Received unexpected LSN type " << slot_info.yb_lsn_type() << " for stream "
                  << slot_info.stream_id();
@@ -2376,10 +2374,9 @@ YBCStatus YBCPgListReplicationSlots(
         replica_identity_idx++;
       }
 
-      std::string slot_lsn_type;
-      auto status = GetYbLsnTypeString(info, slot_lsn_type);
-      if (!status.ok()) {
-        return ToYBCStatus(status);
+      auto lsn_type_result = GetYbLsnTypeString(info);
+      if (!lsn_type_result.ok()) {
+        return ToYBCStatus(lsn_type_result.status());
       }
 
       new (dest) YBCReplicationSlotDescriptor{
@@ -2395,7 +2392,7 @@ YBCStatus YBCPgListReplicationSlots(
           .replica_identities = replica_identities,
           .replica_identities_count = replica_identities_count,
           .last_pub_refresh_time = info.last_pub_refresh_time(),
-          .yb_lsn_type = YBCPAllocStdString(slot_lsn_type)
+          .yb_lsn_type = YBCPAllocStdString(lsn_type_result.get())
       };
       ++dest;
     }
@@ -2431,10 +2428,9 @@ YBCStatus YBCPgGetReplicationSlot(
     replica_identity_idx++;
   }
 
-  std::string slot_lsn_type;
-  auto status = GetYbLsnTypeString(slot_info, slot_lsn_type);
-  if (!status.ok()) {
-    return ToYBCStatus(status);
+  auto lsn_type_result = GetYbLsnTypeString(slot_info);
+  if (!lsn_type_result.ok()) {
+    return ToYBCStatus(lsn_type_result.status());
   }
 
   new (*replication_slot) YBCReplicationSlotDescriptor{
@@ -2450,7 +2446,7 @@ YBCStatus YBCPgGetReplicationSlot(
       .replica_identities = replica_identities,
       .replica_identities_count = replica_identities_count,
       .last_pub_refresh_time = slot_info.last_pub_refresh_time(),
-      .yb_lsn_type = YBCPAllocStdString(slot_lsn_type)
+      .yb_lsn_type = YBCPAllocStdString(lsn_type_result.get())
   };
 
   return YBCStatusOK();

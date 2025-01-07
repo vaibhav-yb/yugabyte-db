@@ -486,18 +486,16 @@ Status YBCGetTableKeyRangesImpl(
 }
 
 static Result<std::string> GetYbLsnTypeString(
-    tserver::PgReplicationSlotInfoPB slot_info) {
-  switch (slot_info.yb_lsn_type()) {
+    const tserver::PGReplicationSlotLsnType& yb_lsn_type, const std::string& stream_id) {
+  switch (yb_lsn_type) {
     case tserver::PGReplicationSlotLsnType::ReplicationSlotLsnTypePg_SEQUENCE:
       return YBC_LSN_TYPE_SEQUENCE;
     case tserver::PGReplicationSlotLsnType::ReplicationSlotLsnTypePg_HYBRID_TIME:
       return YBC_LSN_TYPE_HYBRID_TIME;
     default:
-      LOG(ERROR) << "Received unexpected LSN type " << slot_info.yb_lsn_type() << " for stream "
-                 << slot_info.stream_id();
+      LOG(ERROR) << "Received unexpected LSN type " << yb_lsn_type << " for stream " << stream_id;
       return STATUS_FORMAT(
-          InternalError, "Received unexpected LSN type $0 for stream $1", slot_info.yb_lsn_type(),
-          slot_info.stream_id());
+          InternalError, "Received unexpected LSN type $0 for stream $1", yb_lsn_type, stream_id);
   }
 }
 
@@ -2374,7 +2372,7 @@ YBCStatus YBCPgListReplicationSlots(
         replica_identity_idx++;
       }
 
-      auto lsn_type_result = GetYbLsnTypeString(info);
+      auto lsn_type_result = GetYbLsnTypeString(info.yb_lsn_type(), info.stream_id());
       if (!lsn_type_result.ok()) {
         return ToYBCStatus(lsn_type_result.status());
       }
@@ -2428,7 +2426,7 @@ YBCStatus YBCPgGetReplicationSlot(
     replica_identity_idx++;
   }
 
-  auto lsn_type_result = GetYbLsnTypeString(slot_info);
+  auto lsn_type_result = GetYbLsnTypeString(slot_info.yb_lsn_type(), slot_info.stream_id());
   if (!lsn_type_result.ok()) {
     return ToYBCStatus(lsn_type_result.status());
   }

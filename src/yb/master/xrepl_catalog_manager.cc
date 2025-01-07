@@ -2928,6 +2928,10 @@ Status CatalogManager::GetCDCStream(
         stream_lock->pb.cdcsdk_disable_dynamic_table_addition());
   }
 
+  // We need to ensure that we do not check the lsn type option when we are
+  // dealing with a gRPC stream. Adding a check to only access the lsn type values
+  // when we have a slot name present which essentially indicates that we are in
+  // the context of logical replication.
   if (stream_lock->pb.has_cdcsdk_ysql_replication_slot_name()) {
     auto cdc_stream_info_options = stream_info->mutable_cdc_stream_info_options();
 

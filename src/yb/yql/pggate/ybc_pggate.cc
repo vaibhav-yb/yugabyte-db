@@ -486,7 +486,7 @@ Status YBCGetTableKeyRangesImpl(
 }
 
 static Result<std::string> GetYbLsnTypeString(
-    const tserver::PGReplicationSlotLsnType& yb_lsn_type, const std::string& stream_id) {
+    const tserver::PGReplicationSlotLsnType yb_lsn_type, const std::string& stream_id) {
   switch (yb_lsn_type) {
     case tserver::PGReplicationSlotLsnType::ReplicationSlotLsnTypePg_SEQUENCE:
       return YBC_LSN_TYPE_SEQUENCE;

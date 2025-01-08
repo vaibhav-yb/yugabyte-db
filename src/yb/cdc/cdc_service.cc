@@ -2183,10 +2183,27 @@ void CDCServiceImpl::UpdateMetrics() {
     bool is_leader = (tablet_peer->LeaderStatus() == consensus::LeaderStatus::LEADER_AND_READY);
 
     if (record.GetSourceType() == CDCSDK) {
+      if (!tablet_checkpoints.contains(tablet_info)) {
+        tablet_checkpoints.emplace()
+      }
+
       if (entry.active_time.has_value() &&
           CheckTabletExpiredOrNotOfInterest(tablet_info, *entry.active_time)) {
         LOG(INFO) << "VKVK inserting entry to expired_entries: " << tablet_info.tablet_id << " for stream " << tablet_info.stream_id;
         expired_entries.insert(tablet_info);
+
+        if (!tablet_checkpoints.contains(tablet_info)) {
+          LOG(INFO) << "VKVK adding to tablet_checkpoints " << tablet_info.tablet_id;
+          tablet_checkpoints.emplace(TabletCheckpointInfo{
+              .producer_tablet_info = tablet_info,
+              .cdc_state_checkpoint =
+                  TabletCheckpoint{.op_id = {}, .last_update_time = {}, .last_active_time = {}},
+              .sent_checkpoint =
+                  TabletCheckpoint{.op_id = {}, .last_update_time = {}, .last_active_time = {}},
+              .mem_tracker = nullptr,
+          });
+        }
+
         continue;
       }
       auto tablet_metric_result = GetCDCSDKTabletMetrics(

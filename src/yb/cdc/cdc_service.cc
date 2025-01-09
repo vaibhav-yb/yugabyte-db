@@ -2185,11 +2185,11 @@ void CDCServiceImpl::UpdateMetrics() {
     if (record.GetSourceType() == CDCSDK) {
       if (entry.active_time.has_value() &&
           CheckTabletExpiredOrNotOfInterest(tablet_info, *entry.active_time)) {
-        LOG(INFO) << "VKVK inserting entry to expired_entries: " << tablet_info.tablet_id << " for stream " << tablet_info.stream_id;
         expired_entries.insert(tablet_info);
 
         if (!tablet_checkpoints.contains(tablet_info)) {
-          LOG(INFO) << "VKVK adding to tablet_checkpoints " << tablet_info.tablet_id;
+          VLOG(1) << "Inserting a dummy entry for tablet " << tablet_info.tablet_id
+                  << " in tablet_checkpoints";
           tablet_checkpoints.emplace(TabletCheckpointInfo{
               .producer_tablet_info = tablet_info,
               .cdc_state_checkpoint =
@@ -2311,27 +2311,19 @@ void CDCServiceImpl::UpdateMetrics() {
   ProcessMetricsForEmptyChildrenTablets(
       empty_children_tablets, &cdc_state_tablets_to_last_replication_time);
 
-  LOG(INFO) << "VKVK printing tablet checkpoints";
-  for (const auto& checkpoint : tablet_checkpoints) {
-    LOG(INFO) << "VKVK tablet " << checkpoint.tablet_id() << " stream " << checkpoint.stream_id();
-  }
-
   // Now, go through tablets in tablet_checkpoints_ and set lag to 0 for all tablets we're no
   // longer replicating.
   for (const auto& checkpoint : tablet_checkpoints) {
     const TabletStreamInfo& tablet_info = checkpoint.producer_tablet_info;
     if (!cdc_state_tablets_to_last_replication_time.contains(tablet_info) ||
         expired_entries.contains(tablet_info)) {
-      LOG(INFO) << "VKVK expired_entries contains " << tablet_info.tablet_id << " for stream " << tablet_info.stream_id << " expired: " << expired_entries.contains(tablet_info);
       // We're no longer replicating this tablet, so set lag to 0.
       auto tablet_peer = context_->LookupTablet(checkpoint.tablet_id());
       if (!tablet_peer) {
-        LOG(INFO) << "VKVK tablet_peer is null for tablet " << checkpoint.tablet_id();
         continue;
       }
       auto get_stream_metadata = GetStream(checkpoint.producer_tablet_info.stream_id);
       if (!get_stream_metadata.ok()) {
-        LOG(INFO) << "VKVK get_stream_metadata failed for tablet " << checkpoint.tablet_id();
         continue;
       }
       StreamMetadata& record = **get_stream_metadata;
@@ -2342,8 +2334,6 @@ void CDCServiceImpl::UpdateMetrics() {
             *tablet_peer.get(), checkpoint.stream_id(), CreateMetricsEntityIfNotFound::kFalse);
         if (tablet_metric_result) {
           tablet_metric_result.get()->ClearMetrics();
-        } else {
-          LOG(INFO) << "VKVK coming to else case for tablet_metric_result for tablet " << checkpoint.tablet_id();
         }
       } else {
         auto tablet_metric_result = GetXClusterTabletMetrics(

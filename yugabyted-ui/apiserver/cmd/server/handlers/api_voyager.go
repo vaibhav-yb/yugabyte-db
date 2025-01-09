@@ -592,14 +592,35 @@ func getMigrateSchemaTaskInfoFuture(log logger.Logger, conn *pgxpool.Pool, migra
     determineStatusOfMigrateSchmeaPhases(log, conn, &schemaPhaseInfoList,
         &migrateSchemaTaskInfo)
 
+    // Finding the count for manual refactoring using Issues field of Schema analysis report.
+    dbObjectConversionIssuesMap := map[string]int{}
+    for _, conversionIssue := range migrateSchemaTaskInfo.SuggestionsErrors {
+        count, ok := dbObjectConversionIssuesMap[conversionIssue.ObjectType]
+        if ok {
+            count++
+            dbObjectConversionIssuesMap[conversionIssue.ObjectType] = count
+        } else {
+            dbObjectConversionIssuesMap[conversionIssue.ObjectType] = 1
+        }
+    }
+
+    // Computing the count for automatic, invalid, and manual refactoring fields
+    // for each sql object type.
     recommendedRefactoringList := []models.RefactoringCount{}
     for _, sqlObject := range migrateSchemaTaskInfo.SqlObjects {
         var refactorCount models.RefactoringCount
         refactorCount.SqlObjectType = sqlObject.ObjectType
         refactorCount.Automatic = sqlObject.TotalCount - sqlObject.InvalidCount
-        refactorCount.Manual = sqlObject.InvalidCount
+        refactorCount.Invalid = sqlObject.InvalidCount
+        issueCount, ok := dbObjectConversionIssuesMap[sqlObject.ObjectType]
+        if ok {
+            refactorCount.Manual = int32(issueCount)
+        } else {
+            refactorCount.Manual = 0
+        }
         recommendedRefactoringList = append(recommendedRefactoringList, refactorCount)
     }
+
     migrateSchemaTaskInfo.CurrentAnalysisReport.RecommendedRefactoring.RefactorDetails =
         recommendedRefactoringList
 
@@ -1055,16 +1076,31 @@ func (c *Container) GetVoyagerAssessmentReport(ctx echo.Context) error {
         }
     }
 
+    // recommendedRefactoringList := []models.RefactoringCount{}
+    // for sqlObjectType, sqlObjectcount := range dbObjectsMap {
+    //     var refactorCount models.RefactoringCount
+    //     refactorCount.SqlObjectType = sqlObjectType
+    //     issueCount, ok := dbObjectConversionIssuesMap[sqlObjectType]
+    //     if ok {
+    //         refactorCount.Automatic = int32(sqlObjectcount - issueCount)
+    //         refactorCount.Manual = int32(issueCount)
+    //     } else {
+    //         refactorCount.Automatic = int32(sqlObjectcount)
+    //         refactorCount.Manual = 0
+    //     }
+    //     recommendedRefactoringList = append(recommendedRefactoringList, refactorCount)
+    // }
+
     recommendedRefactoringList := []models.RefactoringCount{}
-    for sqlObjectType, sqlObjectcount := range dbObjectsMap {
+    for _, dbObject := range assessmentReport.SchemaSummary.DBObjects {
         var refactorCount models.RefactoringCount
-        refactorCount.SqlObjectType = sqlObjectType
-        issueCount, ok := dbObjectConversionIssuesMap[sqlObjectType]
+        refactorCount.SqlObjectType = dbObject.ObjectType
+        refactorCount.Automatic = int32(dbObject.TotalCount - dbObject.InvalidCount)
+        refactorCount.Invalid = int32(dbObject.InvalidCount)
+        issueCount, ok := dbObjectConversionIssuesMap[dbObject.ObjectType]
         if ok {
-            refactorCount.Automatic = int32(sqlObjectcount - issueCount)
             refactorCount.Manual = int32(issueCount)
         } else {
-            refactorCount.Automatic = int32(sqlObjectcount)
             refactorCount.Manual = 0
         }
         recommendedRefactoringList = append(recommendedRefactoringList, refactorCount)
@@ -1205,19 +1241,40 @@ func getMigrationAssessmentReportFuture(log logger.Logger, migrationUuid string,
 
         sqlMetadataList := []models.SqlObjectMetadata{}
         tableIndexList := assessmentReport.TableIndexStats
-        for _, dbObjectStat := range tableIndexList {
-            var sqlMetadata1 models.SqlObjectMetadata
-            sqlMetadata1.ObjectName = dbObjectStat.ObjectName
-            if dbObjectStat.IsIndex {
-                sqlMetadata1.SqlType = "Index"
-            } else {
-                sqlMetadata1.SqlType = "Table"
-            }
-            sqlMetadata1.RowCount = dbObjectStat.RowCount
-            sqlMetadata1.Iops = dbObjectStat.Reads
-            sqlMetadata1.Size = dbObjectStat.SizeInBytes
+        setForSchemaObjectPairs := map[string]int{}
+        for _, dbObjectStat := range assessmentReport.SchemaSummary.DBObjects {
+          var sqlMetadata1 models.SqlObjectMetadata
+          allObjectNames := dbObjectStat.ObjectNames
+          allObjectNamesArray := strings.Split(allObjectNames, ", ")
+          for _, currentObjName := range allObjectNamesArray {
+            sqlMetadata1.SqlType = strings.ToLower(dbObjectStat.ObjectType)
+
+            sqlMetadata1.Size = -1
+            sqlMetadata1.Iops = -1
+            sqlMetadata1.ObjectName = currentObjName
+            setForSchemaObjectPairs[strings.ToLower(currentObjName)] = len(sqlMetadataList)
             sqlMetadataList = append(sqlMetadataList, sqlMetadata1)
+          }
         }
+
+        for _, dbObjectStat := range tableIndexList {
+          currentObjectName := string(dbObjectStat.SchemaName) + "." +
+            string(dbObjectStat.ObjectName)
+          // Here searching with and without schema names is important because of inconsistent
+          // payload
+          objectNameLower := strings.ToLower(currentObjectName)
+          objectNameOnlyLower := strings.ToLower(string(dbObjectStat.ObjectName))
+          index, exists := setForSchemaObjectPairs[objectNameLower]
+          if !exists {
+            index, exists = setForSchemaObjectPairs[objectNameOnlyLower]
+          }
+          if exists {
+            sqlMetadataList[index].Iops = dbObjectStat.Reads
+            sqlMetadataList[index].Size = dbObjectStat.SizeInBytes
+            sqlMetadataList[index].ObjectName = currentObjectName
+          }
+        }
+
         assessmentSourceDBDetails.SqlObjectsMetadata = sqlMetadataList
 
         sqlObjectsList := []models.SqlObjectCount{}

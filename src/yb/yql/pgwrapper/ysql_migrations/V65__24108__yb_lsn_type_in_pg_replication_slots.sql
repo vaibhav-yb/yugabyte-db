@@ -77,5 +77,5 @@ BEGIN
         FROM pg_replication_slots as r,
             LATERAL pg_stat_get_replication_slot(slot_name) as s
         WHERE r.datoid IS NOT NULL; -- excluding physical slots
-  END IF;
 END $$;
+

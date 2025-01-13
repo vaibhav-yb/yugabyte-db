@@ -2856,6 +2856,6 @@ uint64_t YBCGetCurrentHybridTimeLsn() {
   return (HybridTime::FromMicros(GetCurrentTimeMicros()).ToUint64());
 }
 
-} // extern "C"
+}  // extern "C"
 
 } // namespace yb::pggate

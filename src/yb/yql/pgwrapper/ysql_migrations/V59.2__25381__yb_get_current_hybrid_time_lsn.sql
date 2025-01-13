@@ -6,7 +6,7 @@ BEGIN;
   DELETE FROM pg_catalog.pg_proc WHERE proname = 'yb_get_current_hybrid_time_lsn' AND
     pronamespace = 'pg_catalog'::regnamespace;
   INSERT INTO pg_catalog.pg_proc (
-    oid, proname, pronamespace, proowner, prolang, procost, prorows, provariadic, prosupport,
+    oid, proname, pronamespace, proowner, prolang, procost, prorows, provariadic, protransform,
     prokind, prosecdef, proleakproof, proisstrict, proretset, provolatile, proparallel,
     pronargs, pronargdefaults, prorettype, proargtypes, proallargtypes, proargmodes,
     proargnames, proargdefaults, protrftypes, prosrc, probin, proconfig, proacl

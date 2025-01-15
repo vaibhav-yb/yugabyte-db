@@ -16,9 +16,18 @@ BEGIN;
     NULL, NULL, 'yb_get_current_hybrid_time_lsn', NULL, NULL, NULL)
   ON CONFLICT DO NOTHING;
 
-  INSERT INTO pg_catalog.pg_description (
-    objoid, classoid, objsubid, description
-  ) VALUES (
-    8078, 1255, 0, 'returns current hybrid time'
-  ) ON CONFLICT DO NOTHING;
+  -- Create dependency records for everything we (possibly) created.
+  -- Since pg_depend has no OID or unique constraint, using PL/pgSQL instead.
+  DO $$
+  BEGIN
+    IF NOT EXISTS (
+      SELECT FROM pg_catalog.pg_depend
+        WHERE refclassid = 1255 AND refobjid = 8078
+    ) THEN
+      INSERT INTO pg_catalog.pg_depend (
+        classid, objid, objsubid, refclassid, refobjid, refobjsubid, deptype
+      ) VALUES
+        (0, 0, 0, 1255, 8078, 0, 'p');
+    END IF;
+  END $$;
 COMMIT;

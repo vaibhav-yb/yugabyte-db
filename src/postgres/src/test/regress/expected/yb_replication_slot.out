@@ -23,7 +23,7 @@ SELECT * FROM pg_create_logical_replication_slot('testslot_test_decoding', 'test
  testslot_test_decoding | 0/2
 (1 row)
 
-SELECT * FROM pg_create_logical_replication_slot('testslot_hybrid_time', 'yboutput', false, false, 'HYBRID_TIME');
+SELECT * FROM pg_create_logical_replication_slot('testslot_hybrid_time', 'yboutput', false, 'HYBRID_TIME');
       slot_name       | lsn
 ----------------------+-----
  testslot_hybrid_time | 0/2

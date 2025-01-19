@@ -7,16 +7,16 @@ BEGIN;
   DELETE FROM pg_catalog.pg_proc WHERE proname = 'pg_get_replication_slots' AND
     pronamespace = 'pg_catalog'::regnamespace;
   INSERT INTO pg_catalog.pg_proc (
-    oid, proname, pronamespace, proowner, prolang, procost, prorows, provariadic, prosupport,
+    oid, proname, pronamespace, proowner, prolang, procost, prorows, provariadic, protransform,
     prokind, prosecdef, proleakproof, proisstrict, proretset, provolatile, proparallel,
     pronargs, pronargdefaults, prorettype, proargtypes, proallargtypes, proargmodes,
     proargnames, proargdefaults, protrftypes, prosrc, probin, proconfig, proacl
   ) VALUES (
     3781, 'pg_get_replication_slots', 11, 10, 12, 1, 10, 0, '-', 'f', false, false, false,
-    true, 's', 's', 0, 0, 2249, '', '{19,19,25,26,16,16,23,28,28,3220,3220,25,20,16,25,20,25}',
-    '{o,o,o,o,o,o,o,o,o,o,o,o,o,o,o,o,o}', '{slot_name,plugin,slot_type,datoid,temporary,active,
-    active_pid,xmin,catalog_xmin,restart_lsn,confirmed_flush_lsn,wal_status,safe_wal_size,
-    two_phase,yb_stream_id,yb_restart_commit_ht,yb_lsn_type}',
+    true, 's', 's', 0, 0, 2249, '', '{19,19,25,26,16,16,23,28,28,3220,3220,25,20,25}',
+    '{o,o,o,o,o,o,o,o,o,o,o,o,o,o}', '{slot_name,plugin,slot_type,datoid,temporary,active,
+    active_pid,xmin,catalog_xmin,restart_lsn,confirmed_flush_lsn,yb_stream_id,
+    yb_restart_commit_ht,yb_lsn_type}',
     NULL, NULL, 'pg_get_replication_slots', NULL, NULL, NULL)
   ON CONFLICT DO NOTHING;
 COMMIT;

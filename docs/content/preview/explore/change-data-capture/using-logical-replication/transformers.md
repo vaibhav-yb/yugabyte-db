@@ -49,10 +49,6 @@ UPDATE test SET aura = NULL WHERE id = 1;
 DELETE FROM test WHERE id = 1;
 ```
 
-## YBExtractNewRecordState
-
-**Transformer class:** 
-
 ## PGCompatible
 
 **Transformer class:** `io.debezium.connector.postgresql.transforms.PGCompatible`

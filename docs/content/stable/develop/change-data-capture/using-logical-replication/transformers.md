@@ -11,18 +11,22 @@ menu:
 type: docs
 ---
 
-The connector comes bundled with some SMTs which can ease in the data flow and help achieve the right message format as per the requirement. The following transformers are bundled with the connector jar file available on [GitHub releases](https://github.com/yugabyte/debezium/releases):
+The YugabyteDB Connector comes bundled with Single Message Transformers (SMTs). SMTs are applied to messages as they flow through Kafka Connect so that sinks understand the format in which data is sent. SMTs transform inbound messages after a source connector has produced them, but before they are written to Kafka. SMTs transform outbound messages before they are sent to a sink connector.
+
+The following SMTs are bundled with the connector jar file available on [GitHub releases](https://github.com/yugabyte/debezium/releases):
 
 * YBExtractNewRecordState
 * PGCompatible
 
 {{< note title="Important" >}}
 
-The above mentioned transformers are only expected to be used with logical replication when the [plugin](../using-logical-replication/key-concepts#output-plugin) being used is `yboutput`.
+These SMTs are only compatible with the [yboutput plugin](../key-concepts#output-plugin).
 
 {{< /note >}}
 
-Note that for maintaining simplicity, only the `before` and `after` fields of the `payload` of the message published by the connector will be mentioned in the following examples. Any information pertaining to the record schema, if same as the standard Debezium connector for Postgres, will be skipped.
+## Example
+
+For simplicity, only `before` and `after` fields of the `payload` of the message published by the connector are mentioned in the following examples. Any information pertaining to the record schema, if it is the same as the standard Debezium connector for PostgreSQL, is skipped.
 
 Consider a table created using the following statement:
 
@@ -55,15 +59,15 @@ DELETE FROM test WHERE id = 1;
 
 By default, the YugabyteDB CDC service publishes events with a schema that only includes columns that have been modified. The source connector then sends the value as `null` for columns that are missing in the payload. Each column payload includes a `set` field that is used to signal if a column has been set to `null` because it wasn't present in the payload from YugabyteDB.
 
-However, some sink connectors may not understand the preceding format. `PGCompatible` transforms the payload to a format that is compatible with the format of the standard change data events. Specifically, it transforms column schema and value to remove the `set` field and collapse the payload such that it only contains the data type schema and value.
+However, some sink connectors may not understand this format. PGCompatible transforms the payload to a format that is compatible with the format of standard change data events. Specifically, it transforms column schema and value to remove the `set` field and collapse the payload such that it only contains the data type schema and value.
 
-`PGCompatible` differs from `YBExtractNewRecordState` by recursively modifying all the fields in a payload.
+PGCompatible differs from YBExtractNewRecordState by recursively modifying all the fields in a payload.
 
-Following are the examples how the payload would look like for each [replica identity](../using-logical-replication/key-concepts/#replica-identity).
+The following examples show what the payload would look like for each [replica identity](../key-concepts/#replica-identity).
 
 ### CHANGE
 
-```
+```output
 -- statement 1
 "before":null,"after":{"id":1,"name":"Vaibhav","aura":9876}
 
@@ -84,7 +88,7 @@ Do note that for statement 2 and 4, the columns which were not updated as a part
 
 ### DEFAULT
 
-```
+```output
 -- statement 1
 "before":null,"after":{"id":1,"name":"Vaibhav","aura":9876}
 
@@ -103,7 +107,7 @@ Do note that for statement 2 and 4, the columns which were not updated as a part
 
 ### FULL
 
-```
+```output
 -- statement 1
 "before":null,"after":{"id":1,"name":"Vaibhav","aura":9876}
 

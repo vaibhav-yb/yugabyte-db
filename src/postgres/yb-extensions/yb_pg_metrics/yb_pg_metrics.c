@@ -1,14 +1,21 @@
-// Copyright (c) YugaByte, Inc.
-//
-// Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except
-// in compliance with the License.  You may obtain a copy of the License at
-//
-// http://www.apache.org/licenses/LICENSE-2.0
-//
-// Unless required by applicable law or agreed to in writing, software distributed under the License
-// is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
-// or implied.  See the License for the specific language governing permissions and limitations
-// under the License.
+/*-------------------------------------------------------------------------
+ *
+ * Copyright (c) YugaByte, Inc.
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License"); you may not
+ * use this file except in compliance with the License.  You may obtain a copy
+ * of the License at
+ *
+ * http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+ * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
+ * License for the specific language governing permissions and limitations
+ * under the License.
+ *
+ *-------------------------------------------------------------------------
+ */
 
 #include "postgres.h"
 
@@ -32,13 +39,14 @@
 #include "storage/ipc.h"
 #include "storage/latch.h"
 #include "storage/proc.h"
+#include "storage/procarray.h"
 #include "storage/shmem.h"
 #include "tcop/utility.h"
 #include "utils/builtins.h"
 #include "utils/catcache.h"
 #include "utils/datetime.h"
 #include "utils/syscache.h"
-#include "yb/yql/pggate/webserver/pgsql_webserver_wrapper.h"
+#include "yb/yql/pggate/webserver/ybc_pg_webserver_wrapper.h"
 
 #include "pg_yb_utils.h"
 
@@ -47,7 +55,7 @@
 
 PG_MODULE_MAGIC;
 
-typedef enum statementType
+typedef enum YbStatementType
 {
   Select,
   Insert,
@@ -202,9 +210,9 @@ typedef enum statementType
   CatCacheTableMisses_49,
   CatCacheTableMisses_End = CatCacheTableMisses_49,
   kMaxStatementType
-} statementType;
+} YbStatementType;
 int num_entries = kMaxStatementType;
-ybpgmEntry *ybpgm_table = NULL;
+YbcPgmEntry *ybpgm_table = NULL;
 
 /* Statement nesting level is used when setting up dml statements.
  * - Some state variables are set up for the top-level query but not the nested query.
@@ -237,7 +245,7 @@ static bool log_accesses = false;
 static bool log_tcmalloc_stats = false;
 static int webserver_profiler_sample_freq_bytes = 0;
 static int num_backends = 0;
-static rpczEntry *rpcz = NULL;
+static YbcRpczEntry *rpcz = NULL;
 static MemoryContext ybrpczMemoryContext = NULL;
 PgBackendStatus *backendStatusArray = NULL;
 extern int MaxConnections;
@@ -277,8 +285,8 @@ static void ybpgm_ProcessUtility(PlannedStmt *pstmt, const char *queryString,
 								 ParamListInfo params,
 								 QueryEnvironment *queryEnv,
 								 DestReceiver *dest, QueryCompletion *qc);
-static void ybpgm_Store(statementType type, uint64_t time, uint64_t rows);
-static void ybpgm_StoreCount(statementType type, uint64_t time, uint64_t count);
+static void ybpgm_Store(YbStatementType type, uint64_t time, uint64_t rows);
+static void ybpgm_StoreCount(YbStatementType type, uint64_t time, uint64_t count);
 
 static void ws_sighup_handler(SIGNAL_ARGS);
 static void ws_sigterm_handler(SIGNAL_ARGS);
@@ -340,7 +348,7 @@ set_metric_names(void)
 	strcpy(ybpgm_table[Commit].name, YSQL_METRIC_PREFIX "CommitStmt");
 	strcpy(ybpgm_table[Rollback].name, YSQL_METRIC_PREFIX "RollbackStmt");
 	strcpy(ybpgm_table[Other].name, YSQL_METRIC_PREFIX "OtherStmts");
-	// Deprecated. Names with "_"s may cause confusion to metric conumsers.
+	/* Deprecated. Names with "_"s may cause confusion to metric consumers. */
 	strcpy(ybpgm_table[Single_Shard_Transaction].name,
 		   YSQL_METRIC_PREFIX "Single_Shard_Transactions");
 	strcpy(ybpgm_table[SingleShardTransaction].name,
@@ -473,7 +481,7 @@ pullRpczEntries(void)
 												ALLOCSET_SMALL_SIZES);
 
 	MemoryContext oldcontext = MemoryContextSwitchTo(ybrpczMemoryContext);
-	rpcz = (rpczEntry *) palloc(sizeof(rpczEntry) * NumBackendStatSlots);
+	rpcz = (YbcRpczEntry *) palloc(sizeof(YbcRpczEntry) * NumBackendStatSlots);
 
 	num_backends = NumBackendStatSlots;
 	volatile PgBackendStatus *beentry = backendStatusArray;
@@ -503,6 +511,29 @@ pullRpczEntries(void)
 				break;
 
 			rpcz[i].db_oid = beentry->st_databaseid;
+			rpcz[i].query_id = beentry->st_query_id;
+			rpcz[i].leader_pid = -1;
+			PGPROC *proc = NULL;
+
+			if (beentry->st_backendType == B_BACKEND)
+				proc = BackendPidGetProc(rpcz[i].proc_id);
+			else if (beentry->st_backendType != YB_YSQL_CONN_MGR)
+			{
+				/*
+				 * For an auxiliary process, retrieve process info from
+				 * AuxiliaryProcs stored in shared-memory.
+				 */
+				proc = AuxiliaryPidGetProc(beentry->st_procpid);
+			}
+
+			if (proc != NULL)
+			{
+				PGPROC *leader = proc->lockGroupLeader;
+				if (leader != NULL)
+				{
+					rpcz[i].leader_pid = leader->pid;
+				}
+			}
 
 			rpcz[i].query = (char *) palloc(pgstat_track_activity_query_size);
 			strcpy(rpcz[i].query, (char *) beentry->st_activity_raw);
@@ -640,20 +671,20 @@ webserver_worker_main(Datum unused)
 	if (!backendStatusArray)
 		ereport(FATAL,
 			(errcode(ERRCODE_INTERNAL_ERROR),
-			 errmsg("Shared memory not allocated to BackendStatusArray before starting YSQL webserver")));
+			 errmsg("shared memory not allocated to BackendStatusArray before starting YSQL webserver")));
 
 	webserver = CreateWebserver(ListenAddresses, port);
 
 	RegisterMetrics(ybpgm_table, num_entries, metric_node_name);
 
-	postgresCallbacks callbacks;
+	YbcPostgresCallbacks callbacks;
 	callbacks.pullRpczEntries      = pullRpczEntries;
 	callbacks.freeRpczEntries      = freeRpczEntries;
 	callbacks.getTimestampTz       = GetCurrentTimestamp;
 	callbacks.getTimestampTzDiffMs = getElapsedMs;
 	callbacks.getTimestampTzToStr  = timestamptz_to_str;
 
-	YbConnectionMetrics conn_metrics;
+	YbcConnectionMetrics conn_metrics;
 	conn_metrics.max_conn = &MaxConnections;
 	conn_metrics.too_many_conn = yb_too_many_conn;
 	conn_metrics.new_conn = yb_new_conn;
@@ -844,7 +875,7 @@ ybpgm_startup_hook(void)
 	bool found;
 
 	ybpgm_table = ShmemInitStruct("yb_pg_metrics",
-								  num_entries * sizeof(struct ybpgmEntry),
+								  num_entries * sizeof(struct YbcPgmEntry),
 								  &found);
 	set_metric_names();
 }
@@ -928,7 +959,7 @@ ybpgm_ExecutorFinish(QueryDesc *queryDesc)
 static void
 ybpgm_ExecutorEnd(QueryDesc *queryDesc)
 {
-	statementType type;
+	YbStatementType type;
 
 	switch (queryDesc->operation)
 	{
@@ -1039,7 +1070,7 @@ ybpgm_memsize(void)
 {
 	Size		size;
 
-	size = MAXALIGN(num_entries * sizeof(struct ybpgmEntry));
+	size = MAXALIGN(num_entries * sizeof(struct YbcPgmEntry));
 
 	return size;
 }
@@ -1047,8 +1078,8 @@ ybpgm_memsize(void)
 /*
  * Get the statement type for a transactional statement.
  */
-static statementType ybpgm_getStatementType(TransactionStmt *stmt) {
-	statementType type = Other;
+static YbStatementType ybpgm_getStatementType(TransactionStmt *stmt) {
+	YbStatementType type = Other;
 	switch (stmt->kind)
 	{
 		case TRANS_STMT_BEGIN:
@@ -1091,7 +1122,7 @@ ybpgm_ProcessUtility(PlannedStmt *pstmt, const char *queryString,
 	{
 		instr_time start;
 		instr_time end;
-		statementType type;
+		YbStatementType type;
 
 		if (IsA(pstmt->utilityStmt, TransactionStmt))
 		{
@@ -1172,16 +1203,16 @@ ybpgm_ProcessUtility(PlannedStmt *pstmt, const char *queryString,
 }
 
 static void
-ybpgm_Store(statementType type, uint64_t time, uint64_t rows) {
-	struct ybpgmEntry *entry = &ybpgm_table[type];
+ybpgm_Store(YbStatementType type, uint64_t time, uint64_t rows) {
+	struct YbcPgmEntry *entry = &ybpgm_table[type];
 	entry->total_time += time;
 	entry->calls += 1;
 	entry->rows += rows;
 }
 
 static void
-ybpgm_StoreCount(statementType type, uint64_t time, uint64_t count) {
-	struct ybpgmEntry *entry = &ybpgm_table[type];
+ybpgm_StoreCount(YbStatementType type, uint64_t time, uint64_t count) {
+	struct YbcPgmEntry *entry = &ybpgm_table[type];
 	entry->total_time += time;
 	entry->calls += count;
 	entry->rows += count;

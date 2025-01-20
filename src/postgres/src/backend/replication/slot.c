@@ -52,7 +52,7 @@
 #include "utils/builtins.h"
 
 /* YB includes. */
-#include "commands/ybccmds.h"
+#include "commands/yb_cmds.h"
 #include "pg_yb_utils.h"
 
 /*
@@ -265,7 +265,7 @@ ReplicationSlotCreate(const char *name, bool db_specific,
 					  char *yb_plugin_name,
 					  CRSSnapshotAction yb_snapshot_action,
 					  uint64_t *yb_consistent_snapshot_time,
-					  CRSLsnType lsn_type)
+					  YbCRSLsnType lsn_type)
 {
 	ReplicationSlot *slot = NULL;
 	int			i;
@@ -529,7 +529,7 @@ retry:
 	 */
 	if (IsYugaByteEnabled())
 	{
-		YBCReplicationSlotDescriptor *yb_replication_slot;
+		YbcReplicationSlotDescriptor *yb_replication_slot;
 		int							 replica_identity_idx = 0;
 		HTAB						 *replica_identities;
 		HASHCTL						 ctl;
@@ -579,7 +579,7 @@ retry:
 		 * entrysize >= keysize. So we just end up storing both the table_oid
 		 * and the replica identity.
 		 */
-		ctl.entrysize = sizeof(YBCPgReplicaIdentityDescriptor);
+		ctl.entrysize = sizeof(YbcPgReplicaIdentityDescriptor);
 		ctl.hcxt = GetCurrentMemoryContext();
 
 		replica_identities = hash_create("yb_repl_slot_replica_identities",
@@ -590,10 +590,10 @@ retry:
 			 yb_replication_slot->replica_identities_count;
 			 replica_identity_idx++)
 		{
-			YBCPgReplicaIdentityDescriptor *desc =
+			YbcPgReplicaIdentityDescriptor *desc =
 				&yb_replication_slot->replica_identities[replica_identity_idx];
 
-			YBCPgReplicaIdentityDescriptor *value = hash_search(replica_identities,
+			YbcPgReplicaIdentityDescriptor *value = hash_search(replica_identities,
 																&desc->table_oid,
 																HASH_ENTER,
 																NULL);
@@ -823,7 +823,7 @@ ReplicationSlotDrop(const char *name, bool nowait)
 	 */
 	if (IsYugaByteEnabled())
 	{
-		YBCReplicationSlotDescriptor *yb_replication_slot;
+		YbcReplicationSlotDescriptor *yb_replication_slot;
 		YBCGetReplicationSlot(name, &yb_replication_slot);
 
 		if (yb_replication_slot->active)
@@ -2179,7 +2179,7 @@ YBCGetReplicaIdentityForRelation(Oid relid)
 
 	bool found;
 
-	YBCPgReplicaIdentityDescriptor *value =
+	YbcPgReplicaIdentityDescriptor *value =
 		hash_search(MyReplicationSlot->data.yb_replica_identities, &relid,
 					HASH_FIND, &found);
 

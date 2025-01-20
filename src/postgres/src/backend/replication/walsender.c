@@ -97,7 +97,7 @@
 
 /* YB includes. */
 #include "pg_yb_utils.h"
-#include "commands/ybccmds.h"
+#include "commands/yb_cmds.h"
 #include "replication/yb_virtual_wal_client.h"
 
 /*
@@ -1024,7 +1024,7 @@ parseCreateReplSlotOptions(CreateReplicationSlotCmd *cmd,
 						   bool *reserve_wal,
 						   CRSSnapshotAction *snapshot_action,
 						   bool *two_phase,
-						   CRSLsnType *lsn_type)
+						   YbCRSLsnType *lsn_type)
 {
 	ListCell   *lc;
 	bool		snapshot_action_given = false;
@@ -1131,7 +1131,7 @@ CreateReplicationSlot(CreateReplicationSlotCmd *cmd)
 	bool		reserve_wal = false;
 	bool		two_phase = false;
 	CRSSnapshotAction snapshot_action = CRS_EXPORT_SNAPSHOT;
-	CRSLsnType lsn_type = CRS_SEQUENCE;
+	YbCRSLsnType lsn_type = CRS_SEQUENCE;
 	DestReceiver *dest;
 	TupOutputState *tstate;
 	TupleDesc	tupdesc;
@@ -1203,7 +1203,7 @@ CreateReplicationSlot(CreateReplicationSlotCmd *cmd)
 			if (IsYugaByteEnabled())
 				ereport(ERROR,
 						(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-						 errmsg("Exporting snapshot is not yet supported")));
+						 errmsg("exporting snapshot is not yet supported")));
 
 			if (IsTransactionBlock())
 				ereport(ERROR,
@@ -1252,11 +1252,11 @@ CreateReplicationSlot(CreateReplicationSlotCmd *cmd)
 			if (cmd->temporary)
 				ereport(ERROR,
 						(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-						 errmsg("Temporary replication slot is not yet"
+						 errmsg("temporary replication slot is not yet"
 								" supported"),
 						 errhint("See https://github.com/yugabyte/yugabyte-db/"
 								 "issues/19263. React with thumbs up to raise"
-								 " its priority")));
+								 " its priority.")));
 
 			/*
 			 * Validate output plugin requirement early so that we can avoid the
@@ -1443,7 +1443,7 @@ DropReplicationSlot(DropReplicationSlotCmd *cmd)
 	if (IsYugaByteEnabled() && cmd->wait)
 		ereport(ERROR,
 				(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-				 errmsg("Waiting for a replication slot is not yet"
+				 errmsg("waiting for a replication slot is not yet"
 						" supported")));
 
 	ReplicationSlotDrop(cmd->slotname, !cmd->wait);
@@ -3273,7 +3273,7 @@ XLogSendLogical(void)
 	XLogRecord *record;
 	char	   *errm;
 
-	YBCPgVirtualWalRecord *yb_record;
+	YbVirtualWalRecord *yb_record;
 
 	/*
 	 * We'll use the current flush point to determine whether we've caught up.

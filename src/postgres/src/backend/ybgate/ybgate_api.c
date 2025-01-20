@@ -117,11 +117,12 @@ YbgStatus YbgDeleteMemoryContext()
 // Types
 //-----------------------------------------------------------------------------
 
-YbgStatus YbgGetTypeTable(const YBCPgTypeEntity **type_table, int *count)
+YbgStatus
+YbgGetTypeTable(YbcPgTypeEntities *types_entities)
 {
 	PG_SETUP_ERROR_REPORTING();
 
-	YbGetTypeTable(type_table, count);
+	*types_entities = YbGetTypeTable();
 
 	PG_STATUS_OK();
 }
@@ -364,7 +365,7 @@ static Datum evalExpr(YbgExprContext ctx, Expr* expr, bool *is_null)
 					/* Planner should ensure we never get here. */
 					ereport(ERROR,
 							(errcode(ERRCODE_INTERNAL_ERROR),
-							 errmsg("Unsupported boolop received by DocDB")));
+							 errmsg("unsupported boolop received by DocDB")));
 					break;
 			}
 			return true;
@@ -380,7 +381,7 @@ static Datum evalExpr(YbgExprContext ctx, Expr* expr, bool *is_null)
 			if (ce->arg)
 				ereport(ERROR,
 						(errcode(ERRCODE_INTERNAL_ERROR),
-						 errmsg("Unsupported CASE expression received by DocDB")));
+						 errmsg("unsupported CASE expression received by DocDB")));
 			/*
 			 * Evaluate WHEN clause expressions one by one, if any evaluation
 			 * result is true, evaluate and return respective result expression
@@ -416,7 +417,7 @@ static Datum evalExpr(YbgExprContext ctx, Expr* expr, bool *is_null)
 			/* Planner should ensure we never get here. */
 			ereport(ERROR,
 					(errcode(ERRCODE_INTERNAL_ERROR),
-					 errmsg("Unsupported YSQL expression received by DocDB")));
+					 errmsg("unsupported YSQL expression received by DocDB")));
 			break;
 	}
 	*is_null = true;
@@ -506,7 +507,7 @@ YbgStatus YbgEvalExpr(YbgPreparedExpr expr, YbgExprContext expr_ctx, uint64_t *d
 
 /* YB_TODO(Deepthi@yugabyte)
  * - Postgres 13 has added some new types. Need to update this function accordingly.
- * - It'd be best if you use the table "static const YBCPgTypeEntity YbTypeEntityTable[]". Just
+ * - It'd be best if you use the table "static const YbcPgTypeEntity YbTypeEntityTable[]". Just
  *   as the attributes that you need, such as (elmlen, elmbyval, ...), and fill the table with
  *   their values. That way, when upgrading we don't have to seek for location of datatypes every
  *   where and update the info.
@@ -600,7 +601,7 @@ char* DecodeTZDatum(char const* fn_name, uintptr_t datum, const char *timezone, 
 	Oid id = fmgr_internal_function(fn_name);
 	fmgr_info(id, finfo);
 
-	DatumDecodeOptions decodeOptions;
+	YbDatumDecodeOptions decodeOptions;
 	decodeOptions.timezone = timezone;
 	decodeOptions.from_YB = from_YB;
 	decodeOptions.range_datum_decode_options = NULL;
@@ -622,7 +623,7 @@ char* DecodeArrayDatum(char const* arr_fn_name, uintptr_t datum,
 	Oid elem_id = fmgr_internal_function(fn_name);
 	fmgr_info(elem_id, elem_finfo);
 
-	DatumDecodeOptions decodeOptions;
+	YbDatumDecodeOptions decodeOptions;
 	decodeOptions.is_array = true;
 	decodeOptions.elem_by_val = elem_by_val;
 	decodeOptions.from_YB = from_YB;
@@ -654,7 +655,7 @@ char* DecodeRangeDatum(char const* range_fn_name, uintptr_t datum,
 	Oid elem_id = fmgr_internal_function(elem_fn_name);
 	fmgr_info(elem_id, elem_finfo);
 
-	DatumDecodeOptions decodeOptions;
+	YbDatumDecodeOptions decodeOptions;
 	decodeOptions.is_array = false;
 	decodeOptions.elem_by_val = elem_by_val;
 	decodeOptions.from_YB = from_YB;
@@ -693,7 +694,7 @@ char* DecodeRangeArrayDatum(char const* arr_fn_name, uintptr_t datum,
 	Oid elem_id = fmgr_internal_function(elem_fn_name);
 	fmgr_info(elem_id, elem_finfo);
 
-	DatumDecodeOptions range_decodeOptions;
+	YbDatumDecodeOptions range_decodeOptions;
 	range_decodeOptions.is_array = false;
 	range_decodeOptions.elem_by_val = range_by_val;
 	range_decodeOptions.from_YB = from_YB;
@@ -705,7 +706,7 @@ char* DecodeRangeArrayDatum(char const* arr_fn_name, uintptr_t datum,
 	range_decodeOptions.timezone = timezone;
 	range_decodeOptions.range_datum_decode_options = NULL;
 
-	DatumDecodeOptions arr_decodeOptions;
+	YbDatumDecodeOptions arr_decodeOptions;
 	arr_decodeOptions.is_array = true;
 	arr_decodeOptions.elem_by_val = elem_by_val;
 	arr_decodeOptions.from_YB = from_YB;

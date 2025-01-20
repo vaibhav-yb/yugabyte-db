@@ -569,6 +569,14 @@ typedef struct ResultRelInfo
 	 * one of its ancestors; see ExecCrossPartitionUpdateForeignKey().
 	 */
 	List	   *ri_ancestorResultRels;
+
+	/*
+	 * YB: is INSERT ON CONFLICT read batching possible for this table?
+	 * Possible does not mean enabled.  It is enabled when a yb_ioc_state is
+	 * created in the ModifyTableContext, and this only happens when an ON
+	 * CONFLICT clause is found and YbAddSlotToBatch is called.
+	 */
+	bool		ri_ybIocBatchingPossible;
 } ResultRelInfo;
 
 /*
@@ -718,12 +726,12 @@ typedef struct EState
 	bool yb_es_is_single_row_modify_txn; /* Is this query a single-row modify
 										  * and the only stmt in this txn. */
 	bool yb_es_is_fk_check_disabled;	/* Is FK check disabled? */
-	YBCPgExecParameters yb_exec_params;
+	YbcPgExecParameters yb_exec_params;
 
 	/*
 	 * The in_txn_limit used by all reads executed by this executor state. This is done to satisfy
 	 * requirement 1 in src/yb/yql/pggate/README i.e., all reads of a SQL statement should use the
-	 * same in_txn_limit. A pointer to this is passed down via PgExecParameters to all PgDocOp
+	 * same in_txn_limit. A pointer to this is passed down via YbcPgExecParameters to all PgDocOp
 	 * instances invoked by the SQL statement. The first read operation by the statement finds that
 	 * this is unset i.e., 0 and hence initializes the in txn limit for read operations. All future
 	 * operations see this to be non-zero and hence don't change the picked in txn limit for reads.
@@ -2198,43 +2206,43 @@ typedef struct JoinState
  * Batch state of batched NL Join. These are explained in the comment for
  * ExecYbBatchedNestLoop in nodeYbBatchedNestLoop.c.
  */
-typedef enum NLBatchStatus
+typedef enum YbNLBatchStatus
 {
 	BNL_INIT,
 	BNL_NEWINNER,
 	BNL_MATCHING,
 	BNL_FLUSHING
-} NLBatchStatus;
+} YbNLBatchStatus;
 
 /* Struct to contain tuple and its matching info in a hash bucket*/
-typedef struct BucketTupleInfo
+typedef struct YbBucketTupleInfo
 {
 	MinimalTuple tuple;
 	bool matched;
-} BucketTupleInfo;
+} YbBucketTupleInfo;
 
 /* Buckets of MinimalTuples stored in the hash table. */
-typedef struct NLBucketInfo
+typedef struct YbNLBucketInfo
 {
 	ListCell *current; /* The current list element being iterated on. */
-	List *tuples;	   /* List of BucketTupleInfo in this bucket */
-} NLBucketInfo;
+	List *tuples;	   /* List of YbBucketTupleInfo in this bucket */
+} YbNLBucketInfo;
 
 struct YbBatchedNestLoopState;
 
-typedef bool (*FlushTupleFn_t)(struct YbBatchedNestLoopState *, ExprContext *);
+typedef bool (*YbFlushTupleFn_t)(struct YbBatchedNestLoopState *, ExprContext *);
 
-typedef bool (*GetNewOuterTupleFn_t)(struct YbBatchedNestLoopState *node,
+typedef bool (*YbGetNewOuterTupleFn_t)(struct YbBatchedNestLoopState *node,
 									 ExprContext *econtext);
-typedef void (*ResetBatchFn_t)(struct YbBatchedNestLoopState *node,
+typedef void (*YbResetBatchFn_t)(struct YbBatchedNestLoopState *node,
 							   ExprContext *econtext);
-typedef void (*RegisterOuterMatchFn_t)(struct YbBatchedNestLoopState *node,
+typedef void (*YbRegisterOuterMatchFn_t)(struct YbBatchedNestLoopState *node,
 									   ExprContext *econtext);
-typedef void (*AddTupleToOuterBatchFn_t)(struct YbBatchedNestLoopState *node,
+typedef void (*YbAddTupleToOuterBatchFn_t)(struct YbBatchedNestLoopState *node,
 										 TupleTableSlot *slot);
 
-typedef void (*FreeBatchFn_t)(struct YbBatchedNestLoopState *node);
-typedef void (*EndFn_t)(struct YbBatchedNestLoopState *node);
+typedef void (*YbFreeBatchFn_t)(struct YbBatchedNestLoopState *node);
+typedef void (*YbEndFn_t)(struct YbBatchedNestLoopState *node);
 
 /* ----------------
  *	 NestLoopState information
@@ -2251,7 +2259,7 @@ typedef struct NestLoopState
 	bool		nl_MatchedOuter;
 	TupleTableSlot *nl_NullInnerTupleSlot;
 	Tuplestorestate *batchedtuplestorestate;
-	NLBatchStatus nl_currentstatus;
+	YbNLBatchStatus nl_currentstatus;
 } NestLoopState;
 
 typedef struct YbBatchedNestLoopState
@@ -2260,7 +2268,7 @@ typedef struct YbBatchedNestLoopState
 	TupleTableSlot *nl_NullInnerTupleSlot;
 
 	bool bnl_outerdone;
-	NLBatchStatus bnl_currentstatus;
+	YbNLBatchStatus bnl_currentstatus;
 
 	bool is_first_batch_done;
 	int batch_size;
@@ -2278,13 +2286,13 @@ typedef struct YbBatchedNestLoopState
 	/* State for hashing batch strategy */
 
 	/*
-	 * This hash table stores instance of NLBucketInfo, each of which
+	 * This hash table stores instance of YbNLBucketInfo, each of which
 	 * stores lists of tuples with the same hash value.
 	 */
 	TupleHashTable hashtable;
 	bool hashiterinit;
 	TupleHashIterator hashiter;
-	BucketTupleInfo *current_ht_tuple;
+	YbBucketTupleInfo *current_ht_tuple;
 	TupleHashEntry current_hash_entry;
 	FmgrInfo *outerHashFunctions;
 	FmgrInfo *innerHashFunctions;
@@ -2293,13 +2301,13 @@ typedef struct YbBatchedNestLoopState
 	ExprState *ht_lookup_fn;
 
 	/* Function pointers to local join methods */
-	FlushTupleFn_t FlushTupleImpl;
-	GetNewOuterTupleFn_t GetNewOuterTupleImpl;
-	ResetBatchFn_t ResetBatchImpl;
-	RegisterOuterMatchFn_t RegisterOuterMatchImpl;
-	AddTupleToOuterBatchFn_t AddTupleToOuterBatchImpl;
-	FreeBatchFn_t FreeBatchImpl;
-	EndFn_t EndImpl;
+	YbFlushTupleFn_t FlushTupleImpl;
+	YbGetNewOuterTupleFn_t GetNewOuterTupleImpl;
+	YbResetBatchFn_t ResetBatchImpl;
+	YbRegisterOuterMatchFn_t RegisterOuterMatchImpl;
+	YbAddTupleToOuterBatchFn_t AddTupleToOuterBatchImpl;
+	YbFreeBatchFn_t FreeBatchImpl;
+	YbEndFn_t EndImpl;
 } YbBatchedNestLoopState;
 
 /* ----------------
@@ -3054,7 +3062,7 @@ typedef struct LimitState
  *	 YbInsertOnConflictBatchState information
  *
  *		INSERT ... ON CONFLICT read batching state for Yugabyte relations.  The
- *		batch size is taken from ResultRelInfo.ri_BatchSize.
+ *		batch size is taken from GUC yb_insert_on_conflict_read_batch_size.
  * ----------------
  */
 typedef struct YbInsertOnConflictBatchState

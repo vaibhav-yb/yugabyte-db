@@ -134,8 +134,8 @@
 #include "commands/dbcommands.h"
 #include "commands/tablegroup.h"
 #include "commands/view.h"
-#include "commands/ybccmds.h"
-#include "executor/ybcModifyTable.h"
+#include "commands/yb_cmds.h"
+#include "executor/ybModifyTable.h"
 #include "parser/analyze.h"
 #include "pg_yb_utils.h"
 #include "statistics/statistics.h"
@@ -820,7 +820,7 @@ DefineRelation(CreateStmt *stmt, char relkind, Oid ownerId,
 
 	if (IsYugaByteEnabled() &&
 		stmt->relation->relpersistence == RELPERSISTENCE_TEMP)
-		YBCForceAllowCatalogModifications(true);
+		YBCDdlEnableForceCatalogModification();
 
 	/*
 	 * Determine the lockmode to use when scanning parents.  A self-exclusive
@@ -1147,7 +1147,9 @@ DefineRelation(CreateStmt *stmt, char relkind, Oid ownerId,
 					(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
 					 errmsg("specifying a table access method is not supported on a partitioned table")));
 	}
-	else if (RELKIND_HAS_TABLE_AM(relkind))
+	else if ((IsYugaByteEnabled() && RELKIND_HAS_PARTITIONS(relkind)
+			  && stmt->relation->relpersistence != RELPERSISTENCE_TEMP) ||
+			  RELKIND_HAS_TABLE_AM(relkind))
 		accessMethod = default_table_access_method;
 
 	/* look up the access method, verify it is for a table */
@@ -1344,7 +1346,7 @@ DefineRelation(CreateStmt *stmt, char relkind, Oid ownerId,
 				* ensure concurrent operations do not insert any data matching
 				* this new partition into the default partition.
 				*/
-				YBCPgStatement alter_cmd_handle = NULL;
+				YbcPgStatement alter_cmd_handle = NULL;
 				HandleYBStatus(YBCPgNewAlterTable(YBCGetDatabaseOidByRelid(defaultPartOid),
 												  YbGetRelfileNodeId(defaultRel),
 												  &alter_cmd_handle));
@@ -1746,7 +1748,7 @@ RemoveRelations(DropStmt *drop)
 	}
 
 	if (only_temp_tables)
-		YBCForceAllowCatalogModifications(true);
+		YBCDdlEnableForceCatalogModification();
 
 	performMultipleDeletions(objects, drop->behavior, flags);
 
@@ -4402,7 +4404,7 @@ AlterTable(AlterTableStmt *stmt, LOCKMODE lockmode,
 
 	if (IsYugaByteEnabled() &&
 		rel->rd_rel->relpersistence == RELPERSISTENCE_TEMP)
-		YBCForceAllowCatalogModifications(true);
+		YBCDdlEnableForceCatalogModification();
 
 	ATController(stmt, rel, stmt->cmds, stmt->relation->inh, lockmode, context);
 }
@@ -4794,7 +4796,7 @@ ATController(AlterTableStmt *parsetree,
 			ListCell *lc = NULL;
 			foreach(lc, rollbackHandles)
 			{
-				YBCPgStatement handle = (YBCPgStatement) lfirst(lc);
+				YbcPgStatement handle = (YbcPgStatement) lfirst(lc);
 				YBCExecAlterTable(handle, RelationGetRelid(rel));
 			}
 		}
@@ -5228,7 +5230,7 @@ ATRewriteCatalogs(List **wqueue, LOCKMODE lockmode,
 	 */
 	AlteredTableInfo *info = (AlteredTableInfo *) linitial(*wqueue);
 	Oid main_relid = info->relid;
-	YBCPgStatement rollbackHandle = NULL;
+	YbcPgStatement rollbackHandle = NULL;
 	List *handles = YBCPrepareAlterTable(info->subcmds,
 										 AT_NUM_PASSES,
 										 main_relid,
@@ -5253,7 +5255,7 @@ ATRewriteCatalogs(List **wqueue, LOCKMODE lockmode,
 		 */
 		if (childrelid == main_relid)
 			continue;
-		YBCPgStatement childRollbackHandle = NULL;
+		YbcPgStatement childRollbackHandle = NULL;
 		List *child_handles = YBCPrepareAlterTable(info->subcmds,
 												   AT_NUM_PASSES,
 												   childrelid,
@@ -5263,7 +5265,7 @@ ATRewriteCatalogs(List **wqueue, LOCKMODE lockmode,
 		ListCell *listcell = NULL;
 		foreach(listcell, child_handles)
 		{
-			YBCPgStatement child = (YBCPgStatement) lfirst(listcell);
+			YbcPgStatement child = (YbcPgStatement) lfirst(listcell);
 			handles = lappend(handles, child);
 		}
 		if (childRollbackHandle)
@@ -5295,7 +5297,7 @@ ATRewriteCatalogs(List **wqueue, LOCKMODE lockmode,
 		{
 			foreach(lc, handles)
 			{
-				YBCPgStatement handle = (YBCPgStatement) lfirst(lc);
+				YbcPgStatement handle = (YbcPgStatement) lfirst(lc);
 				YBCExecAlterTable(handle, main_relid);
 			}
 		}
@@ -5372,7 +5374,7 @@ ATRewriteCatalogs(List **wqueue, LOCKMODE lockmode,
 		{
 			foreach (lc, handles)
 			{
-				YBCPgStatement handle = (YBCPgStatement) lfirst(lc);
+				YbcPgStatement handle = (YbcPgStatement) lfirst(lc);
 				YBCPgAlterTableSetTableId(handle,
 										  YBCGetDatabaseOidByRelid(main_relid),
 										  relfilenode_id);
@@ -5921,8 +5923,11 @@ ATRewriteTables(AlterTableStmt *parsetree, List **wqueue, LOCKMODE lockmode,
 		 * Foreign tables have no storage, nor do partitioned tables and indexes.
 		 * YB: We do not need to rewrite tables during upgrade because we
 		 * link the DocDB table with the data on master.
+		 * We also want to allow rewrites on partitioned tables to avoid
+		 * schema inconsistencies during backup/restore (see GH#24458).
 		 */
-		if (!RELKIND_HAS_STORAGE(tab->relkind) ||
+		if ((!RELKIND_HAS_STORAGE(tab->relkind) &&
+			 (!IsYBRelationById(tab->relid) || tab->relkind != RELKIND_PARTITIONED_TABLE)) ||
 			(IsYBRelationById(tab->relid) && IsBinaryUpgrade))
 			continue;
 		/*
@@ -6017,9 +6022,9 @@ ATRewriteTables(AlterTableStmt *parsetree, List **wqueue, LOCKMODE lockmode,
 			if (IsYBBackedRelation(OldHeap) && !yb_enable_alter_table_rewrite)
 				ereport(ERROR,
 						(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-						 errmsg("Rewriting of YB table is not yet implemented"),
+						 errmsg("rewriting of YB table is not yet implemented"),
 						 errhint("See https://github.com/yugabyte/yugabyte-db/issues/13278. "
-								 "React with thumbs up to raise its priority")));
+								 "React with thumbs up to raise its priority.")));
 
 			if (IsYBRelation(OldHeap) && !YBSuppressUnsafeAlterNotice())
 				ereport(NOTICE,
@@ -15544,7 +15549,19 @@ ATExecSetTableSpaceNoStorage(Relation rel, Oid newTableSpace)
 		for (int i = 0; i < num_options; i++)
 		{
 			char *option = text_to_cstring(DatumGetTextP(options[i]));
-			YBCValidatePlacement(option);
+			const char *placement_str = "replica_placement=";
+			int placement_strlen = strlen(placement_str);
+			if (strncmp(option, placement_str, placement_strlen) == 0)
+			{
+				YBCValidatePlacement(option + placement_strlen,
+						/* check_satisfiable */ true);
+			}
+			else
+			{
+				ereport(ERROR,
+						(errcode(ERRCODE_INVALID_PARAMETER_VALUE),
+						 errmsg("expected replica_placement option. Got %s", option)));
+			}
 			pfree(option);
 		}
 	}
@@ -15559,11 +15576,11 @@ ATExecSetTableSpaceNoStorage(Relation rel, Oid newTableSpace)
 
 	/* Notify the user that this command is async */
 	ereport(NOTICE,
-			(errmsg("Data movement for table %s is successfully initiated.",
+			(errmsg("data movement for table %s is successfully initiated",
 					RelationGetRelationName(rel)),
 			 errdetail("Data movement is a long running asynchronous process "
 					   "and can be monitored by checking the tablet placement "
-					   "in http://<YB-Master-host>:7000/tables")));
+					   "in http://<YB-Master-host>:7000/tables.")));
 }
 
 /*
@@ -21501,10 +21518,10 @@ YbATValidateChangeForeignKeyType(HeapTuple constraint_tuple, Relation base_rel,
 		{
 			ereport(ERROR,
 				   (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-					errmsg("Altering type of foreign key is not supported"),
+					errmsg("altering type of foreign key is not supported"),
 					errhint("See https://github.com/yugabyte/yugabyte-db/"
 							"issues/17037. React with thumbs up to raise its "
-							"priority")));
+							"priority.")));
 		}
 	}
 }

@@ -32,7 +32,7 @@
 #include "catalog/index.h"
 #include "catalog/pg_type_d.h"
 #include "catalog/yb_type.h"
-#include "executor/ybcModifyTable.h"
+#include "executor/ybModifyTable.h"
 #include "nodes/execnodes.h"
 #include "nodes/parsenodes.h"
 #include "pg_yb_utils.h"
@@ -63,7 +63,7 @@ typedef struct
  * Utility method to set binds for index write statement.
  */
 static void
-doBindsForIdxWrite(YBCPgStatement stmt,
+doBindsForIdxWrite(YbcPgStatement stmt,
 				   void *indexstate,
 				   Relation index,
 				   Datum *values,

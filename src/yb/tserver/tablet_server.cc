@@ -165,7 +165,7 @@ DEFINE_UNKNOWN_int32(cql_proxy_webserver_port, 0, "Webserver port for CQL proxy"
 DEFINE_NON_RUNTIME_string(pgsql_proxy_bind_address, "", "Address to bind the PostgreSQL proxy to");
 DECLARE_int32(pgsql_proxy_webserver_port);
 
-DEFINE_NON_RUNTIME_PREVIEW_bool(enable_ysql_conn_mgr, false,
+DEFINE_NON_RUNTIME_bool(enable_ysql_conn_mgr, false,
     "Enable Ysql Connection Manager for the cluster. Tablet Server will start a "
     "Ysql Connection Manager process as a child process.");
 
@@ -752,12 +752,13 @@ void TabletServer::Shutdown() {
   LOG(INFO) << "TabletServer shut down complete. Bye!";
 }
 
-Status TabletServer::BootstrapDdlObjectLocks(const master::TSHeartbeatResponsePB& heartbeat_resp) {
+Status TabletServer::BootstrapDdlObjectLocks(
+    const master::ClientOperationLeaseUpdatePB& lease_update) {
   VLOG(2) << __func__;
-  if (!heartbeat_resp.has_ddl_lock_entries() || !ts_local_lock_manager_) {
+  if (!lease_update.has_ddl_lock_entries() || !ts_local_lock_manager_) {
     return Status::OK();
   }
-  return ts_local_lock_manager_->BootstrapDdlObjectLocks(heartbeat_resp.ddl_lock_entries());
+  return ts_local_lock_manager_->BootstrapDdlObjectLocks(lease_update.ddl_lock_entries());
 }
 
 Status TabletServer::PopulateLiveTServers(const master::TSHeartbeatResponsePB& heartbeat_resp) {
@@ -1371,7 +1372,7 @@ Status TabletServer::XClusterPopulateMasterHeartbeatRequest(
 
 Status TabletServer::XClusterHandleMasterHeartbeatResponse(
     const master::TSHeartbeatResponsePB& resp) {
-  xcluster_context_->UpdateSafeTime(resp.xcluster_namespace_to_safe_time());
+  xcluster_context_->UpdateSafeTimeMap(resp.xcluster_namespace_to_safe_time());
 
   auto* xcluster_consumer = GetXClusterConsumer();
 

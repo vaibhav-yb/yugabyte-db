@@ -40,12 +40,12 @@
 /*
  * Special type entity used for ybgin null categories.
  */
-extern const YBCPgTypeEntity YBCGinNullTypeEntity;
+extern const YbcPgTypeEntity YBCGinNullTypeEntity;
 
-extern const YBCPgTypeEntity *YbDataTypeFromOidMod(int attnum, Oid type_id);
+extern const YbcPgTypeEntity *YbDataTypeFromOidMod(int attnum, Oid type_id);
 
 /*
- * For non-primitive types (the ones without a corresponding YBCPgTypeEntity),
+ * For non-primitive types (the ones without a corresponding YbcPgTypeEntity),
  * returns the corresponding primitive type's oid.
  */
 extern Oid YbGetPrimitiveTypeOid(Oid type_id, char typtype,
@@ -57,10 +57,7 @@ extern Oid YbGetPrimitiveTypeOid(Oid type_id, char typtype,
  */
 bool YbDataTypeIsValidForKey(Oid type_id);
 
-/*
- * Array of all type entities.
- */
-void YbGetTypeTable(const YBCPgTypeEntity **type_table, int *count);
+extern YbcPgTypeEntities YbGetTypeTable();
 
 /*
  * Callback functions

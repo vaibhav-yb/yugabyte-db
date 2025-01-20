@@ -293,7 +293,8 @@ class DeferredConstructible {
 
 using TransactionBuilder = std::function<
     client::YBTransactionPtr(
-        TxnAssignment* dest, IsDDL, client::ForceGlobalTransaction, CoarseTimePoint)>;
+        TxnAssignment* dest, IsDDL, client::ForceGlobalTransaction, CoarseTimePoint,
+        client::ForceCreateTransaction)>;
 
 class SessionInfo {
  public:
@@ -1209,6 +1210,7 @@ class PgClientServiceImpl::Impl {
           IllegalState, "Received invalid stream_id: $0 from ListCDCSDKStreams", stream.stream_id);
 
       auto replication_slot = resp->mutable_replication_slots()->Add();
+      replication_slot->set_yb_lsn_type(stream.replication_slot_lsn_type);
       stream.ToPB(replication_slot);
       auto is_stream_active =
           current_time - stream_to_latest_active_time[*stream_id] <=
@@ -1394,39 +1396,7 @@ class PgClientServiceImpl::Impl {
   Status ValidatePlacement(
       const PgValidatePlacementRequestPB& req, PgValidatePlacementResponsePB* resp,
       rpc::RpcContext* context) {
-    master::ReplicationInfoPB replication_info;
-    master::PlacementInfoPB* live_replicas = replication_info.mutable_live_replicas();
-
-    for (const auto& block : req.placement_infos()) {
-      auto pb = live_replicas->add_placement_blocks();
-      pb->mutable_cloud_info()->set_placement_cloud(block.cloud());
-      pb->mutable_cloud_info()->set_placement_region(block.region());
-      pb->mutable_cloud_info()->set_placement_zone(block.zone());
-      pb->set_min_num_replicas(block.min_num_replicas());
-
-      if (block.leader_preference() < 0) {
-        return STATUS(InvalidArgument, "leader_preference cannot be negative");
-      } else if (block.leader_preference() > req.placement_infos_size()) {
-        return STATUS(
-            InvalidArgument,
-            "Priority value cannot be more than the number of zones in the preferred list since "
-            "each priority should be associated with at least one zone from the list");
-      } else if (block.leader_preference() > 0) {
-        while (replication_info.multi_affinitized_leaders_size() < block.leader_preference()) {
-          replication_info.add_multi_affinitized_leaders();
-        }
-
-        auto zone_set =
-            replication_info.mutable_multi_affinitized_leaders(block.leader_preference() - 1);
-        auto ci = zone_set->add_zones();
-        ci->set_placement_cloud(block.cloud());
-        ci->set_placement_region(block.region());
-        ci->set_placement_zone(block.zone());
-      }
-    }
-    live_replicas->set_num_replicas(req.num_replicas());
-
-    return client().ValidateReplicationInfo(replication_info);
+    return client().ValidateReplicationInfo(req.replication_info());
   }
 
   Status GetTableDiskSize(
@@ -2045,9 +2015,9 @@ class PgClientServiceImpl::Impl {
 
   [[nodiscard]] client::YBTransactionPtr BuildTransaction(
       TxnAssignment* dest, IsDDL is_ddl, client::ForceGlobalTransaction force_global,
-      CoarseTimePoint deadline) {
+      CoarseTimePoint deadline, client::ForceCreateTransaction force_create_txn) {
     auto watcher = std::make_shared<client::YBTransactionPtr>(
-        transaction_pool_provider_().Take(force_global, deadline));
+        transaction_pool_provider_().Take(force_global, deadline, force_create_txn));
     dest->Assign(watcher, is_ddl);
     auto* txn = &**watcher;
     return {std::move(watcher), txn};

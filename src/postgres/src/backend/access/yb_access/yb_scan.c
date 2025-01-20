@@ -181,10 +181,10 @@ ybcAddAttributeColumn(YbScanPlan scan_plan, AttrNumber attnum)
  */
 static void
 ybcCheckPrimaryKeyAttribute(YbScanPlan scan_plan,
-							YBCPgTableDesc ybc_table_desc,
+							YbcPgTableDesc ybc_table_desc,
 							AttrNumber attnum)
 {
-	YBCPgColumnInfo column_info = {0};
+	YbcPgColumnInfo column_info = {0};
 
 	/*
 	 * TODO(neil) We shouldn't need to upload YugaByte table descriptor here because the structure
@@ -214,7 +214,7 @@ static void
 ybcLoadTableInfo(Relation relation, YbScanPlan scan_plan)
 {
 	Oid			dboid = YBCGetDatabaseOid(relation);
-	YBCPgTableDesc ybc_table_desc = NULL;
+	YbcPgTableDesc ybc_table_desc = NULL;
 
 	HandleYBStatus(YBCPgGetTableDesc(dboid, YbGetRelfileNodeId(relation),
 									 &ybc_table_desc));
@@ -254,7 +254,7 @@ YbBindColumn(YbScanDesc ybScan, TupleDesc bind_desc,
 										   ybc_get_attcollation(bind_desc,
 																attnum));
 
-	YBCPgExpr ybc_expr = YBCNewConstant(ybScan->handle, atttypid, attcollation,
+	YbcPgExpr ybc_expr = YBCNewConstant(ybScan->handle, atttypid, attcollation,
 										value, is_null);
 
 	HandleYBStatus(YBCPgDmlBindColumn(ybScan->handle, attnum, ybc_expr));
@@ -271,13 +271,13 @@ YbBindColumnCondBetween(YbScanDesc ybScan,
 										   ybc_get_attcollation(bind_desc,
 																attnum));
 
-	YBCPgExpr ybc_expr = start_valid ? YBCNewConstant(ybScan->handle,
+	YbcPgExpr ybc_expr = start_valid ? YBCNewConstant(ybScan->handle,
 													  atttypid,
 													  attcollation,
 													  value,
 													  false /* isnull */)
 									 : NULL;
-	YBCPgExpr ybc_expr_end = end_valid ? YBCNewConstant(ybScan->handle,
+	YbcPgExpr ybc_expr_end = end_valid ? YBCNewConstant(ybScan->handle,
 														atttypid,
 														attcollation,
 														value_end,
@@ -307,11 +307,11 @@ ybcBindColumnCondIn(YbScanDesc ybScan, TupleDesc bind_desc, AttrNumber attnum,
 										   ybc_get_attcollation(bind_desc,
 																attnum));
 
-	YBCPgExpr colref = YBCNewColumnRef(ybScan->handle, attnum, atttypid,
+	YbcPgExpr colref = YBCNewColumnRef(ybScan->handle, attnum, atttypid,
 									   attcollation, NULL);
 
 	int total_num_values = nvalues + (bind_to_null ? 1 : 0);
-	YBCPgExpr ybc_exprs[total_num_values]; /* VLA - scratch space */
+	YbcPgExpr ybc_exprs[total_num_values]; /* VLA - scratch space */
 
 	/* First, create expr for non-null values. */
 	for (int i = 0; i < nvalues; i++)
@@ -340,9 +340,9 @@ ybcBindTupleExprCondIn(YbScanDesc ybScan,
 					   Datum *values)
 {
 	Assert(nvalues > 0);
-	YBCPgExpr ybc_rhs_exprs[nvalues];
+	YbcPgExpr ybc_rhs_exprs[nvalues];
 
-	YBCPgExpr ybc_elems_exprs[n_attnum_values];	/* VLA - scratch space */
+	YbcPgExpr ybc_elems_exprs[n_attnum_values];	/* VLA - scratch space */
 	Datum datum_values[n_attnum_values];
 	bool is_null[n_attnum_values];
 
@@ -350,7 +350,7 @@ ybcBindTupleExprCondIn(YbScanDesc ybScan,
 		HeapTupleHeaderGetTypeId(DatumGetHeapTupleHeader(values[0]));
 	Oid tupTypmod =
 		HeapTupleHeaderGetTypMod(DatumGetHeapTupleHeader(values[0]));
-	YBCPgTypeAttrs type_attrs = { tupTypmod };
+	YbcPgTypeAttrs type_attrs = { tupTypmod };
 
 	/* Form the lhs tuple. */
 	for (int i = 0; i < n_attnum_values; i++)
@@ -363,7 +363,7 @@ ybcBindTupleExprCondIn(YbScanDesc ybScan,
 											 atttypid, attcollation, NULL);
 	}
 
-	YBCPgExpr lhs = YBCNewTupleExpr(ybScan->handle, &type_attrs,
+	YbcPgExpr lhs = YBCNewTupleExpr(ybScan->handle, &type_attrs,
 									n_attnum_values, ybc_elems_exprs);
 
 	TupleDesc tupdesc = lookup_rowtype_tupdesc(tupType, tupTypmod);
@@ -403,23 +403,23 @@ ybcBindTupleExprCondIn(YbScanDesc ybScan,
  * Utility method to bind const to column.
  */
 void
-YbBindDatumToColumn(YBCPgStatement stmt,
+YbBindDatumToColumn(YbcPgStatement stmt,
 					int attr_num,
 					Oid type_id,
 					Oid collation_id,
 					Datum datum,
 					bool is_null,
-					const YBCPgTypeEntity *null_type_entity)
+					const YbcPgTypeEntity *null_type_entity)
 {
-	YBCPgExpr	expr;
-	const YBCPgTypeEntity *type_entity;
+	YbcPgExpr	expr;
+	const YbcPgTypeEntity *type_entity;
 
 	if (is_null && null_type_entity)
 		type_entity = null_type_entity;
 	else
 		type_entity = YbDataTypeFromOidMod(InvalidAttrNumber, type_id);
 
-	YBCPgCollationInfo collation_info;
+	YbcPgCollationInfo collation_info;
 	YBGetCollationInfo(collation_id, type_entity, datum, is_null,
 					   &collation_info);
 
@@ -432,9 +432,9 @@ YbBindDatumToColumn(YBCPgStatement stmt,
 }
 
 static void
-YbDmlAppendTargetImpl(YBCPgStatement handle, AttrNumber attnum, Oid typid, Oid collation, Oid typmod)
+YbDmlAppendTargetImpl(YbcPgStatement handle, AttrNumber attnum, Oid typid, Oid collation, Oid typmod)
 {
-	const YBCPgTypeAttrs type_attrs = {.typmod = typmod};
+	const YbcPgTypeAttrs type_attrs = {.typmod = typmod};
 
 	HandleYBStatus(YBCPgDmlAppendTarget(handle, YBCNewColumnRef(handle,
 																attnum, typid,
@@ -446,7 +446,7 @@ YbDmlAppendTargetImpl(YBCPgStatement handle, AttrNumber attnum, Oid typid, Oid c
  * Add a system column as target to the given statement handle.
  */
 void
-YbDmlAppendTargetSystem(AttrNumber attnum, YBCPgStatement handle)
+YbDmlAppendTargetSystem(AttrNumber attnum, YbcPgStatement handle)
 {
 	Assert(attnum < 0);
 	YbDmlAppendTargetImpl(handle, attnum, InvalidOid /* typid */,
@@ -455,7 +455,7 @@ YbDmlAppendTargetSystem(AttrNumber attnum, YBCPgStatement handle)
 
 void
 YbDmlAppendTargetRegularAttr(const FormData_pg_attribute *attr,
-							 YBCPgStatement handle)
+							 YbcPgStatement handle)
 {
 	Assert(attr->attnum > 0);
 	Assert(!attr->attisdropped);
@@ -471,7 +471,7 @@ YbDmlAppendTargetRegularAttr(const FormData_pg_attribute *attr,
  */
 void
 YbDmlAppendTargetRegular(TupleDesc tupdesc, AttrNumber attnum,
-						 YBCPgStatement handle)
+						 YbcPgStatement handle)
 {
 	Assert(attnum > 0);
 	YbDmlAppendTargetRegularAttr(TupleDescAttr(tupdesc, attnum - 1), handle);
@@ -507,7 +507,7 @@ ybcFetchNextHeapTuple(YbScanDesc ybScan, ScanDirection dir)
 	TableScanDesc tsdesc = (TableScanDesc)ybScan;
 	Datum	   *values = (Datum *) palloc0(tupdesc->natts * sizeof(Datum));
 	bool	   *nulls = (bool *) palloc(tupdesc->natts * sizeof(bool));
-	YBCPgSysColumns syscols;
+	YbcPgSysColumns syscols;
 
 	/*
 	 * In the case of parallel scan we need to obtain boundaries from the pscan
@@ -568,7 +568,7 @@ ybcFetchNextHeapTuple(YbScanDesc ybScan, ScanDirection dir)
 		}
 
 		/* Fetch one row. */
-		YBCStatus status = YBCPgDmlFetch(ybScan->handle,
+		YbcStatus status = YBCPgDmlFetch(ybScan->handle,
 										 tupdesc->natts,
 										 (uint64_t *) values,
 										 nulls,
@@ -643,7 +643,7 @@ ybcFetchNextIndexTuple(YbScanDesc ybScan, ScanDirection dir)
 	TupleDesc	tupdesc = ybScan->target_desc;
 	Datum	   *values = (Datum *) palloc0(tupdesc->natts * sizeof(Datum));
 	bool	   *nulls = (bool *) palloc(tupdesc->natts * sizeof(bool));
-	YBCPgSysColumns syscols;
+	YbcPgSysColumns syscols;
 
 	/*
 	 * In the case of parallel scan we need to obtain boundaries from the pscan
@@ -761,7 +761,7 @@ ybcFetchNextIndexTuple(YbScanDesc ybScan, ScanDirection dir)
 
 static Oid
 ybcCalculateIndexRelfileNodeId(Relation rel, Relation index,
-							   const YBCPgPrepareParameters *params)
+							   const YbcPgPrepareParameters *params)
 {
 	Assert(index);
 	if (!index->rd_index->indisprimary)
@@ -807,7 +807,7 @@ ybcSetupScanPlan(bool xs_want_itup, YbScanDesc ybScan, YbScanPlan scan_plan)
 	TableScanDesc tsdesc = (TableScanDesc)ybScan;
 	Relation	relation = tsdesc->rs_rd;
 	Relation	index = ybScan->index;
-	YbTableProperties yb_table_prop_relation = YbGetTableProperties(relation);
+	YbcTableProperties yb_table_prop_relation = YbGetTableProperties(relation);
 	bool		is_colocated_tables_with_tablespace_enabled =
 		*YBCGetGFlags()->ysql_enable_colocated_tables_with_tablespaces;
 	int i;
@@ -857,7 +857,7 @@ ybcSetupScanPlan(bool xs_want_itup, YbScanDesc ybScan, YbScanPlan scan_plan)
 
 	if (index)
 	{
-		YBCPgPrepareParameters *params = &ybScan->prepare_params;
+		YbcPgPrepareParameters *params = &ybScan->prepare_params;
 		params->index_only_scan = xs_want_itup;
 		params->index_relfilenode_oid =
 			ybcCalculateIndexRelfileNodeId(relation, index, params);
@@ -1584,7 +1584,7 @@ YbBindRowComparisonKeys(YbScanDesc ybScan, YbScanPlan scan_plan,
 	if (can_pushdown)
 	{
 
-		YBCPgExpr *col_values = palloc(sizeof(YBCPgExpr) *
+		YbcPgExpr *col_values = palloc(sizeof(YbcPgExpr) *
 									   index->rd_index->indnkeyatts);
 		/*
 		 * Prepare upper/lower bound tuples determined from this
@@ -2340,7 +2340,7 @@ YbPredetermineNeedsRecheck(Relation relation,
 }
 
 typedef struct {
-	YBCPgBoundType type;
+	YbcPgBoundType type;
 	int64_t value;
 } YbBound;
 
@@ -2591,7 +2591,7 @@ static YbAttnumBmsState
 ybcBuildRequiredAttrs(YbScanDesc yb_scan, YbScanPlan scan_plan,
 					  Scan *pg_scan_plan)
 {
-	const YBCPgPrepareParameters *params = &yb_scan->prepare_params;
+	const YbcPgPrepareParameters *params = &yb_scan->prepare_params;
 	const bool is_index_only_scan = params->index_only_scan;
 	bool all_attrs_required = !params->fetch_ybctids_only;
 	Relation index = yb_scan->index;
@@ -2722,7 +2722,7 @@ ybcSetupTargets(YbScanDesc yb_scan, YbScanPlan scan_plan, Scan *pg_scan_plan)
  */
 void
 YbDmlAppendTargetsAggregate(List *aggrefs, TupleDesc tupdesc, Relation index,
-							bool xs_want_itup, YBCPgStatement handle)
+							bool xs_want_itup, YbcPgStatement handle)
 {
 	ListCell   *lc;
 
@@ -2732,8 +2732,8 @@ YbDmlAppendTargetsAggregate(List *aggrefs, TupleDesc tupdesc, Relation index,
 		Aggref *aggref = lfirst_node(Aggref, lc);
 		char *func_name = get_func_name(aggref->aggfnoid);
 		ListCell *lc_arg;
-		YBCPgExpr op_handle;
-		const YBCPgTypeEntity *type_entity;
+		YbcPgExpr op_handle;
+		const YbcPgTypeEntity *type_entity;
 
 		/* Get type entity for the operator from the aggref. */
 		type_entity = YbDataTypeFromOidMod(InvalidAttrNumber,
@@ -2751,7 +2751,7 @@ YbDmlAppendTargetsAggregate(List *aggrefs, TupleDesc tupdesc, Relation index,
 			 * We don't use a column reference as we want to count rows
 			 * even if all column values are NULL.
 			 */
-			YBCPgExpr const_handle;
+			YbcPgExpr const_handle;
 			HandleYBStatus(YBCPgNewConstant(handle,
 											type_entity,
 											false /* collate_is_valid_non_c */,
@@ -2773,7 +2773,7 @@ YbDmlAppendTargetsAggregate(List *aggrefs, TupleDesc tupdesc, Relation index,
 					/* Already checked by yb_agg_pushdown_supported */
 					Assert(const_node->constisnull || const_node->constbyval);
 
-					YBCPgExpr const_handle;
+					YbcPgExpr const_handle;
 					HandleYBStatus(YBCPgNewConstant(handle,
 													type_entity,
 													false /* collate_is_valid_non_c */,
@@ -2798,9 +2798,9 @@ YbDmlAppendTargetsAggregate(List *aggrefs, TupleDesc tupdesc, Relation index,
 					if (index && xs_want_itup)
 						attno = YbGetIndexAttnum(index, attno);
 					Form_pg_attribute attr = TupleDescAttr(tupdesc, attno - 1);
-					YBCPgTypeAttrs type_attrs = {attr->atttypmod};
+					YbcPgTypeAttrs type_attrs = {attr->atttypmod};
 
-					YBCPgExpr arg = YBCNewColumnRef(handle,
+					YbcPgExpr arg = YBCNewColumnRef(handle,
 													attno,
 													attr->atttypid,
 													attr->attcollation,
@@ -2835,11 +2835,11 @@ YbDmlAppendTargetsAggregate(List *aggrefs, TupleDesc tupdesc, Relation index,
  * dropped-columns checking.
  */
 void
-YbDmlAppendTargets(List *colrefs, YBCPgStatement handle)
+YbDmlAppendTargets(List *colrefs, YbcPgStatement handle)
 {
 	ListCell   *lc;
-	YBCPgExpr	expr;
-	YBCPgTypeAttrs type_attrs;
+	YbcPgExpr	expr;
+	YbcPgTypeAttrs type_attrs;
 	YbExprColrefDesc *colref;
 
 	foreach(lc, colrefs)
@@ -2856,7 +2856,7 @@ YbDmlAppendTargets(List *colrefs, YBCPgStatement handle)
 }
 
 void
-YbAppendPrimaryColumnRef(YBCPgStatement dml, YBCPgExpr colref)
+YbAppendPrimaryColumnRef(YbcPgStatement dml, YbcPgExpr colref)
 {
 	HandleYBStatus(YbPgDmlAppendColumnRef(dml, colref,
 										  false /* is_for_secondary_index */));
@@ -2870,7 +2870,7 @@ YbAppendPrimaryColumnRef(YBCPgStatement dml, YBCPgExpr colref)
  * The colref list is expected to be the list of YbExprColrefDesc nodes.
  */
 static void
-YbAppendColumnRefsImpl(YBCPgStatement dml, List *colrefs,
+YbAppendColumnRefsImpl(YbcPgStatement dml, List *colrefs,
 					   bool is_for_secondary_index)
 {
 	ListCell   *lc;
@@ -2878,7 +2878,7 @@ YbAppendColumnRefsImpl(YBCPgStatement dml, List *colrefs,
 	foreach(lc, colrefs)
 	{
 		YbExprColrefDesc *param = lfirst_node(YbExprColrefDesc, lc);
-		YBCPgTypeAttrs type_attrs = { param->typmod };
+		YbcPgTypeAttrs type_attrs = { param->typmod };
 		HandleYBStatus(YbPgDmlAppendColumnRef(dml,
 											  YBCNewColumnRef(dml,
 															  param->attno,
@@ -2890,13 +2890,13 @@ YbAppendColumnRefsImpl(YBCPgStatement dml, List *colrefs,
 }
 
 void
-YbAppendPrimaryColumnRefs(YBCPgStatement dml, List *colrefs)
+YbAppendPrimaryColumnRefs(YbcPgStatement dml, List *colrefs)
 {
 	YbAppendColumnRefsImpl(dml, colrefs, false /* is_for_secondary_index */);
 }
 
 static void
-YbApplyPushdownImpl(YBCPgStatement dml, const PushdownExprs *pushdown,
+YbApplyPushdownImpl(YbcPgStatement dml, const YbPushdownExprs *pushdown,
 					bool is_for_secondary_index)
 {
 	if (!pushdown)
@@ -2914,13 +2914,13 @@ YbApplyPushdownImpl(YBCPgStatement dml, const PushdownExprs *pushdown,
 }
 
 void
-YbApplyPrimaryPushdown(YBCPgStatement dml, const PushdownExprs *pushdown)
+YbApplyPrimaryPushdown(YbcPgStatement dml, const YbPushdownExprs *pushdown)
 {
 	YbApplyPushdownImpl(dml, pushdown, false /* is_for_secondary_index */);
 }
 
 void
-YbApplySecondaryIndexPushdown(YBCPgStatement dml, const PushdownExprs *pushdown)
+YbApplySecondaryIndexPushdown(YbcPgStatement dml, const YbPushdownExprs *pushdown)
 {
 	YbApplyPushdownImpl(dml, pushdown, true /* is_for_secondary_index */);
 }
@@ -2955,11 +2955,11 @@ ybcBeginScan(Relation relation,
 			 int nkeys,
 			 ScanKey keys,
 			 Scan *pg_scan_plan,
-			 PushdownExprs *rel_pushdown,
-			 PushdownExprs *idx_pushdown,
+			 YbPushdownExprs *rel_pushdown,
+			 YbPushdownExprs *idx_pushdown,
 			 List *aggrefs,
 			 int distinct_prefixlen,
-			 YBCPgExecParameters *exec_params,
+			 YbcPgExecParameters *exec_params,
 			 bool is_internal_scan,
 			 bool fetch_ybctids_only)
 {
@@ -3156,7 +3156,7 @@ ybc_getnext_indextuple(YbScanDesc ybScan, ScanDirection dir, bool *recheck)
 }
 
 bool
-ybc_getnext_aggslot(IndexScanDesc scan, YBCPgStatement handle,
+ybc_getnext_aggslot(IndexScanDesc scan, YbcPgStatement handle,
 					bool index_only_scan)
 {
 	Assert(scan->yb_agg_slot);
@@ -3749,14 +3749,14 @@ ybcIndexCostEstimate(struct PlannerInfo *root, IndexPath *path,
 }
 
 static bool
-YbFetchRowData(YBCPgStatement ybc_stmt, Relation relation, Datum ybctid,
-			   Datum *values, bool *nulls, YBCPgSysColumns *syscols)
+YbFetchRowData(YbcPgStatement ybc_stmt, Relation relation, Datum ybctid,
+			   Datum *values, bool *nulls, YbcPgSysColumns *syscols)
 {
 	bool has_data = false;
 	TupleDesc tupdesc = RelationGetDescr(relation);
 
 	/* Bind ybctid to identify the current row. */
-	YBCPgExpr ybctid_expr = YBCNewConstant(ybc_stmt,
+	YbcPgExpr ybctid_expr = YBCNewConstant(ybc_stmt,
 										   BYTEAOID,
 										   InvalidOid,
 										   ybctid,
@@ -3795,12 +3795,12 @@ bool
 YbFetchHeapTuple(Relation relation, Datum ybctid, HeapTuple *tuple)
 {
 	bool has_data = false;
-	YBCPgStatement ybc_stmt;
+	YbcPgStatement ybc_stmt;
 
 	TupleDesc tupdesc = RelationGetDescr(relation);
 	Datum *values = (Datum *) palloc0(tupdesc->natts * sizeof(Datum));
 	bool *nulls  = (bool *) palloc(tupdesc->natts * sizeof(bool));
-	YBCPgSysColumns syscols;
+	YbcPgSysColumns syscols;
 
 	/* Read data */
 	HandleYBStatus(YBCPgNewSelect(YBCGetDatabaseOid(relation),
@@ -3860,7 +3860,7 @@ YBCHandleConflictError(Relation rel, LockWaitPolicy wait_policy)
 }
 
 static bool
-YBCIsExplicitRowLockConflictStatus(YBCStatus status)
+YBCIsExplicitRowLockConflictStatus(YbcStatus status)
 {
 	Assert(status);
 	const uint16_t txn_error = YBCStatusTransactionError(status);
@@ -3868,7 +3868,7 @@ YBCIsExplicitRowLockConflictStatus(YBCStatus status)
 }
 
 static void
-HandleExplicitRowLockStatus(YBCPgExplicitRowLockStatus status)
+HandleExplicitRowLockStatus(YbcPgExplicitRowLockStatus status)
 {
 	if (status.error_info.is_initialized &&
 		YBCIsExplicitRowLockConflictStatus(status.ybc_status))
@@ -3893,7 +3893,7 @@ TM_Result
 YBCLockTuple(Relation relation, Datum ybctid, RowMarkType mode,
 			 LockWaitPolicy pg_wait_policy, EState *estate)
 {
-	const YBCPgExplicitRowLockParams lock_params = {
+	const YbcPgExplicitRowLockParams lock_params = {
 		.rowmark = mode,
 		.pg_wait_policy = pg_wait_policy,
 		.docdb_wait_policy = YBGetDocDBWaitPolicy(pg_wait_policy)
@@ -3913,7 +3913,7 @@ YBCLockTuple(Relation relation, Datum ybctid, RowMarkType mode,
 		return TM_Ok;
 	}
 
-	YBCPgStatement ybc_stmt;
+	YbcPgStatement ybc_stmt;
 	HandleYBStatus(YBCPgNewSelect(db_oid,
 								  relfile_oid,
 								  NULL /* prepare_params */,
@@ -3921,10 +3921,10 @@ YBCLockTuple(Relation relation, Datum ybctid, RowMarkType mode,
 								  &ybc_stmt));
 
 	/* Bind ybctid to identify the current row. */
-	YBCPgExpr ybctid_expr = YBCNewConstant(ybc_stmt, BYTEAOID, InvalidOid, ybctid, false);
+	YbcPgExpr ybctid_expr = YBCNewConstant(ybc_stmt, BYTEAOID, InvalidOid, ybctid, false);
 	HandleYBStatus(YBCPgDmlBindColumn(ybc_stmt, YBTupleIdAttributeNumber, ybctid_expr));
 
-	YBCPgExecParameters exec_params = {0};
+	YbcPgExecParameters exec_params = {0};
 	exec_params.limit_count = 1;
 	exec_params.rowmark = lock_params.rowmark;
 	exec_params.pg_wait_policy = lock_params.pg_wait_policy;
@@ -3945,7 +3945,7 @@ YBCLockTuple(Relation relation, Datum ybctid, RowMarkType mode,
 		bool has_data = false;
 		Datum *values = NULL;
 		bool *nulls  = NULL;
-		YBCPgSysColumns syscols;
+		YbcPgSysColumns syscols;
 
 		/*
 		 * Below is done to ensure the read request is flushed to tserver.
@@ -4079,7 +4079,7 @@ ybFetchSample(YbSample ybSample, HeapTuple *rows)
 	for (numrows = 0; numrows < ybSample->targrows; numrows++)
 	{
 		bool has_data = false;
-		YBCPgSysColumns syscols;
+		YbcPgSysColumns syscols;
 
 		/* Fetch one row. */
 		HandleYBStatus(YBCPgDmlFetch(ybSample->handle,
@@ -4108,7 +4108,7 @@ ybFetchSample(YbSample ybSample, HeapTuple *rows)
 /*
  * ybFetchNext
  *
- *  Fetch next row from the provided YBCPgStatement and load it into the slot.
+ *  Fetch next row from the provided YbcPgStatement and load it into the slot.
  *
  * The statement must be ready to be fetched from, in other words it should be
  * executed, that means request is sent to the DocDB.
@@ -4122,14 +4122,14 @@ ybFetchSample(YbSample ybSample, HeapTuple *rows)
  * value.
  */
 void
-ybFetchNext(YBCPgStatement handle, TupleTableSlot *slot, Oid relid)
+ybFetchNext(YbcPgStatement handle, TupleTableSlot *slot, Oid relid)
 {
 	Assert(slot != NULL);
 	Assert(TTS_IS_VIRTUAL(slot));
 	TupleDesc	tupdesc = slot->tts_tupleDescriptor;
 	Datum	   *values = slot->tts_values;
 	bool	   *nulls = slot->tts_isnull;
-	YBCPgSysColumns syscols;
+	YbcPgSysColumns syscols;
 	bool		has_data;
 
 	ExecClearTuple(slot);
@@ -4243,11 +4243,11 @@ yb_init_partition_key_data(void *data)
 	ppk->key_data_capacity = YB_PARTITION_KEY_DATA_CAPACITY;
 }
 
-typedef int keylen_t;
+typedef int yb_keylen_t;
 #define KEY_LEN(ppk, key_offset) \
 	(ppk)->key_data + (key_offset)
 #define KEY_DATA(ppk, key_offset) \
-	(ppk)->key_data + (key_offset) + sizeof(keylen_t)
+	(ppk)->key_data + (key_offset) + sizeof(yb_keylen_t)
 
 /*
  * yb_add_key_unsynchronized
@@ -4259,7 +4259,7 @@ typedef int keylen_t;
  */
 static bool
 yb_add_key_unsynchronized(YBParallelPartitionKeys ppk,
-						  const char *key, keylen_t key_len)
+						  const char *key, yb_keylen_t key_len)
 {
 	/* Only the first key is allowed to be empty */
 	Assert(key_len > 0 || ppk->key_count == 0);
@@ -4267,7 +4267,7 @@ yb_add_key_unsynchronized(YBParallelPartitionKeys ppk,
 	if (ppk->key_count == 0)
 	{
 		Assert(sizeof(key_len) + key_len <= ppk->key_data_capacity);
-		memcpy(KEY_LEN(ppk, 0), &key_len, sizeof(keylen_t));
+		memcpy(KEY_LEN(ppk, 0), &key_len, sizeof(yb_keylen_t));
 		/* Update counters, etc */
 		if (key_len > 0)
 		{
@@ -4285,14 +4285,14 @@ yb_add_key_unsynchronized(YBParallelPartitionKeys ppk,
 		 * Wrapped around buffer, the available space lays between the end of
 		 * the high key and the beginning of the low key.
 		 */
-		keylen_t high_key_len;
-		memcpy(&high_key_len, KEY_LEN(ppk, ppk->high_offset), sizeof(keylen_t));
+		yb_keylen_t high_key_len;
+		memcpy(&high_key_len, KEY_LEN(ppk, ppk->high_offset), sizeof(yb_keylen_t));
 		int free_offset = ppk->high_offset + sizeof(int) + high_key_len;
 		/* Check the room in the buffer */
 		Assert(free_offset <= ppk->low_offset);
-		if (ppk->low_offset - free_offset < sizeof(keylen_t) + key_len)
+		if (ppk->low_offset - free_offset < sizeof(yb_keylen_t) + key_len)
 			return false;
-		memcpy(KEY_LEN(ppk, free_offset), &key_len, sizeof(keylen_t));
+		memcpy(KEY_LEN(ppk, free_offset), &key_len, sizeof(yb_keylen_t));
 		memcpy(KEY_DATA(ppk, free_offset), key, key_len);
 		/* Update counters, etc */
 		++ppk->key_count;
@@ -4310,7 +4310,7 @@ yb_add_key_unsynchronized(YBParallelPartitionKeys ppk,
 		/* Check for the trailing space capacity */
 		if (ppk->key_data_capacity - free_offset >= sizeof(key_len) + key_len)
 		{
-			memcpy(KEY_LEN(ppk, free_offset), &key_len, sizeof(keylen_t));
+			memcpy(KEY_LEN(ppk, free_offset), &key_len, sizeof(yb_keylen_t));
 			memcpy(KEY_DATA(ppk, free_offset), key, key_len);
 			/* Update counters, etc */
 			++ppk->key_count;
@@ -4325,7 +4325,7 @@ yb_add_key_unsynchronized(YBParallelPartitionKeys ppk,
 		 */
 		else if (ppk->low_offset >= sizeof(key_len) + key_len)
 		{
-			memcpy(KEY_LEN(ppk, 0), &key_len, sizeof(keylen_t));
+			memcpy(KEY_LEN(ppk, 0), &key_len, sizeof(yb_keylen_t));
 			memcpy(KEY_DATA(ppk, 0), key, key_len);
 			/* Update counters, etc */
 			++ppk->key_count;
@@ -4350,11 +4350,11 @@ static void
 yb_remove_key_unsynchronized(YBParallelPartitionKeys ppk)
 {
 	Assert(ppk->key_count > 0);
-	keylen_t key_len;
+	yb_keylen_t key_len;
 	--ppk->key_count;
-	memcpy(&key_len, KEY_LEN(ppk, ppk->low_offset), sizeof(keylen_t));
+	memcpy(&key_len, KEY_LEN(ppk, ppk->low_offset), sizeof(yb_keylen_t));
 	/* Find offset of the next element */
-	int next = ppk->low_offset + sizeof(keylen_t) + key_len;
+	int next = ppk->low_offset + sizeof(yb_keylen_t) + key_len;
 	if (next == ppk->key_data_size)
 	{
 		/*
@@ -4377,8 +4377,8 @@ yb_remove_key_unsynchronized(YBParallelPartitionKeys ppk)
 		}
 		else
 		{
-			memcpy(&key_len, KEY_LEN(ppk, ppk->high_offset), sizeof(keylen_t));
-			ppk->key_data_size = ppk->high_offset + sizeof(keylen_t) + key_len;
+			memcpy(&key_len, KEY_LEN(ppk, ppk->high_offset), sizeof(yb_keylen_t));
+			ppk->key_data_size = ppk->high_offset + sizeof(yb_keylen_t) + key_len;
 		}
 	}
 	ppk->low_offset = next;
@@ -4397,16 +4397,16 @@ yb_remove_key_unsynchronized(YBParallelPartitionKeys ppk)
  * to fetch more and change the fetch state to WORKING. Hence the separate
  * field, a counter, to be able to report inefficient fetch.
  */
-typedef struct FetchKeysParam
+typedef struct YbFetchKeysParam
 {
 	int discarded;
 	YBParallelPartitionKeys ppk;
-} FetchKeysParam;
+} YbFetchKeysParam;
 
 static void
 ppk_buffer_fetch_callback(void *param, const char *key, size_t key_size)
 {
-	FetchKeysParam *fkp = (FetchKeysParam *) param;
+	YbFetchKeysParam *fkp = (YbFetchKeysParam *) param;
 	YBParallelPartitionKeys ppk = fkp->ppk;
 	/* Once discarded, discard all the keys, just count them */
 	if (fkp->discarded)
@@ -4473,14 +4473,14 @@ yb_fetch_partition_keys(YBParallelPartitionKeys ppk)
 	const char *latest_key;
 	size_t latest_key_size;
 	uint64_t max_num_ranges;
-	FetchKeysParam fkp = {0, ppk};
+	YbFetchKeysParam fkp = {0, ppk};
 
 	/* Estimate fetch parameter values */
 	SpinLockAcquire(&ppk->mutex);
 	/* Until fetch is done at least one key must remain in the buffer */
 	Assert(ppk->key_count > 0);
-	keylen_t key_len;
-	memcpy(&key_len, KEY_LEN(ppk, ppk->high_offset), sizeof(keylen_t));
+	yb_keylen_t key_len;
+	memcpy(&key_len, KEY_LEN(ppk, ppk->high_offset), sizeof(yb_keylen_t));
 	latest_key_size = key_len;
 	/* Empty key indicates the end of the keys, fetch shouldn't be possible. */
 	Assert(latest_key_size);
@@ -4496,7 +4496,7 @@ yb_fetch_partition_keys(YBParallelPartitionKeys ppk)
 	 */
 	double average_key_size = ppk->total_key_size / ppk->total_key_count;
 	/* Account for the key length stored in the buffer */
-	average_key_size += sizeof(keylen_t);
+	average_key_size += sizeof(yb_keylen_t);
 	max_num_ranges =
 		floor(ppk->key_data_capacity / average_key_size) - ppk->key_count;
 	if (max_num_ranges < 16)
@@ -4518,7 +4518,7 @@ yb_fetch_partition_keys(YBParallelPartitionKeys ppk)
 										ppk->is_forward ? NULL : latest_key /* upper_bound_key */,
 										ppk->is_forward ? 0 : latest_key_size /* upper_bound_key_size */,
 										max_num_ranges,  yb_parallel_range_size, ppk->is_forward,
-										(ppk->key_data_capacity / 3) - sizeof(keylen_t) /* max_key_length */,
+										(ppk->key_data_capacity / 3) - sizeof(yb_keylen_t) /* max_key_length */,
 										ppk_buffer_fetch_callback, &fkp));
 	SpinLockAcquire(&ppk->mutex);
 	/* Update fetch status */
@@ -4578,7 +4578,7 @@ ppk_buffer_initialize_callback(void *param, const char *key, size_t key_size)
  */
 void
 ybParallelPrepare(YBParallelPartitionKeys ppk, Relation relation,
-				  YBCPgExecParameters *exec_params, bool is_forward)
+				  YbcPgExecParameters *exec_params, bool is_forward)
 {
 	/*
 	 * The index scan access method's DSM initialization routines do not
@@ -4620,7 +4620,7 @@ ybParallelPrepare(YBParallelPartitionKeys ppk, Relation relation,
 										NULL /* upper_bound_key */, 0 /* upper_bound_key_size */,
 										YB_PARTITION_KEYS_DEFAULT_FETCH_SIZE,
 										yb_parallel_range_size, is_forward,
-										(ppk->key_data_capacity / 3) - sizeof(keylen_t),
+										(ppk->key_data_capacity / 3) - sizeof(yb_keylen_t),
 										ppk_buffer_initialize_callback, ppk));
 	/* Update fetch status, unless updated by the callback */
 	if (ppk->fetch_status == FETCH_STATUS_WORKING)
@@ -4647,8 +4647,8 @@ yb_copy_key_unsynchronized(YBParallelPartitionKeys ppk,
 						   const char **bound,
 						   size_t *bound_size)
 {
-	keylen_t key_len;
-	memcpy(&key_len, KEY_LEN(ppk, ppk->low_offset), sizeof(keylen_t));
+	yb_keylen_t key_len;
+	memcpy(&key_len, KEY_LEN(ppk, ppk->low_offset), sizeof(yb_keylen_t));
 	*bound_size = key_len;
 	if (key_len > 0)
 	{

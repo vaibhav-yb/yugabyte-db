@@ -13,6 +13,7 @@
 
 #pragma once
 
+#include "yb/master/master_admin.pb.h"
 #include "yb/util/status_fwd.h"
 
 #include "yb/master/master_fwd.h"
@@ -65,6 +66,8 @@ class YsqlInitDBAndMajorUpgradeHandler {
 
   bool IsYsqlMajorCatalogUpgradeInProgress() const;
 
+  Result<YsqlMajorCatalogUpgradeState> GetYsqlMajorCatalogUpgradeState() const;
+
   // Are we allowed to perform updates to the ysql catalog?
   // True for the current version if the ysql major upgrade completed.
   // The upgrade is considered to have started when the yb-master leader has upgraded to a new major
@@ -74,7 +77,7 @@ class YsqlInitDBAndMajorUpgradeHandler {
   bool IsWriteToCatalogTableAllowed(const TableId& table_id, bool is_forced_update) const;
 
  private:
-  using DbNameToOidList = std::vector<std::pair<std::string, YBCPgOid>>;
+  using DbNameToOidList = std::vector<std::pair<std::string, YbcPgOid>>;
 
   // Executes the given function asynchronously. Ensures that only one function is running at a
   // time.

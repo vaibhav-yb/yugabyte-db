@@ -41,6 +41,7 @@
 #include "yb/docdb/docdb_debug.h"
 #include "yb/docdb/docdb_pgapi.h"
 #include "yb/docdb/docdb_rocksdb_util.h"
+#include "yb/docdb/docdb_statistics.h"
 #include "yb/docdb/intent_aware_iterator.h"
 #include "yb/docdb/ql_storage_interface.h"
 #include "yb/docdb/vector_index.h"
@@ -621,12 +622,12 @@ template <typename T>
 concept Prefetcher = requires(
     T& key_provider, FilteringIterator& iterator, const dockv::ReaderProjection& projection) {
     { key_provider.Prefetch(iterator, projection) } -> std::same_as<Status>;
-}; // NOLINT
+};
 
 template <typename T>
 concept BoundsProvider = requires(T& key_provider) {
     { key_provider.Bounds() } -> std::same_as<YbctidBounds>;
-}; // NOLINT
+};
 
 template <typename T>
 YbctidBounds Bounds(const T& key_provider) {

@@ -75,6 +75,7 @@ ADD_YB_LIBRARY(yb_common_base
   DEPS ${COMMON_BASE_LIBS})
 
 set(COMMON_SRCS
+  advisory_locks_error.cc
   clock.cc
   colocated_util.cc
   common_consensus_util.cc
@@ -90,7 +91,6 @@ set(COMMON_SRCS
   key_encoder.cc
   opid.cc
   pgsql_error.cc
-  placement_info.cc
   pg_types.cc
   ql_protocol_util.cc
   retryable_request.cc
@@ -101,6 +101,7 @@ set(COMMON_SRCS
   schema_pbutil.cc
   snapshot.cc
   tablet_limits.cc
+  tablespace_parser.cc
   termination_monitor.cc
   transaction.cc
   transaction_error.cc
@@ -135,9 +136,9 @@ ADD_YB_TEST_LIBRARY(yb_common_test_util
 set(YB_TEST_LINK_LIBS yb_common yb_common_test_util ${YB_MIN_TEST_LIBS})
 ADD_YB_TEST(id_mapping-test)
 ADD_YB_TEST(jsonb-test)
-ADD_YB_TEST(placement_info-test)
 ADD_YB_TEST(schema-test)
 ADD_YB_TEST(subtxn_set_and_pb-test)
+ADD_YB_TEST(tablespace_parser-test)
 ADD_YB_TEST(tablet_limits_test)
 ADD_YB_TEST(types-test)
 ADD_YB_TEST(wire_protocol-test)

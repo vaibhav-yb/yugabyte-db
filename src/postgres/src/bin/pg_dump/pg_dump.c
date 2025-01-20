@@ -258,7 +258,7 @@ static void dumpTrigger(Archive *fout, const TriggerInfo *tginfo);
 static void dumpEventTrigger(Archive *fout, const EventTriggerInfo *evtinfo);
 static void dumpTable(Archive *fout, const TableInfo *tbinfo);
 static void dumpTableSchema(Archive *fout, const TableInfo *tbinfo);
-static void dumpTablegroup(Archive *fout, const TablegroupInfo *tginfo);
+static void dumpTablegroup(Archive *fout, const YbTablegroupInfo *tginfo);
 static void dumpTableAttach(Archive *fout, const TableAttachInfo *tbinfo);
 static void dumpAttrDef(Archive *fout, const AttrDefInfo *adinfo);
 static void dumpSequence(Archive *fout, const TableInfo *tbinfo);
@@ -358,7 +358,7 @@ static TableInfo *getRootTableInfo(const TableInfo *tbinfo);
 static Oid getDatabaseOid(Archive *fout);
 static PGresult* ybQueryDatabaseData(Archive *fout, PQExpBuffer dbQry);
 static void getYbTablePropertiesAndReloptions(Archive *fout,
-						YbTableProperties properties,
+						YbcTableProperties properties,
 						PQExpBuffer reloptions_buf, Oid reloid, const char* relname,
 						char relkind);
 static void isDatabaseColocated(Archive *fout);
@@ -1313,6 +1313,15 @@ setup_connection(Archive *AH, const char *dumpencoding,
 	{
 		PQExpBuffer query = createPQExpBuffer();
 		appendPQExpBuffer(query, "SET yb_read_time To %s", dopt->yb_read_time);
+		ExecuteSqlStatement(AH, query->data);
+		destroyPQExpBuffer(query);
+		/*
+		 * Disable catalog version check for read requests in case of
+		 * time-traveling queries, as queries in this session might read old data
+		 * with old catalog version.
+		 */
+		query = createPQExpBuffer();
+		appendPQExpBuffer(query, "SET yb_disable_catalog_version_check To True");
 		ExecuteSqlStatement(AH, query->data);
 		destroyPQExpBuffer(query);
 	}
@@ -6766,18 +6775,18 @@ getTables(Archive *fout, int *numTables)
 /*
  * getTablegroups:
  *	  read all user-defined tablegroups in the system catalogs and return
- *	  them in the TablegroupInfo* structure
+ *	  them in the YbTablegroupInfo* structure
  *
  *	numTablegroups is set to the number of tablegroups read in
  */
-TablegroupInfo *
+YbTablegroupInfo *
 getTablegroups(Archive *fout, int *numTablegroups)
 {
 	PGresult   *res;
 	int			ntups;
 	int			i;
 	PQExpBuffer query;
-	TablegroupInfo *tbinfo;
+	YbTablegroupInfo *tbinfo;
 	int			i_grpname;
 	int			i_oid;
 	int			i_tableoid;
@@ -6814,7 +6823,7 @@ getTablegroups(Archive *fout, int *numTablegroups)
 	ntups = PQntuples(res);
 	*numTablegroups = ntups;
 
-	tbinfo = (TablegroupInfo *) pg_malloc(ntups * sizeof(TablegroupInfo));
+	tbinfo = (YbTablegroupInfo *) pg_malloc(ntups * sizeof(YbTablegroupInfo));
 
 	i_grpname = PQfnumber(res, "grpname");
 	i_oid = PQfnumber(res, "oid");
@@ -10197,7 +10206,7 @@ dumpDumpableObject(Archive *fout, DumpableObject *dobj)
 			dumpTableAttach(fout, (const TableAttachInfo *) dobj);
 			break;
 		case DO_TABLEGROUP:
-			dumpTablegroup(fout, (const TablegroupInfo *) dobj);
+			dumpTablegroup(fout, (const YbTablegroupInfo *) dobj);
 			break;
 		case DO_ATTRDEF:
 			dumpAttrDef(fout, (const AttrDefInfo *) dobj);
@@ -15491,7 +15500,7 @@ createDummyViewAsClause(Archive *fout, const TableInfo *tbinfo)
  *    write the declaration of one user-defined tablegroup
  */
 static void
-dumpTablegroup(Archive *fout, const TablegroupInfo *tginfo)
+dumpTablegroup(Archive *fout, const YbTablegroupInfo *tginfo)
 {
 	DumpOptions *dopt = fout->dopt;
 
@@ -15729,12 +15738,12 @@ dumpTableSchema(Archive *fout, const TableInfo *tbinfo)
 		}
 
 		/* Get the table properties from YB, if relevant. */
-		YbTableProperties yb_properties = NULL;
+		YbcTableProperties yb_properties = NULL;
 		if ((dopt->include_yb_metadata || dopt->binary_upgrade) &&
 			(tbinfo->relkind == RELKIND_RELATION || tbinfo->relkind == RELKIND_INDEX
 			 || tbinfo->relkind == RELKIND_MATVIEW || tbinfo->relkind == RELKIND_PARTITIONED_TABLE))
 		{
-			yb_properties = (YbTableProperties) pg_malloc(sizeof(YbTablePropertiesData));
+			yb_properties = (YbcTableProperties) pg_malloc(sizeof(YbcTablePropertiesData));
 		}
 		PQExpBuffer yb_reloptions = createPQExpBuffer();
 		getYbTablePropertiesAndReloptions(fout, yb_properties, yb_reloptions,
@@ -16040,7 +16049,7 @@ dumpTableSchema(Archive *fout, const TableInfo *tbinfo)
 				(dopt->include_yb_metadata || dopt->binary_upgrade) &&
 				OidIsValid(yb_properties->tablegroup_oid))
 			{
-				TablegroupInfo *tablegroup = findTablegroupByOid(yb_properties->tablegroup_oid);
+				YbTablegroupInfo *tablegroup = findTablegroupByOid(yb_properties->tablegroup_oid);
 				if (tablegroup == NULL)
 					pg_fatal("could not find tablegroup definition with OID %u",
 							 yb_properties->tablegroup_oid);
@@ -16724,8 +16733,8 @@ dumpIndex(Archive *fout, const IndxInfo *indxinfo)
 
 		if (is_colocated_database && !is_legacy_colocated_database)
 		{
-			YbTableProperties yb_properties;
-			yb_properties = (YbTableProperties) pg_malloc(sizeof(YbTablePropertiesData));
+			YbcTableProperties yb_properties;
+			yb_properties = (YbcTableProperties) pg_malloc(sizeof(YbcTablePropertiesData));
 			PQExpBuffer yb_reloptions = createPQExpBuffer();
 			getYbTablePropertiesAndReloptions(fout, yb_properties, yb_reloptions,
 				indxinfo->dobj.catId.oid, indxinfo->dobj.name, tbinfo->relkind);
@@ -19013,7 +19022,7 @@ getDatabaseOid(Archive *fout)
  * 					reloptions, will be '{}' if properties are not allocated.
  */
 static void
-getYbTablePropertiesAndReloptions(Archive *fout, YbTableProperties properties,
+getYbTablePropertiesAndReloptions(Archive *fout, YbcTableProperties properties,
 								  PQExpBuffer reloptions_buf,
 								  Oid reloid, const char* relname, char relkind)
 {

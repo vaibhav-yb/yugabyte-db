@@ -23,7 +23,7 @@
 
 /* Yugabyte includes */
 #include "access/yb_sys_scan_base.h"
-#include "executor/ybcExpr.h"
+#include "executor/ybExpr.h"
 #include "pg_yb_utils.h"
 #include "yb/yql/pggate/ybc_pggate.h"
 
@@ -188,7 +188,7 @@ typedef struct IndexScanDescData
 	 * - Postgres IndexScan function will call and pass "yb_exec_params" to PgGate to control the
 	 *   index-scan execution in YugaByte.
 	 */
-	YBCPgExecParameters *yb_exec_params;
+	YbcPgExecParameters *yb_exec_params;
 
 	/*
 	 * yb_scan_plan stores postgres scan plan for current index scan.
@@ -200,8 +200,8 @@ typedef struct IndexScanDescData
 	 *       have plan information in scan state structures.
 	 */
 	Scan *yb_scan_plan;
-	PushdownExprs *yb_rel_pushdown;
-	PushdownExprs *yb_idx_pushdown;
+	YbPushdownExprs *yb_rel_pushdown;
+	YbPushdownExprs *yb_idx_pushdown;
 	List *yb_aggrefs;				/* aggregate information for aggregate pushdown */
 	TupleTableSlot *yb_agg_slot;	/* scan slot used by aggregate pushdown */
 	int yb_distinct_prefixlen; /* prefix length, in columns, of a distinct index scan */

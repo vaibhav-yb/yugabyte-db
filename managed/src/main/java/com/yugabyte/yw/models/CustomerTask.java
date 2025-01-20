@@ -243,6 +243,9 @@ public class CustomerTask extends Model {
     @EnumValue("CreatePitrConfig")
     CreatePitrConfig,
 
+    @EnumValue("UpdatePitrConfig")
+    UpdatePitrConfig,
+
     @EnumValue("DeletePitrConfig")
     DeletePitrConfig,
 
@@ -390,7 +393,10 @@ public class CustomerTask extends Model {
     EnableNodeAgent,
 
     @EnumValue("Decommission")
-    Decommission;
+    Decommission,
+
+    @EnumValue("CloneNamespace")
+    CloneNamespace;
 
     public String toString(boolean completed) {
       switch (this) {
@@ -470,6 +476,8 @@ public class CustomerTask extends Model {
           return completed ? "Restored" : "Restoring";
         case CreatePitrConfig:
           return completed ? "Created PITR Config" : "Creating PITR Config";
+        case UpdatePitrConfig:
+          return completed ? "Updated PITR Config" : "Updating PITR Config";
         case DeletePitrConfig:
           return completed ? "Deleted PITR Config" : "Deleting PITR Config";
         case RestoreSnapshotSchedule:
@@ -567,6 +575,8 @@ public class CustomerTask extends Model {
           return completed ? "Restored continuous YBA backup" : "Restoring continuous YBA backup";
         case EnableNodeAgent:
           return completed ? "Enabled node agent on" : "Enabling node agent on";
+        case CloneNamespace:
+          return completed ? "Cloned Namespace" : "Cloning Namespace";
         default:
           return null;
       }

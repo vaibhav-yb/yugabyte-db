@@ -37,7 +37,7 @@
 
 #include "yb/yql/pggate/ybc_pggate.h"
 #include "pg_yb_utils.h"
-#include "executor/ybcExpr.h"
+#include "executor/ybExpr.h"
 
 extern PGDLLIMPORT int yb_parallel_range_rows;
 
@@ -70,7 +70,7 @@ typedef enum
 	FETCH_STATUS_IDLE,
 	FETCH_STATUS_WORKING,
 	FETCH_STATUS_DONE
-} FetchStatus;
+} YbFetchStatus;
 
 /*
  * The parallel scan state structure
@@ -115,7 +115,7 @@ typedef struct YBParallelPartitionKeysData
 	Oid			table_relfilenode_oid; /* relfilenode_oid of the target
 										  relation */
 	bool		is_forward;		/* scan direction */
-	FetchStatus fetch_status;	/* if fetch is in progress or completed */
+	YbFetchStatus fetch_status;	/* if fetch is in progress or completed */
 	int			low_offset;		/* offset of the lowest key in the buffer */
 	int			high_offset;	/* offset of the highest key in the buffer */
 	int			key_count;		/* number of keys in the buffer */
@@ -166,7 +166,7 @@ typedef struct YbScanDescData
 	TableScanDescData rs_base;
 
 	/* The handle for the internal YB Select statement. */
-	YBCPgStatement handle;
+	YbcPgStatement handle;
 	bool is_exec_done;
 
 	/* Secondary index used in this scan. */
@@ -200,7 +200,7 @@ typedef struct YbScanDescData
 	AttrNumber target_key_attnums[YB_MAX_SCAN_KEYS];
 
 	/* Kept query-plan control to pass it to PgGate during preparation */
-	YBCPgPrepareParameters prepare_params;
+	YbcPgPrepareParameters prepare_params;
 
 	/*
 	 * Kept execution control to pass it to PgGate.
@@ -210,7 +210,7 @@ typedef struct YbScanDescData
 	 * - YBC-index-scan in-turn will passes this attribute to PgGate to control the index-scan
 	 *   execution in YB tablet server.
 	 */
-	YBCPgExecParameters *exec_params;
+	YbcPgExecParameters *exec_params;
 
 	/*
 	 * Flag used for bailing out from scan early. Currently used to bail out
@@ -263,35 +263,35 @@ extern HeapTuple ybc_heap_getnext(TableScanDesc scanDesc);
 extern void ybc_heap_endscan(TableScanDesc scanDesc);
 
 extern void
-YbBindDatumToColumn(YBCPgStatement stmt,
+YbBindDatumToColumn(YbcPgStatement stmt,
 					int attr_num,
 					Oid type_id,
 					Oid collation_id,
 					Datum datum,
 					bool is_null,
-					const YBCPgTypeEntity *null_type_entity);
+					const YbcPgTypeEntity *null_type_entity);
 
 /* Add targets to the given statement. */
-extern void YbDmlAppendTargetSystem(AttrNumber attnum, YBCPgStatement handle);
+extern void YbDmlAppendTargetSystem(AttrNumber attnum, YbcPgStatement handle);
 extern void YbDmlAppendTargetRegular(TupleDesc tupdesc, AttrNumber attnum,
-									 YBCPgStatement handle);
+									 YbcPgStatement handle);
 extern void YbDmlAppendTargetRegularAttr(const FormData_pg_attribute *attr,
-										 YBCPgStatement handle);
+										 YbcPgStatement handle);
 
 extern void YbDmlAppendTargetsAggregate(List *aggrefs, TupleDesc tupdesc,
 										Relation index, bool xs_want_itup,
-										YBCPgStatement handle);
-extern void YbDmlAppendTargets(List *colrefs, YBCPgStatement handle);
+										YbcPgStatement handle);
+extern void YbDmlAppendTargets(List *colrefs, YbcPgStatement handle);
 
-extern void YbAppendPrimaryColumnRef(YBCPgStatement dml, YBCPgExpr colref);
+extern void YbAppendPrimaryColumnRef(YbcPgStatement dml, YbcPgExpr colref);
 
-extern void YbAppendPrimaryColumnRefs(YBCPgStatement dml, List *colrefs);
+extern void YbAppendPrimaryColumnRefs(YbcPgStatement dml, List *colrefs);
 
-extern void YbApplyPrimaryPushdown(YBCPgStatement dml,
-								   const PushdownExprs *pushdown);
+extern void YbApplyPrimaryPushdown(YbcPgStatement dml,
+								   const YbPushdownExprs *pushdown);
 
-extern void YbApplySecondaryIndexPushdown(YBCPgStatement dml,
-										  const PushdownExprs *pushdown);
+extern void YbApplySecondaryIndexPushdown(YbcPgStatement dml,
+										  const YbPushdownExprs *pushdown);
 
 /*
  * The ybc_idx API is used to process the following SELECT.
@@ -304,11 +304,11 @@ extern YbScanDesc ybcBeginScan(Relation relation,
 							   int nkeys,
 							   ScanKey key,
 							   Scan *pg_scan_plan,
-							   PushdownExprs *rel_pushdown,
-							   PushdownExprs *idx_pushdown,
+							   YbPushdownExprs *rel_pushdown,
+							   YbPushdownExprs *idx_pushdown,
 							   List *aggrefs,
 							   int distinct_prefixlen,
-							   YBCPgExecParameters *exec_params,
+							   YbcPgExecParameters *exec_params,
 							   bool is_internal_scan,
 							   bool fetch_ybctids_only);
 
@@ -328,7 +328,7 @@ extern HeapTuple ybc_getnext_heaptuple(YbScanDesc ybScan, ScanDirection dir,
 									   bool *recheck);
 extern IndexTuple ybc_getnext_indextuple(YbScanDesc ybScan, ScanDirection dir,
 										 bool *recheck);
-extern bool ybc_getnext_aggslot(IndexScanDesc scan, YBCPgStatement handle,
+extern bool ybc_getnext_aggslot(IndexScanDesc scan, YbcPgStatement handle,
 								bool index_only_scan);
 
 extern Oid ybc_get_attcollation(TupleDesc bind_desc, AttrNumber attnum);
@@ -390,7 +390,7 @@ extern void YBCHandleConflictError(Relation rel, LockWaitPolicy wait_policy);
 typedef struct YbSampleData
 {
 	/* The handle for the internal YB Sample statement. */
-	YBCPgStatement handle;
+	YbcPgStatement handle;
 
 	Relation	relation;
 	int			targrows;	/* # of rows to collect */
@@ -403,14 +403,14 @@ typedef struct YbSampleData *YbSample;
 extern YbSample ybBeginSample(Relation rel, int targrows);
 extern bool ybSampleNextBlock(YbSample ybSample);
 extern int ybFetchSample(YbSample ybSample, HeapTuple *rows);
-extern void ybFetchNext(YBCPgStatement handle, TupleTableSlot *slot, Oid relid);
+extern void ybFetchNext(YbcPgStatement handle, TupleTableSlot *slot, Oid relid);
 
 extern int ybParallelWorkers(double numrows);
 
 extern Size yb_estimate_parallel_size(void);
 extern void yb_init_partition_key_data(void *data);
 extern void ybParallelPrepare(YBParallelPartitionKeys ppk, Relation relation,
-							  YBCPgExecParameters *exec_params,
+							  YbcPgExecParameters *exec_params,
 							  bool is_forward);
 extern bool ybParallelNextRange(YBParallelPartitionKeys ppk,
 								const char **low_bound, size_t *low_bound_size,

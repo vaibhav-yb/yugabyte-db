@@ -88,7 +88,7 @@
 /*  YB includes. */
 #include "commands/defrem.h"
 #include "commands/progress.h"
-#include "commands/ybccmds.h"
+#include "commands/yb_cmds.h"
 #include "parser/parse_utilcmd.h"
 #include "pgstat.h"
 #include "pg_yb_utils.h"
@@ -741,7 +741,7 @@ index_create(Relation heapRelation,
 			 bool allow_system_table_mods,
 			 bool is_internal,
 			 Oid *constraintId,
-			 OptSplit *split_options,
+			 YbOptSplit *split_options,
 			 const bool skip_index_backfill,
 			 bool is_colocated,
 			 Oid tablegroupId,
@@ -2314,7 +2314,7 @@ index_drop(Oid indexId, bool concurrent, bool concurrent_lock_mode)
 
 	if (IsYugaByteEnabled() &&
 		userIndexRelation->rd_rel->relpersistence == RELPERSISTENCE_TEMP)
-		YBCForceAllowCatalogModifications(true);
+		YBCDdlEnableForceCatalogModification();
 
 	/*
 	 * Drop Index Concurrently is more or less the reverse process of Create
@@ -3885,8 +3885,12 @@ reindex_index(Oid indexId, bool skip_constraint_checks, char persistence,
 	/*
 	 * Partitioned indexes should never get processed here, as they have no
 	 * physical storage.
+	 * YB: We want to allow reindexes on partitioned indexes during
+	 * table rewrite to avoid schema inconsistencies during backup/restore
+	 * (see GH#24458).
 	 */
-	if (iRel->rd_rel->relkind == RELKIND_PARTITIONED_INDEX)
+	if (iRel->rd_rel->relkind == RELKIND_PARTITIONED_INDEX &&
+		!is_yb_table_rewrite)
 		elog(ERROR, "cannot reindex partitioned index \"%s.%s\"",
 			 get_namespace_name(RelationGetNamespace(iRel)),
 			 RelationGetRelationName(iRel));
@@ -4039,7 +4043,14 @@ reindex_index(Oid indexId, bool skip_constraint_checks, char persistence,
 
 	/* Initialize the index and rebuild */
 	/* Note: we do not need to re-establish pkey setting */
-	if (!is_yb_table_rewrite || !yb_skip_data_insert_for_table_rewrite)
+	/*
+	 * YB: Partitioned indexes can reach here as we allow reindexes on
+	 * them during table rewrite. However, we don't actually want to
+	 * do an index build for them (like PG), so skip this.
+	 */
+	if (!(IsYBRelation(iRel) &&
+		  iRel->rd_rel->relkind == RELKIND_PARTITIONED_INDEX) &&
+		(!is_yb_table_rewrite || !yb_skip_data_insert_for_table_rewrite))
 	{
 		index_build(heapRelation, iRel, indexInfo, true, true);
 	}
@@ -4078,8 +4089,12 @@ reindex_index(Oid indexId, bool skip_constraint_checks, char persistence,
 	 * usability horizon must be advanced to the current transaction on every
 	 * build or rebuild.  pg_index is OK in this regard because catalog tables
 	 * are not subject to early cleanup.
+	 * YB: Partitioned indexes can reach here as we allow reindexes on
+	 * them during table rewrite. However, we don't actually perform an index
+	 * build on them (like PG), so we shouldn't update their pg_index entries.
 	 */
-	if (!skipped_constraint)
+	if (!skipped_constraint && !(IsYBRelation(iRel) &&
+		iRel->rd_rel->relkind == RELKIND_PARTITIONED_INDEX))
 	{
 		Relation	pg_index;
 		HeapTuple	indexTuple;
@@ -4210,8 +4225,11 @@ reindex_relation(Oid relid, int flags, ReindexParams *params, bool is_yb_table_r
 	/*
 	 * Partitioned tables should never get processed here, as they have no
 	 * physical storage.
+	 * YB: We want to allow reindexes on partitioned indexes during
+	 * table rewrite to avoid schema inconsistencies during backup/restore
+	 * (see GH#24458).
 	 */
-	if (rel->rd_rel->relkind == RELKIND_PARTITIONED_TABLE)
+	if (rel->rd_rel->relkind == RELKIND_PARTITIONED_TABLE && !is_yb_table_rewrite)
 		elog(ERROR, "cannot reindex partitioned table \"%s.%s\"",
 			 get_namespace_name(RelationGetNamespace(rel)),
 			 RelationGetRelationName(rel));

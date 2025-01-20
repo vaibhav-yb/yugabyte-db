@@ -28,8 +28,8 @@
 #include "access/yb_scan.h"
 #include "catalog/index.h"
 #include "catalog/pg_type.h"
-#include "commands/ybccmds.h"
-#include "executor/ybcModifyTable.h"
+#include "commands/yb_cmds.h"
+#include "executor/ybModifyTable.h"
 #include "miscadmin.h"
 #include "pgstat.h"
 #include "utils/rel.h"
@@ -49,14 +49,14 @@ typedef struct
 	 * backfill.
 	 */
 	const uint64_t *backfill_write_time;
-} YBCBuildState;
+} YbLsmBuildState;
 
 
 /*
  * Utility method to set binds for index write statement.
  */
 static void
-doBindsForIdxWrite(YBCPgStatement stmt,
+doBindsForIdxWrite(YbcPgStatement stmt,
 				   void *indexstate,
 				   Relation index,
 				   Datum *values,
@@ -72,7 +72,7 @@ doBindsForIdxWrite(YBCPgStatement stmt,
 	{
 		ereport(ERROR,
 				(errcode(ERRCODE_INTERNAL_ERROR),
-				 errmsg("Missing base table ybctid in index write request")));
+				 errmsg("missing base table ybctid in index write request")));
 	}
 
 	bool has_null_attr = false;
@@ -135,7 +135,7 @@ doBindsForIdxWrite(YBCPgStatement stmt,
 }
 
 static void
-doAssignForIdxUpdate(YBCPgStatement stmt,
+doAssignForIdxUpdate(YbcPgStatement stmt,
 					 Relation index,
 					 Datum *values,
 					 bool *isnull,
@@ -150,7 +150,7 @@ doAssignForIdxUpdate(YBCPgStatement stmt,
 	{
 		ereport(ERROR,
 				(errcode(ERRCODE_INTERNAL_ERROR),
-				 errmsg("Missing base table ybctid in index write request")));
+				 errmsg("missing base table ybctid in index write request")));
 	}
 
 	bool has_null_attr = false;
@@ -162,7 +162,7 @@ doAssignForIdxUpdate(YBCPgStatement stmt,
 		Datum		value   = values[attnum - 1];
 		bool		is_null = isnull[attnum - 1];
 
-		YBCPgExpr ybc_expr = YBCNewConstant(stmt, type_id, collation_id, value, is_null);
+		YbcPgExpr ybc_expr = YBCNewConstant(stmt, type_id, collation_id, value, is_null);
 
 		/*
 		 * Attrs that are a part of the index key are 'bound' to their values.
@@ -198,7 +198,7 @@ doAssignForIdxUpdate(YBCPgStatement stmt,
 	{
 		Assert(unique_index);
 
-		YBCPgExpr ybc_expr = YBCNewConstant(stmt, BYTEAOID, InvalidOid, new_ybbasectid, false);
+		YbcPgExpr ybc_expr = YBCNewConstant(stmt, BYTEAOID, InvalidOid, new_ybbasectid, false);
 		HandleYBStatus(YBCPgDmlAssignColumn(stmt, YBIdxBaseTupleIdAttributeNumber, ybc_expr));
 	}
 
@@ -230,7 +230,7 @@ static void
 ybcinbuildCallback(Relation index, Datum ybctid, Datum *values,
 				   bool *isnull, bool tupleIsAlive, void *state)
 {
-	YBCBuildState  *buildstate = (YBCBuildState *)state;
+	YbLsmBuildState  *buildstate = (YbLsmBuildState *)state;
 
 	if (!buildstate->isprimary)
 		YBCExecuteInsertIndex(index,
@@ -247,7 +247,7 @@ ybcinbuildCallback(Relation index, Datum ybctid, Datum *values,
 static IndexBuildResult *
 ybcinbuild(Relation heap, Relation index, struct IndexInfo *indexInfo)
 {
-	YBCBuildState	buildstate;
+	YbLsmBuildState	buildstate;
 	double			heap_tuples = 0;
 
 	/* Do the heap scan */
@@ -283,7 +283,7 @@ ybcinbackfill(Relation heap,
 			  YbBackfillInfo *bfinfo,
 			  YbPgExecOutParam *bfresult)
 {
-	YBCBuildState	buildstate;
+	YbLsmBuildState	buildstate;
 	double			heap_tuples = 0;
 
 	/* Do the heap scan */
@@ -428,7 +428,7 @@ static int64
 ybcgetbitmap(IndexScanDesc scan, YbTIDBitmap *ybtbm)
 {
 	size_t		new_tuples = 0;
-	SliceVector ybctids;
+	YbcSliceVector ybctids;
 	YbScanDesc	ybscan = (YbScanDesc) scan->opaque;
 	bool 		exceeded_work_mem = false;
 
@@ -700,7 +700,7 @@ ybcinendscan(IndexScanDesc scan)
 }
 
 static void
-ybcinbindschema(YBCPgStatement handle,
+ybcinbindschema(YbcPgStatement handle,
 				struct IndexInfo *indexInfo,
 				TupleDesc indexTupleDesc,
 				int16 *coloptions)

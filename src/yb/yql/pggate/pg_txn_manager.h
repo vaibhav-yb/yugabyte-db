@@ -17,6 +17,7 @@
 
 #include <mutex>
 #include <optional>
+#include <utility>
 
 #include "yb/common/clock.h"
 #include "yb/common/transaction.h"
@@ -48,13 +49,13 @@ YB_STRONGLY_TYPED_BOOL(EnsureReadTimeIsSet);
 
 class PgTxnManager : public RefCountedThreadSafe<PgTxnManager> {
  public:
-  PgTxnManager(PgClient* pg_client, scoped_refptr<ClockBase> clock, PgCallbacks pg_callbacks);
+  PgTxnManager(PgClient* pg_client, scoped_refptr<ClockBase> clock, YbcPgCallbacks pg_callbacks);
 
   virtual ~PgTxnManager();
 
   Status BeginTransaction(int64_t start_time);
 
-  Status CalculateIsolation(bool read_only_op, TxnPriorityRequirement txn_priority_requirement);
+  Status CalculateIsolation(bool read_only_op, YbcTxnPriorityRequirement txn_priority_requirement);
   Status RecreateTransaction();
   Status RestartTransaction();
   Status ResetTransactionReadPoint();
@@ -73,26 +74,39 @@ class PgTxnManager : public RefCountedThreadSafe<PgTxnManager> {
   Status EnterSeparateDdlTxnMode();
   Status ExitSeparateDdlTxnModeWithAbort();
   Status ExitSeparateDdlTxnModeWithCommit(uint32_t db_oid, bool is_silent_altering);
+  void DdlEnableForceCatalogModification();
   void SetDdlHasSyscatalogChanges();
   Status SetInTxnBlock(bool in_txn_blk);
   Status SetReadOnlyStmt(bool read_only_stmt);
 
   bool IsTxnInProgress() const { return txn_in_progress_; }
   IsolationLevel GetIsolationLevel() const { return isolation_level_; }
-  bool IsDdlMode() const { return ddl_mode_.has_value(); }
+  bool IsDdlMode() const { return ddl_state_.has_value(); }
+  std::optional<bool> GetDdlForceCatalogModification() const {
+    return ddl_state_ ? std::optional(ddl_state_->force_catalog_modification) : std::nullopt;
+  }
   bool ShouldEnableTracing() const { return enable_tracing_; }
 
   void SetupPerformOptions(
       tserver::PgPerformOptionsPB* options, EnsureReadTimeIsSet ensure_read_time);
 
   double GetTransactionPriority() const;
-  TxnPriorityRequirement GetTransactionPriorityType() const;
+  YbcTxnPriorityRequirement GetTransactionPriorityType() const;
 
-  void DumpSessionState(YBCPgSessionState* session_data);
-  void RestoreSessionState(const YBCPgSessionState& session_data);
+  void DumpSessionState(YbcPgSessionState* session_data);
+  void RestoreSessionState(const YbcPgSessionState& session_data);
 
   [[nodiscard]] uint64_t GetCurrentReadTimePoint() const;
   Status RestoreReadTimePoint(uint64_t read_time_point_handle);
+
+  struct DdlState {
+    bool has_docdb_schema_changes = false;
+    bool force_catalog_modification = false;
+
+    std::string ToString() const {
+      return YB_STRUCT_TO_STRING(has_docdb_schema_changes, force_catalog_modification);
+    }
+  };
 
  private:
   struct DdlCommitInfo {
@@ -129,7 +143,7 @@ class PgTxnManager : public RefCountedThreadSafe<PgTxnManager> {
   Status UpdateReadTimeForFollowerReadsIfRequired();
   Status RecreateTransaction(SavePriority save_priority);
 
-  static uint64_t NewPriority(TxnPriorityRequirement txn_priority_requirement);
+  static uint64_t NewPriority(YbcTxnPriorityRequirement txn_priority_requirement);
 
   std::string TxnStateDebugStr() const;
 
@@ -163,7 +177,7 @@ class PgTxnManager : public RefCountedThreadSafe<PgTxnManager> {
   HybridTime read_time_for_follower_reads_;
   bool deferrable_ = false;
 
-  std::optional<DdlMode> ddl_mode_;
+  std::optional<DdlState> ddl_state_;
 
   // On a transaction conflict error we want to recreate the transaction with the same priority as
   // the last transaction. This avoids the case where the current transaction gets a higher priority
@@ -172,7 +186,7 @@ class PgTxnManager : public RefCountedThreadSafe<PgTxnManager> {
   SavePriority use_saved_priority_ = SavePriority::kFalse;
   int64_t pg_txn_start_us_ = 0;
 
-  PgCallbacks pg_callbacks_;
+  YbcPgCallbacks pg_callbacks_;
 
   DISALLOW_COPY_AND_ASSIGN(PgTxnManager);
 };

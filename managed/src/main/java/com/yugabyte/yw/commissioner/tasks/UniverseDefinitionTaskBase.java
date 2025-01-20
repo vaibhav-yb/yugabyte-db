@@ -111,6 +111,7 @@ import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.function.BiConsumer;
 import java.util.function.BiFunction;
 import java.util.function.Consumer;
@@ -546,6 +547,7 @@ public abstract class UniverseDefinitionTaskBase extends UniverseTaskBase {
   public void reserveOnPremNodes(
       Cluster cluster, Set<NodeDetails> clusterNodes, boolean commitReservedNodes) {
     if (cluster.userIntent.providerType.equals(CloudType.onprem)) {
+      AtomicBoolean checkReserved = new AtomicBoolean(true);
       clusterNodes.stream()
           .filter(n -> cluster.uuid.equals(n.placementUuid))
           .filter(n -> n.state == NodeState.ToBeAdded || n.state == NodeState.Decommissioned)
@@ -560,7 +562,10 @@ public abstract class UniverseDefinitionTaskBase extends UniverseTaskBase {
                                 .computeIfAbsent(n.azUuid, k -> new HashSet<>())
                                 .add(n.nodeName));
                 Map<String, NodeInstance> nodeMap =
-                    NodeInstance.reserveNodes(cluster.uuid, onpremAzToNodes, instanceType);
+                    NodeInstance.reserveNodes(
+                        cluster.uuid, onpremAzToNodes, instanceType, checkReserved.get());
+                // To avoid subsequent fails if there are different instanceTypes and commit = false
+                checkReserved.set(false);
                 if (commitReservedNodes) {
                   NodeInstance.commitReservedNodes(cluster.uuid);
                 }
@@ -1286,32 +1291,38 @@ public abstract class UniverseDefinitionTaskBase extends UniverseTaskBase {
   public SubTaskGroup createStartYbcTasks(Collection<NodeDetails> nodes) {
     SubTaskGroup subTaskGroup = createSubTaskGroup("AnsibleClusterServerCtl");
     for (NodeDetails node : nodes) {
-      AnsibleClusterServerCtl.Params params = new AnsibleClusterServerCtl.Params();
       UserIntent userIntent = taskParams().getClusterByUuid(node.placementUuid).userIntent;
-      // Add the node name.
-      params.nodeName = node.nodeName;
-      // Add the universe uuid.
-      params.setUniverseUUID(taskParams().getUniverseUUID());
-      // Add the az uuid.
-      params.azUuid = node.azUuid;
-      // The service and the command we want to run.
-      params.process = "controller";
-      params.command = "start";
-      params.placementUuid = node.placementUuid;
-      // Set the InstanceType
-      params.instanceType = node.cloudInfo.instance_type;
-      params.useSystemd = userIntent.useSystemd;
-      // sshPortOverride, in case the passed imageBundle has a different port
-      // configured for the region.
-      params.sshPortOverride = node.sshPortOverride;
-      // Create the Ansible task to get the server info.
-      AnsibleClusterServerCtl task = createTask(AnsibleClusterServerCtl.class);
-      task.initialize(params);
+      AnsibleClusterServerCtl task = createStartYbcTaskForNode(userIntent, node);
       // Add it to the task list.
       subTaskGroup.addSubTask(task);
     }
     getRunnableTask().addSubTaskGroup(subTaskGroup);
     return subTaskGroup;
+  }
+
+  public AnsibleClusterServerCtl createStartYbcTaskForNode(
+      UserIntent userIntent, NodeDetails node) {
+    AnsibleClusterServerCtl.Params params = new AnsibleClusterServerCtl.Params();
+    // Add the node name.
+    params.nodeName = node.nodeName;
+    // Add the universe uuid.
+    params.setUniverseUUID(taskParams().getUniverseUUID());
+    // Add the az uuid.
+    params.azUuid = node.azUuid;
+    // The service and the command we want to run.
+    params.process = "controller";
+    params.command = "start";
+    params.placementUuid = node.placementUuid;
+    // Set the InstanceType
+    params.instanceType = node.cloudInfo.instance_type;
+    params.useSystemd = userIntent.useSystemd;
+    // sshPortOverride, in case the passed imageBundle has a different port
+    // configured for the region.
+    params.sshPortOverride = node.sshPortOverride;
+    // Create the Ansible task to get the server info.
+    AnsibleClusterServerCtl task = createTask(AnsibleClusterServerCtl.class);
+    task.initialize(params);
+    return task;
   }
 
   @Override
@@ -2938,7 +2949,8 @@ public abstract class UniverseDefinitionTaskBase extends UniverseTaskBase {
       UUID universeUuid,
       UniverseDefinitionTaskParams parentTaskParams,
       Collection<NodeDetails> nodes) {
-    SubTaskGroup subTaskGroup = createSubTaskGroup("InstanceExistsCheck");
+    SubTaskGroup subTaskGroup =
+        createSubTaskGroup("InstanceExistsCheck", SubTaskGroupType.PreflightChecks);
     for (NodeDetails node : nodes) {
       if (node.placementUuid == null) {
         String errMsg = String.format("Node %s does not have placement.", node.nodeName);
@@ -3192,12 +3204,29 @@ public abstract class UniverseDefinitionTaskBase extends UniverseTaskBase {
       boolean enableConnectionPooling,
       boolean enableYCQL,
       boolean enableYCQLAuth) {
+    return createUpdateDBApiDetailsTask(
+        enableYSQL,
+        enableYSQLAuth,
+        enableConnectionPooling,
+        new HashMap<>(),
+        enableYCQL,
+        enableYCQLAuth);
+  }
+
+  protected SubTaskGroup createUpdateDBApiDetailsTask(
+      boolean enableYSQL,
+      boolean enableYSQLAuth,
+      boolean enableConnectionPooling,
+      Map<String, String> connectionPoolingGflags,
+      boolean enableYCQL,
+      boolean enableYCQLAuth) {
     SubTaskGroup subTaskGroup = createSubTaskGroup("UpdateClusterAPIDetails");
     UpdateClusterAPIDetails.Params params = new UpdateClusterAPIDetails.Params();
     params.setUniverseUUID(taskParams().getUniverseUUID());
     params.enableYCQL = enableYCQL;
     params.enableYCQLAuth = enableYCQLAuth;
     params.enableConnectionPooling = enableConnectionPooling;
+    params.connectionPoolingGflags = connectionPoolingGflags;
     params.enableYSQL = enableYSQL;
     params.enableYSQLAuth = enableYSQLAuth;
     UpdateClusterAPIDetails task = createTask(UpdateClusterAPIDetails.class);
@@ -3523,6 +3552,29 @@ public abstract class UniverseDefinitionTaskBase extends UniverseTaskBase {
     return createRunNodeCommandTask(universe, nodes, command, consumer, null /* shell context */);
   }
 
+  /**
+   * Run 'loginctl enable-linger yugabyte' to see if the command can be run.
+   *
+   * @param universe the universe to which the nodes belong.
+   * @param nodes the nodes.
+   * @return the subtask group.
+   */
+  protected SubTaskGroup createRunEnableLinger(Universe universe, Collection<NodeDetails> nodes) {
+    // Command is run in shell.
+    List<String> command =
+        ImmutableList.<String>builder()
+            .add("loginctl")
+            .add("enable-linger")
+            .add("yugabyte")
+            .add(">/dev/null")
+            .add("2>&1")
+            .build();
+    // Check only the exit code in shellProcessHandler.
+    return createRunNodeCommandTask(
+            universe, nodes, command, (n, r) -> {}, null /* shell context */)
+        .setSubTaskGroupType(SubTaskGroupType.PreflightChecks);
+  }
+
   protected <X> void addParallelTasks(
       Collection<X> vals,
       Function<X, ITask> taskInitializer,
@@ -3537,7 +3589,8 @@ public abstract class UniverseDefinitionTaskBase extends UniverseTaskBase {
       String subTaskGroupName,
       UserTaskDetails.SubTaskGroupType subTaskGroupType,
       boolean ignoreErrors) {
-    SubTaskGroup subTaskGroup = createSubTaskGroup(subTaskGroupName, ignoreErrors);
+    SubTaskGroup subTaskGroup =
+        createSubTaskGroup(subTaskGroupName, subTaskGroupType, ignoreErrors);
     vals.forEach(
         value -> {
           subTaskGroup.addSubTask(taskInitializer.apply(value));

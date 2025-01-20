@@ -34,7 +34,8 @@
 #include "ybgate/ybgate_status.h"
 
 #ifdef __cplusplus
-extern "C" {
+extern "C"
+{
 #endif
 
 //-----------------------------------------------------------------------------
@@ -77,7 +78,7 @@ YbgStatus YbgInit();
 // Types
 //-----------------------------------------------------------------------------
 
-struct PgAttributeRow
+struct YbPgAttributeRow
 {
 	uint32_t attrelid;
 	char	 attname[64];
@@ -102,7 +103,7 @@ struct PgAttributeRow
 };
 
 #ifndef __cplusplus
-typedef struct PgAttributeRow PgAttributeRow;
+typedef struct YbPgAttributeRow YbPgAttributeRow;
 #endif
 
 struct YbgTypeDesc {
@@ -115,13 +116,13 @@ typedef struct YbgTypeDesc YbgTypeDesc;
 #endif
 
 /*
- * Get the type entity table for the primtive YSQL/PG types.
+ * Get the type entity table for the primitive YSQL/PG types.
  * Used for for converting between DocDB values and YSQL datums.
  */
-YbgStatus YbgGetTypeTable(const YBCPgTypeEntity **type_table, int *count);
+YbgStatus YbgGetTypeTable(YbcPgTypeEntities *type_entities);
 
 /*
- * For non-primitive types (the ones without a corresponding YBCPgTypeEntity),
+ * For non-primitive types (the ones without a corresponding YbcPgTypeEntity),
  * get the corresponding primitive type's oid.
  */
 YbgStatus YbgGetPrimitiveTypeOid(uint32_t type_oid, char typtype,

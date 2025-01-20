@@ -61,7 +61,7 @@
 #include "commands/tablespace.h"
 #include "commands/dbcommands.h"
 #include "commands/defrem.h"
-#include "commands/ybccmds.h"
+#include "commands/yb_cmds.h"
 #include "common/file_perm.h"
 #include "miscadmin.h"
 #include "postmaster/bgwriter.h"
@@ -88,7 +88,7 @@ bool binary_upgrade_next_tablegroup_default = false;
  * Create a table group.
  */
 Oid
-CreateTableGroup(CreateTableGroupStmt *stmt)
+CreateTableGroup(YbCreateTableGroupStmt *stmt)
 {
 	Relation	rel;
 	Datum		values[Natts_pg_yb_tablegroup];
@@ -103,7 +103,7 @@ CreateTableGroup(CreateTableGroupStmt *stmt)
 	{
 		ereport(ERROR,
 				(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-				 errmsg("Tablegroup system catalog does not exist.")));
+				 errmsg("tablegroup system catalog does not exist")));
 	}
 
 	/*
@@ -270,7 +270,7 @@ get_tablegroup_oid(const char *tablegroupname, bool missing_ok)
 	{
 		ereport(ERROR,
 				(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-				 errmsg("Tablegroup system catalog does not exist.")));
+				 errmsg("tablegroup system catalog does not exist")));
 	}
 
 	/*
@@ -320,7 +320,7 @@ get_tablegroup_name(Oid grp_oid)
 	{
 		ereport(ERROR,
 				(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-				 errmsg("Tablegroup system catalog does not exist.")));
+				 errmsg("tablegroup system catalog does not exist")));
 	}
 
 	/*
@@ -358,7 +358,7 @@ RemoveTablegroupById(Oid grp_oid, bool remove_implicit)
 	{
 		ereport(ERROR,
 				(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-				 errmsg("Tablegroup system catalog does not exist.")));
+				 errmsg("tablegroup system catalog does not exist")));
 	}
 
 	/*
@@ -461,7 +461,7 @@ RenameTablegroup(const char *oldname, const char *newname)
 	if (!YbTablegroupCatalogExists) {
 		ereport(ERROR,
 				(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-				 errmsg("Tablegroup system catalog does not exist.")));
+				 errmsg("tablegroup system catalog does not exist")));
 	}
 
 	/*
@@ -538,7 +538,7 @@ AlterTablegroupOwner(const char *grpname, Oid newOwnerId)
 	if (!YbTablegroupCatalogExists) {
 		ereport(ERROR,
 				(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-				 errmsg("Tablegroup system catalog does not exist.")));
+				 errmsg("tablegroup system catalog does not exist")));
 	}
 
 	rel = table_open(YbTablegroupRelationId, RowExclusiveLock);
@@ -642,7 +642,7 @@ ybAlterTablespaceForTablegroup(const char *grpname, Oid newTablespace, const cha
 	{
 		ereport(ERROR,
 				(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-				 errmsg("Tablegroup system catalog does not exist.")));
+				 errmsg("tablegroup system catalog does not exist")));
 	}
 
 	rel = table_open(YbTablegroupRelationId, RowExclusiveLock);

@@ -181,18 +181,6 @@ Status RestartDaemonInVersion(T& daemon, const std::string& bin_path) {
   return daemon.Restart();
 }
 
-void AppendCsvFlagValue(
-    std::vector<std::string>& flag_list, const std::string& flag_name,
-    const std::string& value_to_add) {
-  for (auto& flag : flag_list) {
-    if (flag.starts_with(Format("--$0=", flag_name))) {
-      flag += Format(",$0", value_to_add);
-      return;
-    }
-  }
-  flag_list.push_back(Format("--$0=$1", flag_name, value_to_add));
-}
-
 // Add the flag_name to undefok list, so that it can be set on all versions even if the version does
 // not contain the flag. If the flag_list already contains an undefok flag, append to it, else
 // insert a new entry.
@@ -226,6 +214,8 @@ bool IsUpgradeSupported(const std::string& from_version) {
 }
 
 }  // namespace
+
+const MonoDelta UpgradeTestBase::kNoDelayBetweenNodes = 0s;
 
 UpgradeTestBase::UpgradeTestBase(const std::string& from_version)
     : old_version_info_(CHECK_RESULT(GetBuildInfoForVersion(from_version))) {

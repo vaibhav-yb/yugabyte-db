@@ -461,6 +461,9 @@ public class Audit extends Model {
     @EnumValue("Create PITR Config")
     CreatePitrConfig,
 
+    @EnumValue("Update PITR Config")
+    UpdatePitrConfig,
+
     @EnumValue("Restore Snapshot Schedule")
     RestoreSnapshotSchedule,
 
@@ -603,7 +606,10 @@ public class Audit extends Model {
     LdapUniverseSync,
 
     @EnumValue("Update Universe's Proxy Configuration")
-    UpdateProxyConfig
+    UpdateProxyConfig,
+
+    @EnumValue("Clone Namespace")
+    CloneNamespace
   }
 
   // An auto incrementing, user-friendly ID for the audit entry.

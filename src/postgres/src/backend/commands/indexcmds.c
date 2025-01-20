@@ -964,9 +964,9 @@ DefineIndex(Oid relationId,
 			if (stmtTablespace != tablespaceId)
 				ereport(ERROR,
 						(errcode(ERRCODE_INVALID_OBJECT_DEFINITION),
-						errmsg("Tablespace for a primary key index must "
+						errmsg("tablespace for a primary key index must "
 							   " always match the tablespace of the "
-							   " indexed table.")));
+							   " indexed table")));
 		}
 	}
 	else if (stmt->tableSpace)
@@ -1091,7 +1091,7 @@ DefineIndex(Oid relationId,
 				spec->roletype = ROLESPEC_CSTRING;
 				spec->rolename = pstrdup("postgres");
 
-				CreateTableGroupStmt *tablegroup_stmt = makeNode(CreateTableGroupStmt);
+				YbCreateTableGroupStmt *tablegroup_stmt = makeNode(YbCreateTableGroupStmt);
 				tablegroup_stmt->tablegroupname = tablegroup_name;
 				tablegroup_stmt->tablespacename = tablespace_name;
 				tablegroup_stmt->implicit = true;
@@ -1591,7 +1591,7 @@ DefineIndex(Oid relationId,
 
 	if (IsYugaByteEnabled() &&
 		rel->rd_rel->relpersistence == RELPERSISTENCE_TEMP)
-		YBCForceAllowCatalogModifications(true);
+		YBCDdlEnableForceCatalogModification();
 
 	indexRelationId =
 		index_create(rel, indexRelationName, indexRelationId, parentIndexId,
@@ -2390,7 +2390,7 @@ ComputeIndexAttrs(IndexInfo *indexInfo,
 		Relation rel = RelationIdGetRelation(relId);
 		if (IsYBRelation(rel))
 		{
-			YbTableProperties yb_props = YbGetTableProperties(rel);
+			YbcTableProperties yb_props = YbGetTableProperties(rel);
 
 			is_colocated    = yb_props->is_colocated;
 			tablegroupId    = yb_props->tablegroup_oid;
@@ -3278,7 +3278,7 @@ ExecReindex(ParseState *pstate, ReindexStmt *stmt, bool isTopLevel)
 	if (IsYugaByteEnabled() && (concurrently || tablespacename))
 		ereport(ERROR,
 				(errcode(ERRCODE_SYNTAX_ERROR),
-				 errmsg("Only REINDEX with VERBOSE option is supported")));
+				 errmsg("only REINDEX with VERBOSE option is supported")));
 
 	if (concurrently)
 		PreventInTransactionBlock(isTopLevel,
@@ -5068,7 +5068,7 @@ YbWaitForBackendsCatalogVersion()
 			}
 		}
 
-		YBCStatus s = YBCPgWaitForBackendsCatalogVersion(MyDatabaseId,
+		YbcStatus s = YBCPgWaitForBackendsCatalogVersion(MyDatabaseId,
 														 catalog_version,
 														 MyProcPid,
 														 &num_lagging_backends);

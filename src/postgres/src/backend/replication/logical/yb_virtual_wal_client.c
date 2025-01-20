@@ -27,7 +27,7 @@
 
 #include "access/xact.h"
 #include "catalog/yb_type.h"
-#include "commands/ybccmds.h"
+#include "commands/yb_cmds.h"
 #include "pg_yb_utils.h"
 #include "replication/slot.h"
 #include "replication/walsender_private.h"
@@ -39,7 +39,7 @@ static MemoryContext cached_records_context = NULL;
 static MemoryContext unacked_txn_list_context = NULL;
 
 /* Cached records received from the CDC service. */
-static YBCPgChangeRecordBatch *cached_records = NULL;
+static YbcPgChangeRecordBatch *cached_records = NULL;
 static size_t cached_records_last_sent_row_idx = 0;
 static bool last_getconsistentchanges_response_empty = false;
 static TimestampTz last_getconsistentchanges_response_receipt_time;
@@ -54,7 +54,7 @@ static bool needs_publication_table_list_refresh = false;
 /* The time at which the list of tables in the publication needs to be provided to the VWAL. */
 static uint64_t publication_refresh_time = 0;
 
-typedef struct UnackedTransactionInfo {
+typedef struct YbUnackedTransactionInfo {
 	TransactionId xid;
 	XLogRecPtr begin_lsn;
 	XLogRecPtr commit_lsn;
@@ -89,7 +89,7 @@ static void InitVirtualWal(List *publication_names);
 
 static void PreProcessBeforeFetchingNextBatch();
 
-static void TrackUnackedTransaction(YBCPgVirtualWalRecord *record);
+static void TrackUnackedTransaction(YbVirtualWalRecord *record);
 static XLogRecPtr CalculateRestartLSN(XLogRecPtr confirmed_flush);
 static void CleanupAckedTransactions(XLogRecPtr confirmed_flush);
 
@@ -217,14 +217,15 @@ InitVirtualWal(List *publication_names)
 	{
 		for (int i = 0; i < list_length(tables); i++)
 		{
-			YBCPgReplicaIdentityDescriptor *value =
+			YbcPgReplicaIdentityDescriptor *value =
 				hash_search(MyReplicationSlot->data.yb_replica_identities,
 							&table_oids[i], HASH_FIND, NULL);
 			Assert(value);
 			if (value->identity_type == YBC_YB_REPLICA_IDENTITY_CHANGE)
 				ereport(ERROR,
-						(errmsg("Replica identity CHANGE is not supported for output "
-						"plugin pgoutput. Consider using output plugin yboutput instead.")));
+						(errmsg("replica identity CHANGE is not supported for output "
+								"plugin pgoutput"),
+						 errhint("Consider using output plugin yboutput instead.")));
 		}
 	}
 
@@ -240,7 +241,7 @@ InitVirtualWal(List *publication_names)
 	list_free(tables);
 }
 
-static const YBCPgTypeEntity *
+static const YbcPgTypeEntity *
 GetDynamicTypeEntity(int attr_num, Oid relid)
 {
 	bool is_in_txn = IsTransactionOrTransactionBlock();
@@ -252,7 +253,7 @@ GetDynamicTypeEntity(int attr_num, Oid relid)
 		elog(ERROR, "Could not open relation with OID %u", relid);
 	Oid type_oid = GetTypeId(attr_num, RelationGetDescr(rel));
 	RelationClose(rel);
-	const YBCPgTypeEntity* type_entity = YbDataTypeFromOidMod(attr_num, type_oid);
+	const YbcPgTypeEntity* type_entity = YbDataTypeFromOidMod(attr_num, type_oid);
 
 	if (!is_in_txn)
 		AbortCurrentTransaction();
@@ -260,11 +261,11 @@ GetDynamicTypeEntity(int attr_num, Oid relid)
 	return type_entity;
 }
 
-YBCPgVirtualWalRecord *
+YbVirtualWalRecord *
 YBCReadRecord(XLogReaderState *state, List *publication_names, char **errormsg)
 {
 	MemoryContext			caller_context;
-	YBCPgVirtualWalRecord	*record = NULL;
+	YbVirtualWalRecord	*record = NULL;
 	List					*tables;
 	Oid						*table_oids;
 
@@ -417,7 +418,7 @@ PreProcessBeforeFetchingNextBatch()
 }
 
 static void
-TrackUnackedTransaction(YBCPgVirtualWalRecord *record)
+TrackUnackedTransaction(YbVirtualWalRecord *record)
 {
 	MemoryContext			 caller_context;
 
@@ -480,7 +481,7 @@ XLogRecPtr
 YBCCalculatePersistAndGetRestartLSN(XLogRecPtr confirmed_flush)
 {
 	XLogRecPtr		restart_lsn_hint = CalculateRestartLSN(confirmed_flush);
-	YBCPgXLogRecPtr	restart_lsn = InvalidXLogRecPtr;
+	YbcPgXLogRecPtr	restart_lsn = InvalidXLogRecPtr;
 
 	/* There was nothing to ack, so we can return early. */
 	if (restart_lsn_hint == InvalidXLogRecPtr)
@@ -605,7 +606,7 @@ YBCGetTableOids(List *tables)
 static void
 YBCRefreshReplicaIdentities()
 {
-	YBCReplicationSlotDescriptor 	*yb_replication_slot;
+	YbcReplicationSlotDescriptor 	*yb_replication_slot;
 	int							 	replica_identity_idx = 0;
 
 	YBCGetReplicationSlot(MyReplicationSlot->data.name.data, &yb_replication_slot);
@@ -615,7 +616,7 @@ YBCRefreshReplicaIdentities()
 	 yb_replication_slot->replica_identities_count;
 	 replica_identity_idx++)
 	{
-		YBCPgReplicaIdentityDescriptor *desc =
+		YbcPgReplicaIdentityDescriptor *desc =
 			&yb_replication_slot->replica_identities[replica_identity_idx];
 
 		/*
@@ -625,10 +626,11 @@ YBCRefreshReplicaIdentities()
 		if (strcmp(MyReplicationSlot->data.plugin.data, PG_OUTPUT_PLUGIN) == 0
 			&& desc->identity_type == YBC_YB_REPLICA_IDENTITY_CHANGE)
 			ereport(ERROR,
-						(errmsg("Replica identity CHANGE is not supported for output "
-						"plugin pgoutput. Consider using output plugin yboutput instead.")));
+					(errmsg("replica identity CHANGE is not supported for output "
+							"plugin pgoutput"),
+					 errhint("Consider using output plugin yboutput instead.")));
 
-		YBCPgReplicaIdentityDescriptor *value =
+		YbcPgReplicaIdentityDescriptor *value =
 			hash_search(MyReplicationSlot->data.yb_replica_identities,
 						&desc->table_oid, HASH_ENTER, NULL);
 		value->table_oid = desc->table_oid;

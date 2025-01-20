@@ -119,7 +119,7 @@
 #include "access/heaptoast.h"
 #include "access/yb_scan.h"
 #include "commands/copy.h"
-#include "executor/ybcModifyTable.h"
+#include "executor/ybModifyTable.h"
 #include "tcop/pquery.h"
 #include "pg_yb_utils.h"
 #include "yb_ash.h"
@@ -182,7 +182,7 @@ static bool call_bool_check_hook(struct config_bool *conf, bool *newval,
 								 void **extra, GucSource source, int elevel);
 static bool call_int_check_hook(struct config_int *conf, int *newval,
 								void **extra, GucSource source, int elevel);
-static bool call_oid_check_hook(struct config_oid *conf, Oid *newval,
+static bool call_oid_check_hook(struct yb_config_oid *conf, Oid *newval,
 								void **extra, GucSource source, int elevel);
 static bool call_real_check_hook(struct config_real *conf, double *newval,
 								 void **extra, GucSource source, int elevel);
@@ -269,7 +269,7 @@ extern void YBCAssignTransactionPriorityLowerBound(double newval, void* extra);
 static bool check_transaction_priority_upper_bound(double *newval, void **extra, GucSource source);
 extern void YBCAssignTransactionPriorityUpperBound(double newval, void* extra);
 extern double YBCGetTransactionPriority();
-extern TxnPriorityRequirement YBCGetTransactionPriorityType();
+extern YbcTxnPriorityRequirement YBCGetTransactionPriorityType();
 static bool yb_check_no_txn(int* newval, void **extra, GucSource source);
 
 static void assign_yb_pg_batch_detection_mechanism(int new_value, void *extra);
@@ -594,7 +594,7 @@ static struct config_enum_entry recovery_init_sync_method_options[] = {
 	{NULL, 0, false}
 };
 
-const struct config_enum_entry yb_pg_batch_detection_mechanism_options[] = {
+const struct config_enum_entry yb_batch_detection_mechanism_options[] = {
   {"detect_by_peeking", DETECT_BY_PEEKING, false},
   {"assume_all_batch_executions", ASSUME_ALL_BATCH_EXECUTIONS, false},
   {"ignore_batch_delete_and_update_may_fail", IGNORE_BATCH_DELETE_AND_UPDATE_MAY_FAIL, false},
@@ -645,6 +645,12 @@ const struct config_enum_entry yb_read_after_commit_visibility_options[] = {
   {"strict", YB_STRICT_READ_AFTER_COMMIT_VISIBILITY, false},
   {"relaxed", YB_RELAXED_READ_AFTER_COMMIT_VISIBILITY, false},
   {NULL, 0, false}
+};
+
+const struct config_enum_entry yb_sampling_algorithm_options[] = {
+	{"full_table_scan", YB_SAMPLING_ALGORITHM_FULL_TABLE_SCAN, false},
+	{"block_based_sampling", YB_SAMPLING_ALGORITHM_BLOCK_BASED_SAMPLING, false},
+	{NULL, 0, false}
 };
 
 /*
@@ -3063,6 +3069,21 @@ static struct config_bool ConfigureNamesBool[] =
 	},
 
 	{
+		{"yb_disable_catalog_version_check", PGC_SUSET, CUSTOM_OPTIONS,
+			gettext_noop("Disable checking that read requests from "
+			"this pg backend have the latest catalog version."),
+			gettext_noop("User should set this variable with caution. It is "
+			"under active development and is not recommended for production "
+			"clusters. Currently, it is used by ysql_dump to read pg catalog "
+			"as of time."),
+			GUC_NOT_IN_SAMPLE
+		},
+		&yb_disable_catalog_version_check,
+		false,
+		NULL, NULL, NULL
+	},
+
+	{
 		{"yb_enable_advisory_locks", PGC_SIGHUP, LOCK_MANAGEMENT,
 			gettext_noop("Enable advisory lock feature"),
 			NULL,
@@ -3091,6 +3112,19 @@ static struct config_bool ConfigureNamesBool[] =
 			GUC_NOT_IN_SAMPLE
 		},
 		&yb_enable_docdb_vector_type,
+		true,
+		NULL, NULL, NULL
+	},
+
+	{
+		{"yb_allow_block_based_sampling_algorithm", PGC_SUSET, CUSTOM_OPTIONS,
+			gettext_noop("Autoflag to allow "
+						 "YsqlSamplingAlgorithm::BLOCK_BASED_SAMPLING. Not to "
+						 "be touched by users."),
+			NULL,
+			GUC_NOT_IN_SAMPLE
+		},
+		&yb_allow_block_based_sampling_algorithm,
 		true,
 		NULL, NULL, NULL
 	},
@@ -4728,11 +4762,11 @@ static struct config_int ConfigureNamesInt[] =
 		/* TODO(jason): once it becomes stable, this can be PGC_USERSET. */
 		{"yb_insert_on_conflict_read_batch_size", PGC_SUSET, CLIENT_CONN_STATEMENT,
 			gettext_noop("Maximum batch size for arbiter index reads during INSERT ON CONFLICT."),
-			gettext_noop("A value of 1 disables this feature."),
+			gettext_noop("A value of 0 disables this feature."),
 			0
 		},
 		&yb_insert_on_conflict_read_batch_size,
-		1, 1, INT_MAX,
+		0, 0, INT_MAX,
 		NULL, NULL, NULL
 	},
 
@@ -4954,7 +4988,7 @@ static struct config_int ConfigureNamesInt[] =
 	}
 };
 
-static struct config_oid ConfigureNamesOid[] =
+static struct yb_config_oid ConfigureNamesOid[] =
 {
 	/* End-of-list marker */
 	{
@@ -6609,7 +6643,7 @@ static struct config_enum ConfigureNamesEnum[] =
 		},
 		&yb_pg_batch_detection_mechanism,
 		DETECT_BY_PEEKING,
-		yb_pg_batch_detection_mechanism_options,
+		yb_batch_detection_mechanism_options,
 		NULL, assign_yb_pg_batch_detection_mechanism, NULL
 	},
 
@@ -6650,6 +6684,21 @@ static struct config_enum ConfigureNamesEnum[] =
 		YB_STRICT_READ_AFTER_COMMIT_VISIBILITY,
 		yb_read_after_commit_visibility_options,
 		yb_check_no_txn, NULL, NULL
+	},
+
+	{
+		{"yb_sampling_algorithm", PGC_USERSET, QUERY_TUNING_OTHER,
+		 gettext_noop("Which sampling algorithm to use for YSQL. full_table_scan - scan the"
+					  " whole table and pick random rows, block_based_sampling - sample the"
+					  " table for a set of blocks, then scan selected blocks to form a final"
+					  " rows sample."),
+		 NULL,
+		 0
+		},
+		&yb_sampling_algorithm,
+		YB_SAMPLING_ALGORITHM_BLOCK_BASED_SAMPLING,
+		yb_sampling_algorithm_options,
+		NULL, NULL, NULL
 	},
 
 	/* End-of-list marker */
@@ -6837,7 +6886,7 @@ extra_field_used(struct config_generic *gconf, void *extra)
 				return true;
 			break;
 		case PGC_OID:
-			if (extra == ((struct config_oid*) gconf)->reset_extra)
+			if (extra == ((struct yb_config_oid*) gconf)->reset_extra)
 				return true;
 			break;
 		case PGC_REAL:
@@ -6903,7 +6952,7 @@ set_stack_value(struct config_generic *gconf, config_var_value *val)
 			break;
 		case PGC_OID:
 			val->val.oidval =
-				*((struct config_oid *) gconf)->variable;
+				*((struct yb_config_oid *) gconf)->variable;
 			break;
 		case PGC_REAL:
 			val->val.realval =
@@ -6990,7 +7039,7 @@ build_guc_variables(void)
 
 	for (i = 0; ConfigureNamesOid[i].gen.name; i++)
 	{
-		struct config_oid *conf = &ConfigureNamesOid[i];
+		struct yb_config_oid *conf = &ConfigureNamesOid[i];
 
 		conf->gen.vartype = PGC_OID;
 		num_vars++;
@@ -7606,7 +7655,7 @@ InitializeOneGUCOption(struct config_generic *gconf)
 			}
 		case PGC_OID:
 			{
-				struct config_oid *conf = (struct config_oid *) gconf;
+				struct yb_config_oid *conf = (struct yb_config_oid *) gconf;
 				Oid			newval = conf->boot_val;
 				void	   *extra = NULL;
 
@@ -7919,7 +7968,7 @@ ResetAllOptions(void)
 				}
 			case PGC_OID:
 				{
-					struct config_oid *conf = (struct config_oid *) gconf;
+					struct yb_config_oid *conf = (struct yb_config_oid *) gconf;
 
 					if (conf->assign_hook)
 						conf->assign_hook(conf->reset_val,
@@ -8290,7 +8339,7 @@ AtEOXact_GUC(bool isCommit, int nestLevel)
 						}
 					case PGC_OID:
 						{
-							struct config_oid *conf = (struct config_oid *) gconf;
+							struct yb_config_oid *conf = (struct yb_config_oid *) gconf;
 							Oid			newval = newvalue.val.oidval;
 							void	   *newextra = newvalue.extra;
 
@@ -9115,7 +9164,7 @@ parse_and_validate_value(struct config_generic *record,
 			break;
 		case PGC_OID:
 			{
-				struct config_oid *conf = (struct config_oid *) record;
+				struct yb_config_oid *conf = (struct yb_config_oid *) record;
 				const char *hintmsg;
 
 				if (!parse_oid(value, &newval->oidval, &hintmsg))
@@ -9805,7 +9854,7 @@ set_config_option_ext(const char *name, const char *value,
 
 		case PGC_OID:
 			{
-				struct config_oid *conf = (struct config_oid *) record;
+				struct yb_config_oid *conf = (struct yb_config_oid *) record;
 
 #define newval (newval_union.oidval)
 
@@ -10356,7 +10405,7 @@ GetConfigOption(const char *name, bool missing_ok, bool restrict_privileged)
 
 		case PGC_OID:
 			snprintf(buffer, sizeof(buffer), "%u",
-					 *((struct config_oid *) record)->variable);
+					 *((struct yb_config_oid *) record)->variable);
 			return buffer;
 
 		case PGC_REAL:
@@ -10408,7 +10457,7 @@ GetConfigOptionResetString(const char *name)
 
 		case PGC_OID:
 			snprintf(buffer, sizeof(buffer), "%u",
-					 ((struct config_oid *) record)->reset_val);
+					 ((struct yb_config_oid *) record)->reset_val);
 			return buffer;
 
 		case PGC_REAL:
@@ -11517,15 +11566,15 @@ DefineCustomOidVariable(const char *name,
 						Oid maxValue,
 						GucContext context,
 						int flags,
-						GucOidCheckHook check_hook,
-						GucOidAssignHook assign_hook,
+						YbGucOidCheckHook check_hook,
+						YbGucOidAssignHook assign_hook,
 						GucShowHook show_hook)
 {
-	struct config_oid *var;
+	struct yb_config_oid *var;
 
-	var = (struct config_oid *)
+	var = (struct yb_config_oid *)
 		init_custom_variable(name, short_desc, long_desc, context, flags,
-							 PGC_OID, sizeof(struct config_oid));
+							 PGC_OID, sizeof(struct yb_config_oid));
 	var->variable = valueAddr;
 	var->boot_val = bootValue;
 	var->reset_val = bootValue;
@@ -12101,7 +12150,7 @@ GetConfigOptionByNum(int varnum, const char **values, bool *noshow)
 
 		case PGC_OID:
 			{
-				struct config_oid *lconf = (struct config_oid *) conf;
+				struct yb_config_oid *lconf = (struct yb_config_oid *) conf;
 
 				/* min_val */
 				snprintf(buffer, sizeof(buffer), "%u", lconf->min);
@@ -12582,7 +12631,7 @@ _ShowOption(struct config_generic *record, bool use_units)
 		case PGC_OID:
 			/* YB_TODO(alex@yugabyte) Is this case still needed for Pg13+ */
 			{
-				struct config_oid *conf = (struct config_oid *) record;
+				struct yb_config_oid *conf = (struct yb_config_oid *) record;
 
 				if (conf->show_hook)
 					val = conf->show_hook();
@@ -12719,7 +12768,7 @@ write_one_nondefault_variable(FILE *fp, struct config_generic *gconf)
 
 		case PGC_OID:
 			{
-				struct config_oid *conf = (struct config_oid *) gconf;
+				struct yb_config_oid *conf = (struct yb_config_oid *) gconf;
 
 				fprintf(fp, "%u", *conf->variable);
 			}
@@ -13002,7 +13051,7 @@ estimate_variable_size(struct config_generic *gconf)
 
 		case PGC_OID:
 			{
-				struct config_oid *conf = (struct config_oid *) gconf;
+				struct yb_config_oid *conf = (struct yb_config_oid *) gconf;
 
 				/*
 				 * Instead of getting the exact display length, use max
@@ -13176,7 +13225,7 @@ serialize_variable(char **destptr, Size *maxbytes,
 
 		case PGC_OID:
 			{
-				struct config_oid *conf = (struct config_oid *) gconf;
+				struct yb_config_oid *conf = (struct yb_config_oid *) gconf;
 
 				do_serialize(destptr, maxbytes, "%u", *conf->variable);
 			}
@@ -13985,7 +14034,7 @@ call_int_check_hook(struct config_int *conf, int *newval, void **extra,
 }
 
 static bool
-call_oid_check_hook(struct config_oid *conf, Oid *newval, void **extra,
+call_oid_check_hook(struct yb_config_oid *conf, Oid *newval, void **extra,
 					GucSource source, int elevel)
 {
 	/* Quick success if no hook */
@@ -15162,8 +15211,8 @@ check_transaction_priority_lower_bound(double *newval, void **extra, GucSource s
 						(errmsg("priorities don't exist for read committed isolation transations, the "
 										"transaction will wait for conflicting transactions to commit before "
 										"proceeding"),
-						 errdetail("this also applies to other isolation levels if using Wait-on-Conflict "
-											"concurrency control")));
+						 errdetail("This also applies to other isolation levels if using Wait-on-Conflict "
+											"concurrency control.")));
 	}
 	return true;
 }
@@ -15183,8 +15232,8 @@ check_transaction_priority_upper_bound(double *newval, void **extra, GucSource s
 						(errmsg("priorities don't exist for read committed isolation transations, the "
 										"transaction will wait for conflicting transactions to commit before "
 										"proceeding"),
-						 errdetail("this also applies to other isolation levels if using Wait-on-Conflict "
-											"concurrency control")));
+						 errdetail("This also applies to other isolation levels if using Wait-on-Conflict "
+											"concurrency control.")));
 	}
 	return true;
 }

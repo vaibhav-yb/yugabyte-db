@@ -950,9 +950,9 @@ Status PgClientSession::CreateDatabase(
       req.source_database_name() != "" &&
       req.source_database_name() != "template0" &&
       req.source_database_name() != "template1";
-  std::optional<YbCloneInfo> yb_clone_info = std::nullopt;
+  std::optional<YbcCloneInfo> yb_clone_info = std::nullopt;
   if (is_clone) {
-    yb_clone_info = YbCloneInfo {
+    yb_clone_info = YbcCloneInfo {
       .clone_time = req.clone_time(),
       .src_db_name = req.source_database_name().c_str(),
       .src_owner = req.source_owner().c_str(),
@@ -1380,9 +1380,7 @@ Status PgClientSession::FinishTransaction(
       auto table_mutations = txn_value->GetTableMutationCounts();
       VLOG_WITH_PREFIX(4) << "Incrementing global mutation count using table to mutations map: "
                           << AsString(table_mutations) << " for txn: " << txn_value->id();
-      for(const auto& [table_id, mutation_count] : table_mutations) {
-        pg_node_level_mutation_counter_->Increase(table_id, mutation_count);
-      }
+      pg_node_level_mutation_counter_->IncreaseBatch(table_mutations);
     }
   } else {
     VLOG_WITH_PREFIX_AND_FUNC(2)
@@ -1575,7 +1573,7 @@ Status PgClientSession::UpdateReadPointForXClusterConsistentReads(
   auto xcluster_safe_time = VERIFY_RESULT(xcluster_context_->GetSafeTime(namespace_id));
   if (!xcluster_safe_time) {
     // No xCluster safe time for this namespace.
-      return Status::OK();
+    return Status::OK();
   }
 
   RSTATUS_DCHECK(
@@ -1606,6 +1604,33 @@ Status PgClientSession::UpdateReadPointForXClusterConsistentReads(
           "Wait for xCluster safe time of namespace $0 to move above the requested read time $1",
           namespace_id, read_point->GetReadTime().read),
       100ms /* initial_delay */, 1 /* delay_multiplier */);
+}
+
+Result<const PgClientSession::SessionData&> PgClientSession::BeginPgSessionLevelTxnIfNecessary(
+    CoarseTimePoint deadline) {
+  EnsureSession(PgClientSessionKind::kPgSession, deadline);
+  auto& session_data = GetSessionData(PgClientSessionKind::kPgSession);
+  auto& txn = session_data.transaction;
+  if (!txn) {
+    // The transaction coordinator needs to know that this is a session level transaction as the
+    // handling on deadlocks and heartbeats etc are different for regular docdb transactions and
+    // session level transactions. Hence, we create a new transaction instead of using a ready
+    // transaction (whose state at the coordinator would be different from what we want to set).
+    //
+    // Advisory locks table is not placement local, hence we need a global transaction for tagging
+    // the requested session advisory locks.
+    txn = transaction_builder_(
+        IsDDL::kFalse, client::ForceGlobalTransaction::kTrue, deadline,
+        client::ForceCreateTransaction::kTrue);
+    txn->SetLogPrefixTag(kTxnLogPrefixTag, id_);
+    txn->InitPgSessionRequestVersion();
+    // Isolation level doesn't matter but we need to set it for conflict resolution to not treat
+    // it as a single shard/fast-path transaction.
+    RETURN_NOT_OK(txn->Init(IsolationLevel::READ_COMMITTED));
+    RETURN_NOT_OK(txn->SetPgTxnStart(MonoTime::Now().ToUint64()));
+    session_data.session->SetTransaction(txn);
+  }
+  return session_data;
 }
 
 Result<PgClientSession::SetupSessionResult> PgClientSession::SetupSession(
@@ -1796,6 +1821,13 @@ Status PgClientSession::DoBeginTransactionIfNecessary(
     txn = nullptr;
   }
 
+  // TODO(advisory-locks): The session level transaction could get aborted in the background, for
+  // instance, it could happen if the heartbeats get delayed due to load etc. If we decide to honor
+  // the assumption that all session advisory locks taken in the past are active till the ysql
+  // session ends, then we need to explicitly check status of pg_session_transaction_, if exists,
+  // and fail all read/write ops if pg_session_transaction_ has failed.
+  //
+  // Refer https://github.com/yugabyte/yugabyte-db/issues/25566 for details.
   if (isolation == IsolationLevel::NON_TRANSACTIONAL) {
     return Status::OK();
   }
@@ -1810,7 +1842,8 @@ Status PgClientSession::DoBeginTransactionIfNecessary(
   }
 
   txn = transaction_builder_(
-    IsDDL::kFalse, client::ForceGlobalTransaction(options.force_global_transaction()), deadline);
+    IsDDL::kFalse, client::ForceGlobalTransaction(options.force_global_transaction()), deadline,
+    client::ForceCreateTransaction::kFalse);
   txn->SetLogPrefixTag(kTxnLogPrefixTag, id_);
   RETURN_NOT_OK(txn->SetPgTxnStart(options.pg_txn_start_us()));
   if ((isolation == IsolationLevel::SNAPSHOT_ISOLATION ||
@@ -1850,7 +1883,8 @@ Result<const TransactionMetadata*> PgClientSession::GetDdlTransactionMetadata(
   if (!txn) {
     const auto isolation = FLAGS_ysql_serializable_isolation_for_ddl_txn
         ? IsolationLevel::SERIALIZABLE_ISOLATION : IsolationLevel::SNAPSHOT_ISOLATION;
-    txn = transaction_builder_(IsDDL::kTrue, client::ForceGlobalTransaction::kTrue, deadline);
+    txn = transaction_builder_(IsDDL::kTrue, client::ForceGlobalTransaction::kTrue, deadline,
+                               client::ForceCreateTransaction::kFalse);
     RETURN_NOT_OK(txn->Init(isolation));
     txn->SetLogPrefixTag(kTxnLogPrefixTag, id_);
     ddl_txn_metadata_ = VERIFY_RESULT(Copy(txn->GetMetadata(deadline).get()));
@@ -2316,7 +2350,7 @@ client::YBSessionPtr& PgClientSession::EnsureSession(
     session->SetDeadline(deadline);
   }
   if (read_time) {
-    // Set the read_time only for sequence YBSession. Other types of seesions set their read_time
+    // Set the read_time only for sequence YBSession. Other types of sessions set their read_time
     // differently.
     DCHECK(kind == PgClientSessionKind::kSequence);
     VLOG(4) << Format(
@@ -2470,10 +2504,35 @@ Status PgClientSession::AcquireAdvisoryLock(
     rpc::RpcContext* context) {
   VLOG(2) << "Servicing AcquireAdvisoryLock: " << req.ShortDebugString();
   SCHECK(FLAGS_ysql_yb_enable_advisory_locks, NotSupported, "advisory locks are disabled");
-  SCHECK(!req.session(), NotSupported, "session-level advisory locks are not yet implemented");
-  auto setup_session_result = VERIFY_RESULT(SetupSession(
-      req.options(), context->GetClientDeadline(), HybridTime()));
-  auto* session = setup_session_result.session_data.session.get();
+  const auto deadline = context->GetClientDeadline();
+  auto* primary_session_data = &GetSessionData(PgClientSessionKind::kPlain);
+  auto* background_session_data = &GetSessionData(PgClientSessionKind::kPgSession);
+  if (req.session()) {
+    std::swap(primary_session_data, background_session_data);
+    const auto& pg_session_data = VERIFY_RESULT_REF(BeginPgSessionLevelTxnIfNecessary(deadline));
+    DCHECK(&pg_session_data == primary_session_data) << "Expected session of kind kPgSession.";
+  } else {
+    RSTATUS_DCHECK(
+        VERIFY_RESULT(SetupSession(req.options(), deadline, HybridTime())).is_plain,
+        IllegalState, "Expected session of kind kPlain.");
+  }
+  RSTATUS_DCHECK(
+      primary_session_data->session && primary_session_data->transaction,
+      IllegalState, "Transaction on primary session is required.");
+
+  auto& session = *primary_session_data->session;
+  // Set background transaction to achieve the folllowing:
+  // - When acquiring a session advisory lock, the session level txn should ignore conflicts with
+  //   the current active regular/plain txn, if any.
+  // - When acquiring a txn advisory lock, the regular/plain txn should ingore conflicts with the
+  //   session level transaction, if exists.
+  if (const auto& background_txn = background_session_data->transaction; background_txn) {
+    auto background_txn_meta_res = background_txn->GetMetadata(deadline).get();
+    RETURN_NOT_OK(background_txn_meta_res);
+    session.SetBatcherBackgroundTransactionId(background_txn_meta_res->transaction_id);
+  }
+
+  auto& txn = *primary_session_data->transaction;
   for (const auto& lock : req.locks()) {
     auto lock_op = VERIFY_RESULT(advisory_locks_table_.CreateLockOp(
       req.db_oid(), lock.lock_id().classid(), lock.lock_id().objid(), lock.lock_id().objsubid(),
@@ -2481,26 +2540,59 @@ Status PgClientSession::AcquireAdvisoryLock(
           ? PgsqlLockRequestPB::PG_LOCK_SHARE : PgsqlLockRequestPB::PG_LOCK_EXCLUSIVE,
       req.wait(), &context->sidecars()));
     VLOG(4) << "Applying lock op: " << lock_op->ToString();
-    session->Apply(lock_op);
+    session.Apply(lock_op);
   }
   // TODO(async_flush): https://github.com/yugabyte/yugabyte-db/issues/12173
-  auto flush_status = session->FlushFuture().get();
-  return CombineErrorsToStatus(flush_status.errors, flush_status.status);
+  auto flush_status = session.FlushFuture().get();
+  auto status = CombineErrorsToStatus(flush_status.errors, flush_status.status);
+  VLOG_WITH_PREFIX_AND_FUNC(4)
+      << "Acquired advisory locks with transaction " << txn.id() << " status: " << status;
+  return status;
 }
 
 Status PgClientSession::ReleaseAdvisoryLock(
     const PgReleaseAdvisoryLockRequestPB& req, PgReleaseAdvisoryLockResponsePB* resp,
     rpc::RpcContext* context) {
   VLOG(2) << "Servicing ReleaseAdvisoryLock: " << req.ShortDebugString();
-  // TODO(advisory-lock #24709): integrate with docdb unlock op.
-  // if req.locks_size() == 0, it's an unlock-all operation, should call
-  // advisory_locks_table_provider_().CreateUnlockAllOp().
-  // otherwise, it's releasing specific locks, should call
-  // advisory_locks_table_provider_().CreateUnlockOp().
-  return STATUS(NotSupported, "session-level advisory locks are not yet implemented");
+  SCHECK(FLAGS_ysql_yb_enable_advisory_locks, NotSupported, "advisory locks are disabled");
+  // Release Advisory lock api is only invoked for session asvisory locks.
+  const auto& session_data =
+      VERIFY_RESULT_REF(BeginPgSessionLevelTxnIfNecessary(context->GetClientDeadline()));
+  DCHECK(session_data.session && session_data.transaction)
+      << "Expected non null session and transaction for PgClientSessionKind::kPgSession";
+  auto& session = *session_data.session;
+  auto& txn = *session_data.transaction;
+  if (req.locks_size()) {
+    for (const auto& lock : req.locks()) {
+      auto unlock_op = VERIFY_RESULT(advisory_locks_table_.CreateUnlockOp(
+          req.db_oid(), lock.lock_id().classid(), lock.lock_id().objid(), lock.lock_id().objsubid(),
+          lock.lock_mode() == AdvisoryLockMode::LOCK_SHARE
+              ? PgsqlLockRequestPB::PG_LOCK_SHARE : PgsqlLockRequestPB::PG_LOCK_EXCLUSIVE,
+          &context->sidecars()));
+      session.Apply(unlock_op);
+    }
+  } else {
+    auto unlock_op =
+        VERIFY_RESULT(advisory_locks_table_.CreateUnlockAllOp(req.db_oid(), &context->sidecars()));
+    session.Apply(unlock_op);
+  }
+  // TODO(async_flush): https://github.com/yugabyte/yugabyte-db/issues/12173
+  auto flush_status = session.FlushFuture().get();
+  auto status = CombineErrorsToStatus(flush_status.errors, flush_status.status);
+  VLOG_WITH_PREFIX_AND_FUNC(4)
+      << "Releasing advisory locks with transaction " << txn.id() << " status: " << status;
+  return status;
 }
 
 void PgClientSession::StartShutdown() {
+  // If this session has a corresponding docdb session level transaction, abort it.
+  auto& session = Session(PgClientSessionKind::kPgSession);
+  if (session) {
+    auto session_data = GetSessionData(PgClientSessionKind::kPgSession);
+    if (session_data.transaction) {
+      session_data.transaction->Abort();
+    }
+  }
   big_shared_mem_expiration_task_.StartShutdown();
 }
 

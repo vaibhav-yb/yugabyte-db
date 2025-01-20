@@ -114,6 +114,7 @@ import org.bouncycastle.util.io.pem.PemReader;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.yb.CommonNet;
+import org.yb.CommonNet.ReplicationInfoPB;
 import org.yb.CommonTypes;
 import org.yb.CommonTypes.YQLDatabase;
 import org.yb.Schema;
@@ -121,7 +122,6 @@ import org.yb.annotations.InterfaceAudience;
 import org.yb.annotations.InterfaceStability;
 import org.yb.cdc.CdcConsumer.XClusterRole;
 import org.yb.master.CatalogEntityInfo;
-import org.yb.master.CatalogEntityInfo.ReplicationInfoPB;
 import org.yb.master.MasterClientOuterClass;
 import org.yb.master.MasterClientOuterClass.GetTableLocationsResponsePB;
 import org.yb.master.MasterDdlOuterClass;
@@ -1942,6 +1942,21 @@ public class AsyncYBClient implements AutoCloseable {
     return sendRpcToTablet(request);
   }
 
+  public Deferred<EditSnapshotScheduleResponse> editSnapshotSchedule(
+      UUID snapshotScheduleUUID,
+      long retentionInSecs,
+      long timeIntervalInSecs) {
+    checkIsClosed();
+    EditSnapshotScheduleRequest request =
+        new EditSnapshotScheduleRequest(
+            this.masterTable,
+            snapshotScheduleUUID,
+            retentionInSecs,
+            timeIntervalInSecs);
+    request.setTimeoutMillis(defaultAdminOperationTimeoutMs);
+    return sendRpcToTablet(request);
+  }
+
   public Deferred<DeleteSnapshotScheduleResponse> deleteSnapshotSchedule(
       UUID snapshotScheduleUUID) {
     checkIsClosed();
@@ -1995,6 +2010,51 @@ public class AsyncYBClient implements AutoCloseable {
   public Deferred<DeleteSnapshotResponse> deleteSnapshot(UUID snapshotUUID) {
     checkIsClosed();
     DeleteSnapshotRequest request = new DeleteSnapshotRequest(this.masterTable, snapshotUUID);
+    request.setTimeoutMillis(defaultAdminOperationTimeoutMs);
+    return sendRpcToTablet(request);
+  }
+
+  public Deferred<CloneNamespaceResponse> cloneNamespace(
+      YQLDatabase databaseType,
+      String sourceKeyspaceName,
+      String targetKeyspaceName,
+      long cloneTimeInMillis) {
+    checkIsClosed();
+    CloneNamespaceRequest request =
+        new CloneNamespaceRequest(
+            this.masterTable,
+            databaseType,
+            sourceKeyspaceName,
+            targetKeyspaceName,
+            cloneTimeInMillis);
+    request.setTimeoutMillis(defaultAdminOperationTimeoutMs);
+    return sendRpcToTablet(request);
+  }
+
+  public Deferred<CloneNamespaceResponse> cloneNamespace(
+      YQLDatabase databaseType,
+      String sourceKeyspaceName,
+      String keyspaceId,
+      String targetKeyspaceName,
+      long cloneTimeInMillis) {
+    checkIsClosed();
+    CloneNamespaceRequest request =
+        new CloneNamespaceRequest(
+            this.masterTable,
+            databaseType,
+            sourceKeyspaceName,
+            keyspaceId,
+            targetKeyspaceName,
+            cloneTimeInMillis);
+    request.setTimeoutMillis(defaultAdminOperationTimeoutMs);
+    return sendRpcToTablet(request);
+  }
+
+  public Deferred<ListClonesResponse> listClones(
+      String keyspaceId, Integer cloneSeqNo) {
+    checkIsClosed();
+    ListClonesRequest request =
+        new ListClonesRequest(this.masterTable, keyspaceId, cloneSeqNo);
     request.setTimeoutMillis(defaultAdminOperationTimeoutMs);
     return sendRpcToTablet(request);
   }

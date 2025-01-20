@@ -27,7 +27,7 @@
 #include "utils/resowner.h"
 
 /* YB includes. */
-#include "commands/ybccmds.h"
+#include "commands/yb_cmds.h"
 #include "pg_yb_utils.h"
 #include "utils/uuid.h"
 
@@ -226,10 +226,10 @@ pg_create_logical_replication_slot(PG_FUNCTION_ARGS)
 		if (temporary)
 			ereport(ERROR,
 					(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-					 errmsg("Temporary replication slot is not yet supported"),
+					 errmsg("temporary replication slot is not yet supported"),
 					 errhint("See https://github.com/yugabyte/yugabyte-db/"
 							 "issues/19263. React with thumbs up to raise its "
-							 "priority")));
+							 "priority.")));
 
 		/*
 		 * Validate output plugin requirement early so that we can avoid the
@@ -328,7 +328,7 @@ pg_get_replication_slots(PG_FUNCTION_ARGS)
 {
 #define PG_GET_REPLICATION_SLOTS_COLS 14
 /* YB specific fields in pg_get_replication_slots */
-#define YB_PG_GET_REPLICATION_SLOTS_COLS 2
+#define YB_PG_GET_REPLICATION_SLOTS_COLS 3
 
 	ReturnSetInfo *rsinfo = (ReturnSetInfo *) fcinfo->resultinfo;
 	XLogRecPtr	currlsn;
@@ -346,7 +346,7 @@ pg_get_replication_slots(PG_FUNCTION_ARGS)
 
 	currlsn = GetXLogWriteRecPtr();
 
-	YBCReplicationSlotDescriptor *yb_replication_slots = NULL;
+	YbcReplicationSlotDescriptor *yb_replication_slots = NULL;
 	size_t yb_numreplicationslots = 0;
 
 	/*
@@ -380,16 +380,18 @@ pg_get_replication_slots(PG_FUNCTION_ARGS)
 		const char	*yb_stream_id;
 		bool		yb_stream_active;
 		uint64      yb_restart_commit_ht;
+		const char	*yb_lsn_type;
 
 		if (IsYugaByteEnabled())
 		{
-			YBCReplicationSlotDescriptor *slot = &yb_replication_slots[slotno];
+			YbcReplicationSlotDescriptor *slot = &yb_replication_slots[slotno];
 
 			slot_contents.data.database = slot->database_oid;
 			namestrcpy(&slot_contents.data.name, slot->slot_name);
 			namestrcpy(&slot_contents.data.plugin, slot->output_plugin);
 			yb_stream_id = slot->stream_id;
 			yb_stream_active = slot->active;
+			yb_lsn_type = slot->yb_lsn_type;
 
 			slot_contents.data.restart_lsn = slot->restart_lsn;
 			slot_contents.data.confirmed_flush = slot->confirmed_flush;
@@ -565,9 +567,11 @@ pg_get_replication_slots(PG_FUNCTION_ARGS)
 		{
 			values[i++] = CStringGetTextDatum(yb_stream_id);
 			values[i++] = Int64GetDatum(yb_restart_commit_ht);
+			values[i++] = CStringGetTextDatum(yb_lsn_type);
 		}
 		else
 		{
+			nulls[i++] = true;
 			nulls[i++] = true;
 			nulls[i++] = true;
 		}

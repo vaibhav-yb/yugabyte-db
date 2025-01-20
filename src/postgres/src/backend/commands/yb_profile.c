@@ -46,7 +46,7 @@
 #include "catalog/pg_yb_role_profile.h"
 #include "commands/yb_profile.h"
 #include "yb/yql/pggate/ybc_pggate.h"
-#include "executor/ybcModifyTable.h"
+#include "executor/ybModifyTable.h"
 #include "pg_yb_utils.h"
 
 static void
@@ -59,7 +59,7 @@ CheckProfileCatalogsExist()
 	if (!YbLoginProfileCatalogsExist)
 		ereport(ERROR,
 				(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-				 errmsg("Login profile system catalogs do not exist.")));
+				 errmsg("login profile system catalogs do not exist")));
 }
 
 /*

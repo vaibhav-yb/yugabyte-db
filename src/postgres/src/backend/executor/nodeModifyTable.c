@@ -84,9 +84,9 @@
 #include "access/yb_scan.h"
 #include "catalog/index.h"
 #include "catalog/pg_database.h"
-#include "executor/ybcModifyTable.h"
+#include "executor/ybModifyTable.h"
 #include "executor/ybOptimizeModifyTable.h"
-#include "optimizer/ybcplan.h"
+#include "optimizer/ybplan.h"
 #include "parser/parsetree.h"
 #include "utils/typcache.h"
 
@@ -232,13 +232,14 @@ static TupleTableSlot *mergeGetUpdateNewTuple(ResultRelInfo *relinfo,
 static void YbPostProcessDml(CmdType cmd_type,
 							 Relation rel,
 							 TupleTableSlot *newslot);
+static void YbInitInsertOnConflictBatchState(YbInsertOnConflictBatchState **state);
 static void YbAddSlotToBatch(ModifyTableContext *context,
 							 ResultRelInfo *resultRelInfo,
 							 TupleTableSlot *planSlot,
 							 TupleTableSlot *slot,
-							 YBCPgStatement blockInsertStmt);
+							 YbcPgStatement blockInsertStmt);
 static TupleTableSlot *YbFlushSlotsFromBatch(ModifyTableContext *context,
-											 YBCPgStatement blockInsertStmt);
+											 YbcPgStatement blockInsertStmt);
 
 static bool YbExecCheckIndexConstraints(EState *estate,
 										ResultRelInfo *resultRelInfo,
@@ -251,11 +252,11 @@ static bool YbExecCheckIndexConstraints(EState *estate,
 static bool YbExecInsertPrologue(ModifyTableContext *context,
 								 ResultRelInfo *resultRelInfo,
 								 TupleTableSlot **slot,
-								 YBCPgStatement blockInsertStmt);
+								 YbcPgStatement blockInsertStmt);
 static TupleTableSlot *YbExecInsertAct(ModifyTableContext *context,
 									   ResultRelInfo *resultRelInfo,
 									   TupleTableSlot *slot,
-									   YBCPgStatement blockInsertStmt,
+									   YbcPgStatement blockInsertStmt,
 									   bool canSetTag,
 									   TupleTableSlot **inserted_tuple,
 									   ResultRelInfo **insert_destrel);
@@ -828,7 +829,7 @@ static bool
 YbExecInsertPrologue(ModifyTableContext *context,
 					 ResultRelInfo *resultRelInfo,
 					 TupleTableSlot **slot,
-					 YBCPgStatement blockInsertStmt)
+					 YbcPgStatement blockInsertStmt)
 {
 	ModifyTableState *mtstate = context->mtstate;
 	EState	   *estate = context->estate;
@@ -941,7 +942,7 @@ static TupleTableSlot *
 ExecInsert(ModifyTableContext *context,
 		   ResultRelInfo *resultRelInfo,
 		   TupleTableSlot *slot,
-		   YBCPgStatement blockInsertStmt,
+		   YbcPgStatement blockInsertStmt,
 		   bool canSetTag,
 		   TupleTableSlot **inserted_tuple,
 		   ResultRelInfo **insert_destrel)
@@ -968,7 +969,7 @@ ExecInsert(ModifyTableContext *context,
 	}
 
 	if (onconflict != ONCONFLICT_NONE &&
-		!YbIsInsertOnConflictReadBatchingEnabled(resultRelInfo) &&
+		!resultRelInfo->ri_ybIocBatchingPossible &&
 		mtstate->yb_ioc_state != NULL &&
 		mtstate->yb_ioc_state->num_slots > 0)
 	{
@@ -991,7 +992,7 @@ ExecInsert(ModifyTableContext *context,
 		return NULL;
 
 	if (onconflict != ONCONFLICT_NONE &&
-		YbIsInsertOnConflictReadBatchingEnabled(resultRelInfo))
+		resultRelInfo->ri_ybIocBatchingPossible)
 	{
 		TupleTableSlot *returnSlot = NULL;
 
@@ -999,8 +1000,11 @@ ExecInsert(ModifyTableContext *context,
 						 planSlot, slot,
 						 blockInsertStmt);
 		/* When we've reached the desired batch size, enter flushing mode. */
-		if (mtstate->yb_ioc_state->num_slots == resultRelInfo->ri_BatchSize)
+		if (mtstate->yb_ioc_state->num_slots ==
+			yb_insert_on_conflict_read_batch_size)
+		{
 			returnSlot = YbFlushSlotsFromBatch(context, blockInsertStmt);
+		}
 
 		return returnSlot;
 	}
@@ -1015,7 +1019,7 @@ static TupleTableSlot *
 YbExecInsertAct(ModifyTableContext *context,
 				ResultRelInfo *resultRelInfo,
 				TupleTableSlot *slot,
-				YBCPgStatement blockInsertStmt,
+				YbcPgStatement blockInsertStmt,
 				bool canSetTag,
 				TupleTableSlot **inserted_tuple,
 				ResultRelInfo **insert_destrel)
@@ -2459,7 +2463,8 @@ yb_lreplace:;
 	 * arbiter index, which is notable for expression indexes.
 	 * TODO(kramanathan): Optimize this by forming the tuple ID from the slot.
 	 */
-	if (YbIsInsertOnConflictReadBatchingEnabled(resultRelInfo))
+	if (resultRelInfo->ri_ybIocBatchingPossible &&
+		context->mtstate->yb_ioc_state)
 	{
 		ItemPointerData unusedConflictTid;
 		YbExecCheckIndexConstraints(estate, resultRelInfo,
@@ -2641,7 +2646,8 @@ ExecUpdateEpilogue(ModifyTableContext *context, UpdateContext *updateCxt,
 		 * tuple do not affect indices.
 		 */
 		if ((YBCRelInfoHasSecondaryIndices(resultRelInfo) ||
-			 YbIsInsertOnConflictReadBatchingEnabled(resultRelInfo)) &&
+			 (resultRelInfo->ri_ybIocBatchingPossible &&
+			  mtstate->yb_ioc_state)) &&
 			mtstate->yb_fetch_target_tuple)
 		{
 			recheckIndexes =  YbExecUpdateIndexTuples(resultRelInfo, slot,
@@ -4177,10 +4183,6 @@ ExecPrepareTupleRouting(ModifyTableState *mtstate,
 		slot = execute_attr_map_slot(map->attrMap, slot, new_slot);
 	}
 
-	/* YB: inherit batch size from parent */
-	if (YbIsInsertOnConflictReadBatchingEnabled(targetRelInfo))
-		partrel->ri_BatchSize = targetRelInfo->ri_BatchSize;
-
 	/*
 	 * For a partitioned relation, table constraints (such as FK) are visible on a
 	 * target partition rather than an original insert target.
@@ -4260,7 +4262,7 @@ ExecModifyTable(PlanState *pstate)
 	context.epqstate = &node->mt_epqstate;
 	context.estate = estate;
 
-	YBCPgStatement blockInsertStmt = NULL;
+	YbcPgStatement blockInsertStmt = NULL;
 	bool hasInserts = false;
 	Relation relation = resultRelInfo->ri_RelationDesc;
 	if (IsYBRelation(relation) && operation == CMD_INSERT) {
@@ -5207,10 +5209,11 @@ ExecInitModifyTable(ModifyTable *node, EState *estate, int eflags)
 				resultRelInfo->ri_FdwRoutine->GetForeignModifyBatchSize(resultRelInfo);
 			Assert(resultRelInfo->ri_BatchSize >= 1);
 		}
-		else if (IsYBRelation(resultRelInfo->ri_RelationDesc))
-			resultRelInfo->ri_BatchSize = yb_insert_on_conflict_read_batch_size;
 		else
 			resultRelInfo->ri_BatchSize = 1;
+
+		if (YbIsInsertOnConflictReadBatchingPossible(resultRelInfo))
+			resultRelInfo->ri_ybIocBatchingPossible = true;
 	}
 
 	/*
@@ -5343,12 +5346,13 @@ static void YbPostProcessDml(CmdType cmd_type,
 }
 
 static void
-YbInitInsertOnConflictBatchState(YbInsertOnConflictBatchState **state,
-								 int batch_size)
+YbInitInsertOnConflictBatchState(YbInsertOnConflictBatchState **state)
 {
 	*state = palloc0(sizeof(YbInsertOnConflictBatchState));
-	(*state)->slots = palloc(sizeof(TupleTableSlot *) * batch_size);
-	(*state)->planSlots = palloc(sizeof(TupleTableSlot *) * batch_size);
+	(*state)->slots = palloc(sizeof(TupleTableSlot *) *
+							 yb_insert_on_conflict_read_batch_size);
+	(*state)->planSlots = palloc(sizeof(TupleTableSlot *) *
+								 yb_insert_on_conflict_read_batch_size);
 }
 
 static void
@@ -5369,16 +5373,16 @@ YbAddSlotToBatch(ModifyTableContext *context,
 				 ResultRelInfo *resultRelInfo,
 				 TupleTableSlot *planSlot,
 				 TupleTableSlot *slot,
-				 YBCPgStatement blockInsertStmt)
+				 YbcPgStatement blockInsertStmt)
 {
 	MemoryContext oldContext;
 	EState	   *estate = context->estate;
 
 	oldContext = MemoryContextSwitchTo(estate->es_query_cxt);
 
+	Assert(resultRelInfo->ri_ybIocBatchingPossible);
 	if (!context->mtstate->yb_ioc_state)
-		YbInitInsertOnConflictBatchState(&context->mtstate->yb_ioc_state,
-										 resultRelInfo->ri_BatchSize);
+		YbInitInsertOnConflictBatchState(&context->mtstate->yb_ioc_state);
 	YbInsertOnConflictBatchState *state = context->mtstate->yb_ioc_state;
 
 	/*
@@ -5427,7 +5431,7 @@ YbAddSlotToBatch(ModifyTableContext *context,
  */
 static TupleTableSlot *
 YbFlushSlotsFromBatch(ModifyTableContext *context,
-					  YBCPgStatement blockInsertStmt)
+					  YbcPgStatement blockInsertStmt)
 {
 	TupleTableSlot *slot;
 	TupleTableSlot *planSlot;
@@ -5531,7 +5535,7 @@ YbFlushSlotsFromBatch(ModifyTableContext *context,
 	 * in one place: slots are allocated in execIndexing and deallocated in
 	 * this function.
 	 */
-	YBCPgInsertOnConflictKeyInfo info = {NULL};
+	YbcPgInsertOnConflictKeyInfo info = {NULL};
 	const uint64_t key_count = YBCPgGetInsertOnConflictKeyCount(state);
 	for (uint64_t i = 0; i < key_count; i++)
 	{
@@ -5567,7 +5571,7 @@ YbExecCheckIndexConstraints(EState *estate,
 	List	   *descriptors = NIL;
 	ListCell   *lc;
 	bool		retval = true;
-	YBCPgInsertOnConflictKeyState keyState;
+	YbcPgInsertOnConflictKeyState keyState;
 
 	/*
 	 * Lossy or not, we recheck the condition since we don't know which
@@ -5588,7 +5592,7 @@ YbExecCheckIndexConstraints(EState *estate,
 	numIndices = resultRelInfo->ri_NumIndices;
 	arbiterIndexes = resultRelInfo->ri_onConflictArbiterIndexes;
 
-	if (!YbIsInsertOnConflictReadBatchingEnabled(resultRelInfo))
+	if (!(resultRelInfo->ri_ybIocBatchingPossible && yb_ioc_state))
 		return ExecCheckIndexConstraints(resultRelInfo, slot, estate,
 										 conflictTid, arbiterIndexes,
 										 ybConflictSlot);
@@ -5638,7 +5642,7 @@ YbExecCheckIndexConstraints(EState *estate,
 		 * nulls into account for NULLS NOT DISTINCT), that could be a problem.
 		 * TODO(jason): revisit when exclusion constraint is supported.
 		 */
-		YBCPgYBTupleIdDescriptor *descr =
+		YbcPgYBTupleIdDescriptor *descr =
 			YBCBuildUniqueIndexYBTupleId(index, values, isnull);
 
 		/*
@@ -5680,7 +5684,7 @@ YbExecCheckIndexConstraints(EState *estate,
 				if (phase == DO_UPDATE_INSERT_PHASE)
 				{
 					Assert(ybConflictSlot && !*ybConflictSlot);
-					YBCPgInsertOnConflictKeyInfo info = {NULL};
+					YbcPgInsertOnConflictKeyInfo info = {NULL};
 					HandleYBStatus(YBCPgDeleteInsertOnConflictKey(descr,
 																  yb_ioc_state,
 																  &info));

@@ -159,10 +159,10 @@ libraryDependencies ++= Seq(
   "net.logstash.logback" % "logstash-logback-encoder" % "6.2",
   "ch.qos.logback" % "logback-classic" % "1.4.14",
   "org.codehaus.janino" % "janino" % "3.1.9",
-  "org.apache.commons" % "commons-lang3" % "3.14.0",
+  "org.apache.commons" % "commons-lang3" % "3.17.0",
   "org.apache.commons" % "commons-collections4" % "4.4",
-  "org.apache.commons" % "commons-compress" % "1.26.0",
-  "org.apache.commons" % "commons-csv" % "1.10.0",
+  "org.apache.commons" % "commons-compress" % "1.27.1",
+  "org.apache.commons" % "commons-csv" % "1.13.0",
   "org.apache.httpcomponents.core5" % "httpcore5" % "5.2.4",
   "org.apache.httpcomponents.core5" % "httpcore5-h2" % "5.2.4",
   "org.apache.httpcomponents.client5" % "httpclient5" % "5.2.3",
@@ -928,7 +928,7 @@ runPlatform := {
   Project.extract(newState).runTask(runPlatformTask, newState)
 }
 
-libraryDependencies += "org.yb" % "yb-client" % "0.8.95-SNAPSHOT"
+libraryDependencies += "org.yb" % "yb-client" % "0.8.97-SNAPSHOT"
 libraryDependencies += "org.yb" % "ybc-client" % "2.2.0.0-b10"
 libraryDependencies += "org.yb" % "yb-perf-advisor" % "1.0.0-b33"
 

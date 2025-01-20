@@ -843,26 +843,14 @@ dumpRoles(PGconn *conn)
 		}
 
 		/*
-		 * In Yugabyte, there are additional roles created by initdb that emit
-		 * an error if re-created.
+		 * In Yugabyte major upgrade, there are additional roles already created
+		 * by initdb.
 		 */
 		if (IsYugabyteEnabled && binary_upgrade &&
 			strncmp(rolename, "yb_", 3) == 0)
 		{
 			pg_log_warning("role name starting with \"yb_\" skipped (%s)",
 						   rolename);
-			continue;
-		}
-
-		/*
-		 * In Yugabyte, we run as user yugabyte during the PG major version
-		 * upgrade, and the postgres install user has already been created by
-		 * initdb, so we skip creating it which would create a conflict.
-		 */
-		if (IsYugabyteEnabled && binary_upgrade &&
-			strcmp(rolename, "postgres") == 0)
-		{
-			pg_log_warning("role name \"postgres\" skipped");
 			continue;
 		}
 
@@ -885,8 +873,17 @@ dumpRoles(PGconn *conn)
 		 * have failed to drop it.  binary_upgrade cannot generate any errors,
 		 * so we assume the current role is already created.
 		 */
-		if (!binary_upgrade ||
-			strcmp(PQgetvalue(res, i, i_is_current_user), "f") == 0)
+		if (IsYugabyteEnabled && binary_upgrade)
+		{
+			/*
+			 * In Yugabyte major upgrade, initdb always creates the yugabyte
+			 * and postgres users.
+			 */
+			if (strcmp(rolename, "yugabyte") != 0 && strcmp(rolename, "postgres") != 0)
+				appendPQExpBuffer(buf, "CREATE ROLE %s;\n", yb_frolename);
+		}
+		else if (!binary_upgrade ||
+				 strcmp(PQgetvalue(res, i, i_is_current_user), "f") == 0)
 		{
 			if (include_yb_metadata)
 				appendPQExpBuffer(buf,

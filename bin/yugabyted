@@ -3601,7 +3601,10 @@ class ControlScript(object):
         if self.configs.saved_data.get("secure"):
             common_gflags.extend(["--certs_dir={}".format(certs_dir),
             "--allow_insecure_connections=false",
-            "--use_node_to_node_encryption=true",])
+            "--use_node_to_node_encryption=true",
+            "--use_client_to_server_encryption=true",
+            "--certs_for_client_dir={}".format(certs_dir),
+            "--certs_for_cdc_dir={}/xcluster".format(certs_dir),])
 
         return common_gflags
 
@@ -3653,7 +3656,6 @@ class ControlScript(object):
         if join_ip:
             master_addresses  = "{}:{},{}".format(join_ip, master_rpc_port, master_addresses)
 
-        certs_dir = self.configs.saved_data.get("certs_dir")
 
         flag_list = common_flags + [
             "--rpc_bind_addresses={}:{}".format(advertise_ip, master_rpc_port),
@@ -3667,11 +3669,6 @@ class ControlScript(object):
             "--enforce_tablet_replica_limits=true",
             "--split_respects_tablet_replica_limits=true",
         ]
-
-        if self.configs.saved_data.get("secure"):
-            flag_list.extend([
-                "--certs_for_cdc_dir={}/xcluster".format(certs_dir)
-                ])
 
         yb_master_cmd = [find_binary_location("yb-master")]
 
@@ -3747,7 +3744,6 @@ class ControlScript(object):
         if join_ip:
             master_addresses  = "{}:{},{}".format(join_ip, master_rpc_port, master_addresses)
         tserver_rpc_port = self.configs.saved_data.get("tserver_rpc_port")
-        certs_dir = self.configs.saved_data.get("certs_dir")
 
         yb_tserver_cmd = [find_binary_location("yb-tserver")] + common_flags + \
             [
@@ -3767,11 +3763,6 @@ class ControlScript(object):
                 "--start_redis_proxy=false",
                 "--placement_uuid={}".format(self.configs.saved_data.get("placement_uuid")),
             ]
-
-        if self.configs.saved_data.get("secure"):
-            yb_tserver_cmd.extend([
-                "--certs_for_cdc_dir={}/xcluster".format(certs_dir)
-                ])
 
         tserver_flags = self.configs.saved_data.get("tserver_flags","")
 
@@ -3813,7 +3804,7 @@ class ControlScript(object):
                             key, value = item.split('=')
                             tserver_pg_parity_flag_values_dict[key] = value
 
-                    # Parse the PG_PARITY_FLAGS_DICT values into a dictionary
+                    # Parse the PG_PARITY_FLAGS_DICT values into dictionary
                     pg_parity_flag_values_dict = {}
                     for item in pg_parity_flag_values.split(','):
                         if '=' in item:
@@ -3875,29 +3866,6 @@ class ControlScript(object):
                 else:
                     # Handle simple flags
                     yb_tserver_cmd.append("--{}".format(tserver_flag))
-
-        # Add authentication flags in tserver
-        if self.configs.saved_data.get("secure"):
-            yb_tserver_cmd.extend(["--use_client_to_server_encryption=true",
-                "--certs_for_client_dir={}".format(certs_dir),])
-
-            hba_conf_updated = False
-            for i, flag in enumerate(yb_tserver_cmd):
-                if flag.startswith("--ysql_hba_conf_csv="):
-                    pattern = re.compile(r'--ysql_hba_conf_csv=(["\']?)(.*)\1$')
-                    match = pattern.match(flag)
-                    # Extract the original ysql_hba_conf
-                    quote_char = match.group(1)  # This will be '' if there are no quotes
-                    original_hba_conf = match.group(2)
-                    # Append 'local all yugabyte trust' to the original_hba_conf
-                    updated_hba_conf = original_hba_conf + ',local all yugabyte trust'
-
-                    yb_tserver_cmd[i] = f'--ysql_hba_conf_csv={quote_char}' +\
-                                f'{updated_hba_conf}{quote_char}'
-                    hba_conf_updated = True
-
-            if not hba_conf_updated:
-                yb_tserver_cmd.extend(["--ysql_hba_conf_csv=local all yugabyte trust",])
 
         if self.configs.saved_data.get("ysql_enable_auth"):
             yb_tserver_cmd.extend(["--ysql_enable_auth=true"])
@@ -4913,7 +4881,7 @@ class ControlScript(object):
         status_details = []
         status_display_info = {}
 
-        # Case Scenario: When each AZ/region has only 1 node. (Most happy path)
+        # Case Scenario: When each AZ/region has only 1 node. (Happiest path)
         if len(placement_location_map) == replication_factor:
             final_status = ""
             ft_status = ""
@@ -9523,7 +9491,7 @@ class YBAdminProxy(object):
             return None
 
         matches = re.findall(r'\[(.*?)\]', out)
-        replication_ids = matches[0].split(',')
+        replication_ids = [replication_id.strip() for replication_id in matches[0].split(',')]
 
         return replication_ids
 

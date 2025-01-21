@@ -2,7 +2,7 @@
 title: YugabyteDB connector transformers
 headerTitle: YugabyteDB connector transformers
 linkTitle: Connector transformers
-description: YugabyteDB connector transformers for Change Data Capture in YugabyteDB.
+description: YugabyteDB connector transformers for Change Data Capture.
 menu:
   stable:
     parent: yugabytedb-connector

@@ -1,8 +1,8 @@
 ---
 title: YugabyteDB gRPC connector transformers
 headerTitle: YugabyteDB gRPC connector transformers
-linkTitle: gRPC connector transformers
-description: YugabyteDB gRPC connector transformers for Change Data Capture in YugabyteDB.
+linkTitle: Connector transformers
+description: YugabyteDB gRPC connector transformers for Change Data Capture.
 menu:
   stable:
     parent: debezium-connector-yugabytedb

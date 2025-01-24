@@ -25,6 +25,7 @@
 
 #include "yb/cdc/cdc_error.h"
 #include "yb/cdc/cdc_producer.h"
+#include "yb/cdc/cdc_service.pb.h"
 #include "yb/cdc/cdc_util.h"
 #include "yb/cdc/xcluster_rpc.h"
 #include "yb/cdc/cdc_service.proxy.h"
@@ -2182,6 +2183,22 @@ void CDCServiceImpl::UpdateMetrics() {
       if (entry.active_time.has_value() &&
           CheckTabletExpiredOrNotOfInterest(tablet_info, *entry.active_time)) {
         expired_entries.insert(tablet_info);
+
+        if (!tablet_checkpoints.contains(tablet_info)) {
+          // For an unpolled tablet, there will be no entry in the tablet_checkpoints map.
+          // We need to add an entry to the map to ensure that when we iterate further down
+          // over the tablet_checkpoints to reset the metric entities, we do not miss the
+          // expired or not of interest tablets that were unpolled.
+          tablet_checkpoints.emplace(TabletCheckpointInfo{
+              .producer_tablet_info = tablet_info,
+              .cdc_state_checkpoint =
+                  TabletCheckpoint{.op_id = {}, .last_update_time = {}, .last_active_time = {}},
+              .sent_checkpoint =
+                  TabletCheckpoint{.op_id = {}, .last_update_time = {}, .last_active_time = {}},
+              .mem_tracker = nullptr,
+          });
+        }
+
         continue;
       }
       auto tablet_metric_result = GetCDCSDKTabletMetrics(
@@ -4825,6 +4842,19 @@ void CDCServiceImpl::InitVirtualWALForCDC(
   auto session_id = req->session_id();
   auto stream_id = RPC_VERIFY_STRING_TO_STREAM_ID(req->stream_id());
   std::shared_ptr<CDCSDKVirtualWAL> virtual_wal;
+
+  // Ensure that stream metadata is populated with the newly created stream_id and
+  // it is present in the tserver cache.
+  auto stream_metadata_result = GetStream(stream_id, RefreshStreamMapOption::kAlways);
+
+  RPC_CHECK_AND_RETURN_ERROR(
+      stream_metadata_result.ok(),
+      STATUS_FORMAT(NotFound, "Stream metadata not found for stream id $0", stream_id),
+      resp->mutable_error(), CDCErrorPB::INTERNAL_ERROR, context);
+
+  auto lsn_type = stream_metadata_result->get()->GetReplicationSlotLsnType().value_or(
+      ReplicationSlotLsnType_SEQUENCE);
+
   // Get an exclusive lock to prevent multiple threads from creating VirtualWAL instance for the
   // same session_id.
   {
@@ -4836,7 +4866,8 @@ void CDCServiceImpl::InitVirtualWALForCDC(
             session_id),
         resp->mutable_error(), CDCErrorPB::INVALID_REQUEST, context);
 
-    virtual_wal = std::make_shared<CDCSDKVirtualWAL>(this, stream_id, session_id);
+    virtual_wal = std::make_shared<CDCSDKVirtualWAL>(
+        this, stream_id, session_id, lsn_type);
     session_virtual_wal_[session_id] = virtual_wal;
   }
 

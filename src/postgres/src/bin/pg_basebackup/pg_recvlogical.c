@@ -776,9 +776,9 @@ main(int argc, char **argv)
 				break;
 /* replication options */
 			case 'I':
-				if (sscanf(optarg, "%X/%X", &hi, &lo) != 2)
+				if (sscanf(optarg, "%X", &hi) != 1)
 					pg_fatal("could not parse start position \"%s\"", optarg);
-				startpos = ((uint64) hi) << 32 | lo;
+				startpos = ((uint64) hi);
 				break;
 			case 'E':
 				if (sscanf(optarg, "%X/%X", &hi, &lo) != 2)

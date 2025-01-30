@@ -785,15 +785,9 @@ main(int argc, char **argv)
 				break;
 /* replication options */
 			case 'I':
-<<<<<<< Updated upstream
-				if (sscanf(optarg, "%X", &hi) != 1)
-					pg_fatal("could not parse start position \"%s\"", optarg);
-				startpos = ((uint64) hi);
-=======
 				if (sscanf(optarg, "%lu", &startpos) != 1)
 					pg_fatal("could not parse start position \"%s\"", optarg);
 				// startpos = ((uint64) hi);
->>>>>>> Stashed changes
 				break;
 			case 'E':
 				if (sscanf(optarg, "%X/%X", &hi, &lo) != 2)

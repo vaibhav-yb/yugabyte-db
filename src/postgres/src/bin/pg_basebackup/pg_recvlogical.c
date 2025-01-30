@@ -34,6 +34,8 @@
 /* Time to sleep between reconnection attempts */
 #define RECONNECT_SLEEP_TIME 5
 
+// #define LSN_ARG(lsn) (if (lsn == InvalidXLogRecPtr) LSN_FORMAT_ARGS(lsn) else lsn);
+
 /* Global Options */
 static char *outfile = NULL;
 static int	verbose = 0;
@@ -232,8 +234,15 @@ StreamLogicalLog(void)
 
 	/* Initiate the replication stream at specified location */
 	query = createPQExpBuffer();
-	appendPQExpBuffer(query, "START_REPLICATION SLOT \"%s\" LOGICAL %X/%X",
+	if (startpos == InvalidXLogRecPtr)
+		appendPQExpBuffer(query, "START_REPLICATION SLOT \"%s\" LOGICAL %X/%X",
 					  replication_slot, LSN_FORMAT_ARGS(startpos));
+	else
+	{
+		pg_log_info("VKVK start pos is %lu", startpos);
+		appendPQExpBuffer(query, "START_REPLICATION SLOT \"%s\" LOGICAL %lu",
+					  replication_slot, startpos);
+	}
 
 	/* print options if there are any */
 	if (noptions)
@@ -776,9 +785,15 @@ main(int argc, char **argv)
 				break;
 /* replication options */
 			case 'I':
+<<<<<<< Updated upstream
 				if (sscanf(optarg, "%X", &hi) != 1)
 					pg_fatal("could not parse start position \"%s\"", optarg);
 				startpos = ((uint64) hi);
+=======
+				if (sscanf(optarg, "%lu", &startpos) != 1)
+					pg_fatal("could not parse start position \"%s\"", optarg);
+				// startpos = ((uint64) hi);
+>>>>>>> Stashed changes
 				break;
 			case 'E':
 				if (sscanf(optarg, "%X/%X", &hi, &lo) != 2)

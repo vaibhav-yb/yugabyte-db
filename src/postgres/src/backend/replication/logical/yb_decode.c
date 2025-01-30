@@ -419,6 +419,7 @@ YBDecodeCommit(LogicalDecodingContext *ctx, XLogReaderState *record)
 	 * Skip the records which the client hasn't asked for. Simpler version of a
 	 * similar check done in DecodeCommit in decode.c
 	 */
+	elog(INFO, "VKVK commit lsn is %lu and start decoding at is %lu", commit_lsn, ctx->yb_start_decoding_at);
 	if (commit_lsn < ctx->yb_start_decoding_at)
 	{
 		/*
@@ -426,7 +427,7 @@ YBDecodeCommit(LogicalDecodingContext *ctx, XLogReaderState *record)
 		 * So this is sufficient to clean up the transaction along with its
 		 * subtransactions.
 		 */
-		elog(DEBUG1,
+		elog(INFO,
 			 "YBDecodeCommit: Ignoring txn %d with commit_lsn = %lu as "
 			 "yb_start_decoding_at = %lu.",
 			 yb_record->xid, commit_lsn, ctx->yb_start_decoding_at);
@@ -434,7 +435,7 @@ YBDecodeCommit(LogicalDecodingContext *ctx, XLogReaderState *record)
 		return;
 	}
 
-	elog(DEBUG1,
+	elog(INFO,
 		 "Going to stream transaction: %d with commit_lsn: %lu and "
 		 "end_lsn: %lu",
 		 yb_record->xid, commit_lsn, end_lsn);

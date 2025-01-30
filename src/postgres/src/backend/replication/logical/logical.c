@@ -221,6 +221,7 @@ StartupDecodingContext(List *output_plugin_options,
 		AllocateSnapshotBuilder(ctx->reorder, xmin_horizon, start_lsn,
 								need_full_snapshot, slot->data.two_phase_at);
 
+	elog(INFO, "VKVK assigning start_decoding_at as %lu", start_lsn);
 	if (IsYugaByteEnabled())
 		ctx->yb_start_decoding_at = start_lsn;
 
@@ -469,6 +470,7 @@ CreateInitDecodingContext(const char *plugin,
 	ReplicationSlotMarkDirty();
 	ReplicationSlotSave();
 
+	elog(INFO, "VKVK restart_lsn at line 473 is %lu", restart_lsn);
 	ctx = StartupDecodingContext(NIL, restart_lsn, xmin_horizon,
 								 need_full_snapshot, false,
 								 xl_routine, prepare_write, do_write,
@@ -555,9 +557,11 @@ CreateDecodingContext(XLogRecPtr start_lsn,
 				 errmsg("replication slot \"%s\" was not created in this database",
 						NameStr(slot->data.name))));
 
+	elog(INFO, "VKVK confirmed_flush at line 560 is %lu", slot->data.confirmed_flush);
 	if (start_lsn == InvalidXLogRecPtr)
 	{
 		/* continue from last position */
+		elog(INFO, "VKVK start_lsn is invalid");
 		start_lsn = slot->data.confirmed_flush;
 	}
 	else if (start_lsn < slot->data.confirmed_flush)
@@ -578,9 +582,11 @@ CreateDecodingContext(XLogRecPtr start_lsn,
 			 LSN_FORMAT_ARGS(start_lsn),
 			 LSN_FORMAT_ARGS(slot->data.confirmed_flush));
 
+		elog(INFO, "VKVK start_lsn is %lu", start_lsn);
 		start_lsn = slot->data.confirmed_flush;
 	}
 
+	elog(INFO, "VKVK start_lsn at line 586 is %lu", start_lsn);
 	ctx = StartupDecodingContext(output_plugin_options,
 								 start_lsn, InvalidTransactionId, false,
 								 fast_forward, xl_routine, prepare_write,

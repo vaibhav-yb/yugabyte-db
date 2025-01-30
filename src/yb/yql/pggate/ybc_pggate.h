@@ -448,6 +448,10 @@ YbcStatus YBCPgBackfillIndex(
     const YbcPgOid database_oid,
     const YbcPgOid index_relfilenode_oid);
 
+YbcStatus YBCPgWaitVectorIndexReady(
+    const YbcPgOid database_oid,
+    const YbcPgOid index_relfilenode_oid);
+
 //--------------------------------------------------------------------------------------------------
 // DML statements (select, insert, update, delete, truncate)
 //--------------------------------------------------------------------------------------------------
@@ -953,6 +957,9 @@ YbcStatus YBCReleaseAllAdvisoryLocks(uint32_t db_oid);
 
 YbcStatus YBCPgExportSnapshot(const YbcPgTxnSnapshot *snapshot, char** snapshot_id);
 YbcStatus YBCPgImportSnapshot(const char* snapshot_id, YbcPgTxnSnapshot *snapshot);
+
+bool YBCPgHasExportedSnapshots();
+void YBCPgClearExportedTxnSnapshots();
 
 #ifdef __cplusplus
 }  // extern "C"

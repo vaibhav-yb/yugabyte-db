@@ -246,7 +246,7 @@ The memory division flags have multiple sets of defaults; which set of defaults 
 
 If true, the defaults for the memory division settings take into account the amount of RAM and cores available and are optimized for using YSQL.  If false, the defaults will be the old defaults, which are more suitable for YCQL but do not take into account the amount of RAM and cores available.
 
-Default: `true`
+Default: `false`. When creating a new universe using yugabyted or YugabyteDB Anywhere, the flag is set to `true`.
 
 If this flag is true then the memory division flag defaults change to provide much more memory for Postgres; furthermore, they optimize for the node size.
 
@@ -1545,8 +1545,6 @@ To minimize performance impact when enabling this flag, set it to 2KB or higher.
 Default: -1 (disabled). Minimum: 128 bytes.
 
 ## DDL concurrency flags
-
-DDL concurrency flags are {{<tags/feature/tp>}}.
 
 ##### ysql_enable_db_catalog_version_mode
 
